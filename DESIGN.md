@@ -8,13 +8,19 @@
 
 My company's payment agent receives an instruction to wire $50,000 to a supplier's invoicing agent. The invoicing agent presents a website URL secured by an SSL certificate. The payment agent must decide: does this agent actually belong to the supplier, or has someone stood up a convincing fake? And if the site is legitimate, has the supplier's code changed since my last transaction?
 
-Without reliable answers, things go wrong. An attacker registers a look-alike domain such as `payments-supplier.example.com` and presents a valid certificate for it. Assuming there's no prior history recorded, the payment agent has no way to tell this impostor from the real supplier, because the certificate may prove only that someone controls the domain, but not that the domain belongs to the right organization. Separately, what if a legitimate supplier passes a security audit, then quietly updates its model? The certificate stays valid, the endpoint stays up, but the code behind it is no longer what was audited. No one notices until payments fail, and then no one can determine which version of the code was running when.
+Without reliable answers, things go wrong. An attacker registers a look-alike domain such as `payments-supplier.example.com` and presents a valid certificate for it.
+Assuming there's no prior history recorded, the payment agent has no way to tell this impostor from the real supplier, because the certificate may prove only that someone controls the domain, but not that the domain belongs to the right organization.
+Separately, what if a legitimate supplier passes a security audit, then quietly updates its model? The certificate stays valid, the endpoint stays up, but the code behind it is no longer what was audited. No one notices until payments fail, and then no one can determine which version of the code was running when.
 
-ANS prevents both by combining three cryptographic mechanisms. First, the agent's identity is anchored to a domain name whose ownership the Registration Authority (RA) has verified. Second, every change to the agent's software produces a new version number and a new identity certificate, which records which code is running. Third, every one of the invoicing agent's lifecycle events is sealed into a Transparency Log, an append-only ledger where entries cannot be altered or removed after the fact. Domain control alone does not detect code swaps. Identity certificates alone do not create a versioned audit trail. The append-only log alone does not prove who issued the certificate. The three together close the gaps.
+ANS prevents both by combining three cryptographic mechanisms. First, the agent's identity is anchored to a domain name whose ownership the Registration Authority (RA) has verified. Second, every change to the agent's software produces a new version number and a new identity certificate, which records which code is running.
+Third, every one of the invoicing agent's lifecycle events is sealed into a Transparency Log, an append-only ledger where entries cannot be altered or removed after the fact. Domain control alone does not detect code swaps. Identity certificates alone do not create a versioned audit trail. The append-only log alone does not prove who issued the certificate. The three together close the gaps.
 
-Now suppose the supplier doesn't run its own infrastructure. Instead, a hosting platform operates the invoicing agent on the supplier's behalf, at a domain the platform owns: `supplier-invoicing.platform.example.com`. The RA's domain challenge confirms that the platform controls `platform.example.com`. It does. But the domain tells my payment agent nothing about the supplier hosted on it. The version-bound certificate and the Transparency Log still work: they prevent one tenant from impersonating another on the same platform, and they record which code was running when. The missing piece is the link between the domain and the organization. An agent registered on its own domain carries that link. An agent on a hosting domain does not, and a trust evaluation should reflect the difference.
+Now suppose the supplier doesn't run its own infrastructure. Instead, a hosting platform operates the invoicing agent on the supplier's behalf, at a domain the platform owns: `supplier-invoicing.platform.example.com`. The RA's domain challenge confirms that the platform controls `platform.example.com`. It does. But the domain tells my payment agent nothing about the supplier hosted on it.
+The version-bound certificate and the Transparency Log still work: they prevent one tenant from impersonating another on the same platform, and they record which code was running when. The missing piece is the link between the domain and the organization. An agent registered on its own domain carries that link.
+An agent on a hosting domain does not, and a trust evaluation should reflect the difference.
 
-The RA acts as the notary in this system. A company or platform that hosts agents submits a registration request. The RA verifies domain ownership, issues the identity certificate, specifies precise DNS records so other agents can discover the new identity, and writes the registration event into the log. The RA does not score agents or evaluate their behavior. A downstream search/rating system consumes the log's sealed records alongside other sources to produce trust evaluations.
+The RA acts as the notary in this system. A company or platform that hosts agents submits a registration request. The RA verifies domain ownership, issues the identity certificate, specifies precise DNS records so other agents can discover the new identity, and writes the registration event into the log. The RA does not score agents or evaluate their behavior.
+A downstream search/rating system consumes the log's sealed records alongside other sources to produce trust evaluations.
 
 ### 1.2 Origin
 
@@ -22,13 +28,16 @@ This architecture builds on "Agent Name Service for Secure AI Agent Discovery" b
 
 ### 1.2.1 Relationship to other standards
 
-**HCS-14 (Universal Agent ID).** Hiero's HCS-14 standard uses DNS TXT records for agent discovery. Each record type is interpreted through a Profile, which is a named convention that tells a resolver what the record contains. The `.agent` profile uses `_agent.<nativeId>` as the record name. An ANS Profile for HCS-14 allows any HCS-14 resolver to discover ANS agents through the same interface it uses for agents from other registries.
+**HCS-14 (Universal Agent ID).** Hiero's HCS-14 standard uses DNS TXT records for agent discovery. Each record type is interpreted through a Profile, which is a named convention that tells a resolver what the record contains. The `.agent` profile uses `_agent.<nativeId>` as the record name.
+An ANS Profile for HCS-14 allows any HCS-14 resolver to discover ANS agents through the same interface it uses for agents from other registries.
 
 **HCS-27 (Merkle Tree Checkpoint).** A companion specification that defines a checkpoint format for publishing the TL's root hash (the single value that proves the integrity of the entire log) to a Hiero consensus topic, a shared ledger where the timestamp is independently verifiable. A draft HCS-27 specification and its companion Merkle Tree Profile are in this repository.
 
-**IETF SCITT.** The SCITT working group (Supply Chain Integrity, Transparency and Trust) defines an append-only transparency service that accepts signed statements, registers them in a log, and returns receipts as proof of inclusion. The ANS Transparency Log follows the SCITT model (RFC 9943), using these receipts to provide clients with mathematical proof that an agent's registration is legitimate and unaltered.
+**IETF SCITT.** The SCITT working group (Supply Chain Integrity, Transparency and Trust) defines an append-only transparency service that accepts signed statements, registers them in a log, and returns receipts as proof of inclusion.
+The ANS Transparency Log follows the SCITT model (RFC 9943), using these receipts to provide clients with mathematical proof that an agent's registration is legitimate and unaltered.
 
-**DNS-AID.** Infoblox's DNS-AID draft (draft-mozleywilliams-dnsop-dnsaid-01, individual submission to IETF dnsop) uses SVCB service binding records (RFC 9460) to let clients find agent endpoints in a single DNS query. DNS-AID tells a client where to connect. ANS tells the client whether to trust the agent at that address. A client may resolve a DNS-AID record to get the endpoint address, then check an `_ans-badge` record to verify the agent's identity before opening a connection.
+**DNS-AID.** Infoblox's DNS-AID draft (draft-mozleywilliams-dnsop-dnsaid-01, individual submission to IETF dnsop) uses SVCB service binding records (RFC 9460) to let clients find agent endpoints in a single DNS query. DNS-AID tells a client where to connect. ANS tells the client whether to trust the agent at that address.
+A client may resolve a DNS-AID record to get the endpoint address, then check an `_ans-badge` record to verify the agent's identity before opening a connection.
 
 **Agent communication and execution protocols.** Google's A2A defines how agents collaborate across services. Anthropic's MCP defines how a model interacts with local tools and data sources. Neither defines how an agent proves its identity to an agent it has never met. ANS provides that layer.
 
@@ -42,7 +51,8 @@ Five design decisions follow from this foundation:
 
 2. **Decentralized discovery.** The TL publishes sealed lifecycle events after the RA seals them. Third-party discovery services subscribe, verify signatures, and build their own indexes. The protocol supports multiple independent discovery providers; no single service controls the lookup.
 
-3. **Version-bound lifecycle.** Every change to an agent's software or capabilities requires a new version number and a new registration. Each version gets its own TL entry, so the audit trail records which code was running at any point. Relaxing this constraint opens attack surfaces. A supplier passes a security audit on Tuesday, updates its model on Wednesday, and the certificate stays valid through both. Clients keep trusting it. When the transactions go wrong on Thursday, no one can reconstruct which code was active on Wednesday, because the identity didn't change when the code did.
+3. **Version-bound lifecycle.** Every change to an agent's software or capabilities requires a new version number and a new registration. Each version gets its own TL entry, so the audit trail records which code was running at any point. Relaxing this constraint opens attack surfaces.
+A supplier passes a security audit on Tuesday, updates its model on Wednesday, and the certificate stays valid through both. Clients keep trusting it. When the transactions go wrong on Thursday, no one can reconstruct which code was active on Wednesday, because the identity didn't change when the code did.
 
 4. **Dual-certificate model.** Two certificates resolve the conflict between public web trust and software versioning. A Server (SSL) Certificate from a public CA secures the stable FQDN. A Client (Identity) Certificate from a private CA attests to the version-bound `ANSName`. Each has its own lifecycle.
 
@@ -71,7 +81,8 @@ Five design decisions follow from this foundation:
 
 ### 1.5 Goals
 
-AI agents buy supplies, book travel, and sign contracts without a human in the loop. The ones handling real money need proof of who stands behind them. No system provides that proof using the infrastructure the internet already runs on: DNS, X.509 certificates, DNSSEC, and the operational practices that keep them working under abuse and at scale. The registry automates the mechanics: verifying domain ownership, issuing certificates, publishing DNS records, and writing events into the log. The standard is open and the services are federated, but the identity always anchors to a domain name.
+AI agents buy supplies, book travel, and sign contracts without a human in the loop. The ones handling real money need proof of who stands behind them. No system provides that proof using the infrastructure the internet already runs on: DNS, X.509 certificates, DNSSEC, and the operational practices that keep them working under abuse and at scale.
+The registry automates the mechanics: verifying domain ownership, issuing certificates, publishing DNS records, and writing events into the log. The standard is open and the services are federated, but the identity always anchors to a domain name.
 
 ### 1.6 Deployment topologies
 
@@ -91,7 +102,9 @@ An agent's domain determines the strength of its identity signal. An agent on it
 
 ### 1.7 Entity scope
 
-The term "agent" appears throughout this document because autonomous AI agents are the primary registrant. The architecture is not limited to agents. Any software entity that needs a verifiable, domain-anchored identity can register: a web crawler with declared behavioral policies, a corporate API that requires versioning and a certificate lifecycle, a dedicated commerce client whose operator controls the domain and wants counterparties to verify the connection. The registration payload, certificate model, and TL semantics are identical regardless of entity type.
+The term "agent" appears throughout this document because autonomous AI agents are the primary registrant. The architecture is not limited to agents.
+Any software entity that needs a verifiable, domain-anchored identity can register: a web crawler with declared behavioral policies, a corporate API that requires versioning and a certificate lifecycle, a dedicated commerce client whose operator controls the domain and wants counterparties to verify the connection.
+The registration payload, certificate model, and TL semantics are identical regardless of entity type.
 
 ## 2.0 Component model
 
@@ -111,7 +124,8 @@ graph TD
 
 ### 2.1 The Registration Authority system
 
-**2.1.1 RA.** Receives a registration request from an AHP. Validates that the AHP controls the domain via ACME. Issues an Identity Certificate from the Private CA and obtains a Server Certificate from the Public CA (or accepts one the AHP brings). Generates the DNS records that make the agent discoverable, and ultimately seals the entire registration into the TL so the event becomes part of the permanent record.
+**2.1.1 RA.** Receives a registration request from an AHP. Validates that the AHP controls the domain via ACME. Issues an Identity Certificate from the Private CA and obtains a Server Certificate from the Public CA (or accepts one the AHP brings).
+Generates the DNS records that make the agent discoverable, and ultimately seals the entire registration into the TL so the event becomes part of the permanent record.
 
 **2.1.2 KMS.** Signs every TL checkpoint. If this key is compromised, every sealed record in the log becomes untrustworthy.
 
@@ -119,11 +133,13 @@ graph TD
 
 **2.1.4 AIM.** Compares the live internet against what the RA sealed. When something doesn't match, it publishes a finding. It cannot revoke certificates or command state changes.
 
-**2.1.5 RA API.** The AHP registers an agent, submits CSRs for both certificate types, and triggers ACME and DNS verification. It can query registration status at any point, including partial registrations not yet sealed into the TL. It resolves an ANSName to its current registration and revokes a version at the AHP's request. Agent discovery flows from the Event Stream through independent indexing services, not through the RA.
+**2.1.5 RA API.** The AHP registers an agent, submits CSRs for both certificate types, and triggers ACME and DNS verification. It can query registration status at any point, including partial registrations not yet sealed into the TL. It resolves an ANSName to its current registration and revokes a version at the AHP's request.
+Agent discovery flows from the Event Stream through independent indexing services, not through the RA.
 
 ### 2.2 The Agent Hosting Platform system
 
-**2.2.1 AHP.** Hosts the agent's code and serves the live endpoints and ANS Agent Card at the agent's FQDN. During registration, the AHP responds to ACME challenges so the RA can verify domain control, then receives both certificates and installs them in its keystore. For external domains, the AHP provisions DNS records using content the RA generates; for RA-managed domains, the RA may provision DNS directly. When the agent's code changes, the AHP initiates a new version registration.
+**2.2.1 AHP.** Hosts the agent's code and serves the live endpoints and ANS Agent Card at the agent's FQDN. During registration, the AHP responds to ACME challenges so the RA can verify domain control, then receives both certificates and installs them in its keystore.
+For external domains, the AHP provisions DNS records using content the RA generates; for RA-managed domains, the RA may provision DNS directly. When the agent's code changes, the AHP initiates a new version registration.
 
 **2.2.2 Interfaces hosted by the AHP:**
 * **Agent Functional Endpoint.** The live service exposing the agent's capabilities.
@@ -133,7 +149,8 @@ graph TD
 
 **2.3.1 Transparency Log**
 
-The TL receives signed events from the RA, validates each signature, and seals the events into a cryptographic append-only structure. That structure produces two kinds of proof: inclusion proofs (proving a specific event exists in the log) and consistency proofs (proving the log has only grown, never shrunk or rewritten). Without inclusion proofs, a client cannot verify that its agent's registration is in the log. Without consistency proofs, an auditor cannot detect if the TL operator deleted or modified historical entries. The KMS signs each checkpoint, and the proof format is an implementation choice. Implementations SHOULD target SCITT compliance.
+The TL receives signed events from the RA, validates each signature, and seals the events into a cryptographic append-only structure. That structure produces two kinds of proof: inclusion proofs (proving a specific event exists in the log) and consistency proofs (proving the log has only grown, never shrunk or rewritten).
+Without inclusion proofs, a client cannot verify that its agent's registration is in the log. Without consistency proofs, an auditor cannot detect if the TL operator deleted or modified historical entries. The KMS signs each checkpoint, and the proof format is an implementation choice. Implementations SHOULD target SCITT compliance.
 
 Each event receives a sequence number that increases with every entry and never repeats. Events become visible only after the KMS signs a checkpoint, so a client querying the log always sees a consistent, finalized view. Each event carries a schema version, so that field renames in future schemas do not break existing consumers.
 
@@ -236,7 +253,8 @@ graph LR
 
 ### 2.5 The ANS SDK
 
-The version-bound lifecycle requires a new registration on every code change. Without tooling, that means a developer who ships a one-line fix must also generate a key pair, build a CSR, submit it to the RA, wait for domain validation, install the new certificate, and update DNS. The SDK collapses that sequence into a single command. It translates Protocol Cards into Registration Metadata, manages the certificate lifecycle, and bootstraps the agent's trust store so it can verify Identity Certificates from any compliant RA.
+The version-bound lifecycle requires a new registration on every code change. Without tooling, that means a developer who ships a one-line fix must also generate a key pair, build a CSR, submit it to the RA, wait for domain validation, install the new certificate, and update DNS. The SDK collapses that sequence into a single command.
+It translates Protocol Cards into Registration Metadata, manages the certificate lifecycle, and bootstraps the agent's trust store so it can verify Identity Certificates from any compliant RA.
 
 ## 3.0 Data model and integrity
 
@@ -279,7 +297,8 @@ The display name is the human-readable label shown in discovery UIs. It supports
 | **ProviderID** | RA-defined | RA, from authentication system | No | Issuing RA | Who controls the domain |
 | **Supersedes ID** | Registration ID reference | RA, when a new version registers | No | Issuing RA | The previous version's registration record |
 
-**ProviderID constraints.** The RA assigns the ProviderID; the AHP does not submit it. It names the entity that controls the domain, not the entity that authored the software. The identifier MUST be stable: the same entity always receives the same ProviderID from a given RA, regardless of credential. The identifier MUST be scoped to the issuing RA. In a federated ecosystem, consumers scope the ProviderID by the Registrar Identifier to avoid collisions.
+**ProviderID constraints.** The RA assigns the ProviderID; the AHP does not submit it. It names the entity that controls the domain, not the entity that authored the software. The identifier MUST be stable: the same entity always receives the same ProviderID from a given RA, regardless of credential. The identifier MUST be scoped to the issuing RA.
+In a federated ecosystem, consumers scope the ProviderID by the Registrar Identifier to avoid collisions.
 
 The ProviderID does not span RAs. The FQDN does. An agent moves between RAs by updating DNS records, not by changing its name. For cross-RA correlation, the registration payload accepts an optional `lei` field (Legal Entity Identifier, ISO 17442). When absent, correlation falls back to the domain and OV/EV certificate subject.
 
@@ -532,11 +551,14 @@ _ans IN TXT "v=ans1; version=v1.0.0; p=mcp; url=https://api.example.com/.well-kn
 
 A domain owner can publish DNS-AID SVCB records (`[agent-id]._[protocol]._agents.{domain}`) alongside `_ans` TXT records. The two record families occupy different DNS names and do not collide. An ANS-aware client reads `_ans`. A DNS-AID client reads the SVCB records under `_agents`. Both reach the same endpoint.
 
-The RA MAY provision DNS-AID SVCB records during activation (§5.1.2 step b). The `_agents` subtree sits under the registrable domain (`_agents.example.com`), not under the agent's FQDN, so the RA needs parent-zone credentials it may not hold. For hosted agents, the customer may have authorized the RA to write records under the agent's FQDN but not under the customer's parent zone. DNS-AID provisioning stays opt-in until a delegation model for parent-zone writes exists.
+The RA MAY provision DNS-AID SVCB records during activation (§5.1.2 step b). The `_agents` subtree sits under the registrable domain (`_agents.example.com`), not under the agent's FQDN, so the RA needs parent-zone credentials it may not hold. For hosted agents, the customer may have authorized the RA to write records under the agent's FQDN but not under the customer's parent zone.
+DNS-AID provisioning stays opt-in until a delegation model for parent-zone writes exists.
 
-When both record families exist for the same agent, the endpoint in the `_ans` record's `url` field and the SVCB target SHOULD point to the same service. If the SVCB record carries `cap-sha256`, its value SHOULD equal the `capabilities_hash` that the RA sealed into the TL for the same version. Both are SHA-256 hashes of the Agent Card content. A mismatch is an integrity finding, not a registration failure. This cross-check is not yet active; it requires `capabilities_hash` to be populated in TL entries.
+When both record families exist for the same agent, the endpoint in the `_ans` record's `url` field and the SVCB target SHOULD point to the same service. If the SVCB record carries `cap-sha256`, its value SHOULD equal the `capabilities_hash` that the RA sealed into the TL for the same version. Both are SHA-256 hashes of the Agent Card content.
+A mismatch is an integrity finding, not a registration failure. This cross-check is not yet active; it requires `capabilities_hash` to be populated in TL entries.
 
-**TLSA selector difference.** ANS uses TLSA selector 0 (full Server Certificate hash) because the same hash doubles as the badge fingerprint in the TL. DNS-AID examples use selector 1 (public key hash). Both selectors are valid under RFC 6698. When a zone carries both, two TLSA records with different selectors coexist at the same owner name. A DANE-capable client checks all records and succeeds if any match the presented Server Certificate.
+**TLSA selector difference.** ANS uses TLSA selector 0 (full Server Certificate hash) because the same hash doubles as the badge fingerprint in the TL. DNS-AID examples use selector 1 (public key hash). Both selectors are valid under RFC 6698. When a zone carries both, two TLSA records with different selectors coexist at the same owner name.
+A DANE-capable client checks all records and succeeds if any match the presented Server Certificate.
 
 ### 4.5 Coexistence with other trust models
 
