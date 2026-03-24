@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trust Evaluation Payload",
+  "type": "object",
+  "required": ["agentId", "evaluationTime", "trustVector", "recommendedProfile", "riskFactors"],
+  "properties": {
+    "agentId": { "type": "string" },
+    "evaluationTime": { "type": "string", "format": "date-time" },
+    "trustVector": {
+      "type": "object",
+      "required": ["integrity", "identity", "solvency", "behavior", "safety"],
+      "properties": {
+        "integrity": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "identity": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "solvency": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "behavior": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "safety": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "compositeScore": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "DEPRECATED. Use trustVector and recommendedProfile instead."
+    },
+    "recommendedProfile": {
+      "type": "string",
+      "enum": ["READ_ONLY", "TRANSACTIONAL", "FIDUCIARY", "UNTRUSTED"]
+    },
+    "riskFactors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "evaluationChanged": {
+      "type": "boolean",
+      "description": "True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score shifts without caching and comparing vectors. The TI tracks each client's last-seen evaluation via client identity or session token. See ADR 021."
+    },
+    "interactionContext": {
+      "type": "object",
+      "description": "Present when the request included interaction context. See Appendix C.",
+      "properties": {
+        "authStrength": { "type": "string" },
+        "adjustedProfile": { "type": "string" },
+        "requiredAuthUpgrade": { "type": "string" }
+      }
+    }
+  }
+}

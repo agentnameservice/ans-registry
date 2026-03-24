@@ -33,14 +33,14 @@ graph TD
 
 ### 1.2 Terminology
 
-Terms defined in the ANS architecture document (DESIGN.md) are used here with the same meaning: RA, TL, AIM, AHP, ANSName, FQDN, KMS, Identity Certificate, Server Certificate, Protocol Card, Registration Metadata, ANS Agent Card. This table defines terms specific to the Trust Index.
+Terms defined in the [ANS Registry architecture](DESIGN.md) are used here with the same meaning: RA, TL, AIM, AHP, ANSName, FQDN, KMS, Identity Certificate, Server Certificate, Protocol Card, Registration Metadata, ANS Agent Card. This table defines terms specific to the Trust Index.
 
 | Term | Definition |
 | ------ | ----------- |
 | **Identity Grade** | A classification (Basic, Verified, Premium) describing how thoroughly the agent's operator was vetted. See Section 5. |
 | **Principal Binding** | A link between an agent and the real-world entity that controls it, expressed as a DID, Legal Entity Identifier, or biometric hash. |
 | **Trust Index (TI)** | A service that crawls Transparency Logs, evaluates agent metadata, and publishes Trust Vectors. |
-| **Trust Manifest** | A JSON document conforming to the schema in Appendix A. Core fields come from TL-sealed data; signal blocks aggregate inputs from the TL, agent-submitted VCs, oracles, and peer endorsements. |
+| **Trust Manifest** | A JSON document conforming to the schema in [Appendix A](#appendix-a-full-trust-manifest-json-schema-normative) ([`trust-manifest-v1.0.0.json`](../schemas/trust-manifest-v1.0.0.json)). Core fields come from TL-sealed data; signal blocks aggregate inputs from the TL, agent-submitted VCs, oracles, and peer endorsements. |
 | **Trust Vector** | A five-integer tuple (integrity, identity, solvency, behavior, safety), each value 0–100, representing an agent's trustworthiness along five independent dimensions. |
 | **Verification Tier** | A classification (Bronze, Silver, Gold) describing what checks a verifier performed when evaluating an agent. A property of the verification act, not of the agent. See Section 6. |
 
@@ -50,8 +50,8 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 A **conforming Trust Index provider** MUST:
 
-1. Accept Trust Manifests conforming to the schema in Appendix A
-2. Return Trust Evaluations as W3C Verifiable Credentials whose `credentialSubject` conforms to the schema in Appendix B
+1. Accept Trust Manifests conforming to the schema in [Appendix A](#appendix-a-full-trust-manifest-json-schema-normative) ([`trust-manifest-v1.0.0.json`](../schemas/trust-manifest-v1.0.0.json))
+2. Return Trust Evaluations as W3C Verifiable Credentials whose `credentialSubject` conforms to the schema in [Appendix B](#appendix-b-trust-evaluation-payload-schema-normative) ([`trust-evaluation-payload.json`](../schemas/trust-evaluation-payload.json))
 3. Compute Trust Vectors with five dimensions as defined in Section 2.2
 4. Support the four recommended profiles defined in Section 2.3
 5. Verify credentials in the formats defined in Section 4
@@ -61,15 +61,15 @@ A conforming provider MAY use any scoring algorithm, signal weights, or caching 
 
 ### 1.4 Relationship to ANS architecture
 
-The ANS architecture (DESIGN.md) provides the sealed events, certificates, and DNS records that the Trust Index scores:
+The [ANS Registry architecture](DESIGN.md) provides the sealed events, certificates, and DNS records that the Trust Index scores:
 
-| ANS concept | DESIGN.md | How the TI uses it |
+| ANS concept | [ANS Registry architecture](DESIGN.md) | How the TI uses it |
 | :--- | :--- | :--- |
-| **Three-layer trust framework** | §2.4 | Layer 1 (RA-sealed identity) feeds the integrity and identity dimensions. Layer 2 (third-party attestations in the ANS Agent Card's `verifiableClaims` array) feeds solvency, safety, and portions of behavior. Layer 3 (real-time behavioral signals) feeds behavior and updates all dimensions over time. |
-| **Verification tiers** | §4.1.1 | Bronze, Silver, Gold describe what the *client* verified, not what the agent possesses. See Section 6. |
-| **Log-sealing boundary** | §5.0, §5.1.2 step d | The integrity dimension depends on the TL's immutability guarantee. The KMS signs each checkpoint. Trust Manifest integrity signals are meaningful only because this property holds. |
-| **Version coexistence** | §5.2 | Multiple ACTIVE versions of the same agent can coexist. Each version has its own ANSName, Identity Certificate, and TL entry. A conforming TI MUST score each ACTIVE version independently. |
-| **Dual-certificate model** | §3.3, ADR 006 | The identity dimension treats Identity Certificates (Private CA, version-bound) differently from Server Certificates (Public CA, FQDN-bound). See Section 4.1. |
+| **Three-layer trust framework** | [§2.4](DESIGN.md#24-the-trust-framework-three-layers) | Layer 1 (RA-sealed identity) feeds the integrity and identity dimensions. Layer 2 (third-party attestations in the ANS Agent Card's `verifiableClaims` array) feeds solvency, safety, and portions of behavior. Layer 3 (real-time behavioral signals) feeds behavior and updates all dimensions over time. See [§2.1 Five signal categories](TRUST_INDEX_SPEC.md#21-five-signal-categories). |
+| **Verification tiers** | [§4.1.1](DESIGN.md#411-verification-steps-and-trust-tiers) | Bronze, Silver, Gold describe what the *client* verified, not what the agent possesses. See [Section 6](TRUST_INDEX_SPEC.md#6-verification-tiers). |
+| **Log-sealing boundary** | [§4.1](DESIGN.md#41-layered-trust), [§5.1.2](DESIGN.md#512-stage-2-activation) step d | The integrity dimension depends on the TL's immutability guarantee. The KMS signs each checkpoint. Trust Manifest integrity signals are meaningful only because this property holds. See [§3 Trust Manifest](TRUST_INDEX_SPEC.md#3-trust-manifest) and [§2.1](TRUST_INDEX_SPEC.md#21-five-signal-categories) (Integrity). |
+| **Version coexistence** | [§5.2](DESIGN.md#52-lifecycle-operations) | Multiple ACTIVE versions of the same agent can coexist. Each version has its own ANSName, Identity Certificate, and TL entry. A conforming TI MUST score each ACTIVE version independently. See [§2.2 Trust Vector](TRUST_INDEX_SPEC.md#22-trust-vector). |
+| **Dual-certificate model** | [§3.3](DESIGN.md#33-certificate-integrity), [ADR 006](DESIGN.md#60-architectural-decisions) | The identity dimension treats Identity Certificates (Private CA, version-bound) differently from Server Certificates (Public CA, FQDN-bound). See [Section 4.1](TRUST_INDEX_SPEC.md#41-x509-certificates-dvovev). |
 
 ```mermaid
 graph TD
@@ -275,7 +275,7 @@ graph TD
 
 *Figure 4. Six provenance channels feed the Trust Manifest. Only the TL channel is cryptographically attested. The dashed line marks behavioral observation as an open integration point: this specification does not define the observation source.*
 
-The normative schema is in Appendix A. Where any inline description conflicts with Appendix A, the appendix governs.
+The normative schema is in [Appendix A](#appendix-a-full-trust-manifest-json-schema-normative) ([`trust-manifest-v1.0.0.json`](../schemas/trust-manifest-v1.0.0.json)). Where any inline description conflicts with that schema, the appendix governs.
 
 ### 3.2 Required and optional fields
 
@@ -597,9 +597,9 @@ A client requests a trust evaluation by identifying the agent and optionally spe
 
 ### 7.2 Response format
 
-The trust evaluation payload conforms to the schema in Appendix B.
+The trust evaluation payload conforms to the schema in [Appendix B](#appendix-b-trust-evaluation-payload-schema-normative) ([`trust-evaluation-payload.json`](../schemas/trust-evaluation-payload.json)).
 A conforming TI wraps this payload as the `credentialSubject` of a W3C Verifiable Credential signed by the TI.
-The VC envelope (`@context`, `type`, `issuer`, `proof`) follows the VC Data Model 2.0; Appendix B defines only the `credentialSubject` content.
+The VC envelope (`@context`, `type`, `issuer`, `proof`) follows the VC Data Model 2.0; [Appendix B](#appendix-b-trust-evaluation-payload-schema-normative) defines only the `credentialSubject` content.
 Third parties verify the evaluation against the TI's public key without contacting the TI.
 
 The `credentialSubject` MUST include:
@@ -806,359 +806,15 @@ A conforming TI SHOULD publish a liability framework defining how responsibility
 
 This is the canonical schema. Where inline descriptions in the specification body conflict with this schema, this appendix governs.
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ans.schema.org/trust-manifest/v1.0.0",
-  "title": "ANS Trust Manifest v1.0.0",
-  "type": "object",
-  "required": ["manifestVersion", "agentIdentity", "attestationLevel", "timestamps"],
-  "properties": {
-    "manifestVersion": { "const": "1.0.0" },
-    "agentIdentity": {
-      "type": "object",
-      "required": ["ansName"],
-      "properties": {
-        "ansName": {
-          "type": "string",
-          "pattern": "^ans://v[0-9]+\\.[0-9]+\\.[0-9]+\\..+$",
-          "description": "Versioned agent identifier. The pattern is a structural hint; the RA validates against RFC 1123 hostname rules."
-        },
-        "agentHost": { "type": "string", "format": "hostname" },
-        "registrarId": { "type": "string" },
-        "agentId": { "type": "string", "format": "uuid" },
-        "principalBinding": {
-          "type": "object",
-          "required": ["type", "identifier"],
-          "properties": {
-            "type": { "enum": ["DID_WEB", "LEI", "BIOMETRIC_HASH", "ENS_ENSIP25"] },
-            "identifier": { "type": "string" },
-            "proof": { "type": "string" },
-            "priccChain": {
-              "type": "object",
-              "properties": {
-                "layers": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": { "enum": ["LEI", "KYC_IAL2", "KYC_IAL3", "BIOMETRIC_LIVENESS", "BIOMETRIC_DOCUMENT"] },
-                      "verifier": { "type": "string", "format": "uri" }
-                    }
-                  }
-                },
-                "aggregateProof": { "type": "string" },
-                "chainedAt": { "type": "string", "format": "date-time" }
-              }
-            }
-          }
-        }
-      }
-    },
-    "attestationLevel": {
-      "type": "object",
-      "required": ["verificationTier", "certificateType"],
-      "properties": {
-        "verificationTier": { "enum": ["BRONZE", "SILVER", "GOLD"] },
-        "certificateType": { "enum": ["DV", "OV", "EV"] },
-        "identityGrade": { "enum": ["BASIC", "VERIFIED", "PREMIUM"] },
-        "serverCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
-        "identityCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
-        "daneEnabled": { "type": "boolean" }
-      }
-    },
-    "timestamps": {
-      "type": "object",
-      "required": ["registered", "lastVerified"],
-      "properties": {
-        "registered": { "type": "string", "format": "date-time" },
-        "lastVerified": { "type": "string", "format": "date-time" },
-        "certExpiry": { "type": "string", "format": "date-time" },
-        "lastCodeChange": { "type": "string", "format": "date-time" }
-      }
-    },
-    "integritySignals": {
-      "type": "object",
-      "required": ["schemaVersion"],
-      "properties": {
-        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "agentAgeDays": { "type": "integer", "minimum": 0 },
-        "versionCount": { "type": "integer", "minimum": 1 },
-        "codeVolatility": { "enum": ["STABLE", "MODERATE", "HIGH", "SUSPICIOUS"] },
-        "lastAttestationAge": { "type": "integer", "description": "Hours since last TEE attestation quote" },
-        "sbomPublished": { "type": "boolean" },
-        "sbomHash": { "type": "string" },
-        "agentCardHash": { "type": "string" },
-        "discoveryChannels": {
-          "type": "array",
-          "items": {
-            "enum": ["HCS14_AGENT", "DNSAID_SVCB", "A2A_WELLKNOWN", "MCP_WELLKNOWN"]
-          },
-          "uniqueItems": true,
-          "description": "Additional discovery channels verified as present, beyond the baseline _ans TXT record."
-        },
-        "capHashConsistent": {
-          "type": "boolean",
-          "description": "[PENDING] True when capability hashes from all available sources agree. Activates when capabilities_hash is populated in TL entries."
-        },
-        "providerAttestation": {
-          "type": "object",
-          "properties": {
-            "providerDid": { "type": "string" },
-            "providerName": { "type": "string" },
-            "hostingRegion": { "type": "string" },
-            "attestationSignature": { "type": "string" }
-          }
-        }
-      }
-    },
-    "identitySignals": {
-      "type": "object",
-      "required": ["schemaVersion"],
-      "properties": {
-        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "verificationLevel": { "type": "integer", "minimum": 1, "maximum": 3 },
-        "organizationName": { "type": "string" },
-        "organizationId": { "type": "string" },
-        "jurisdiction": { "type": "string" },
-        "physicalAddress": { "type": "boolean" },
-        "externalTrustAnchors": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["type"],
-            "properties": {
-              "type": {
-                "enum": ["BIMI_VMC", "BIMI_CMC", "BIMI_SELF_ASSERTED", "CODE_SIGNING", "CORPORATE_PKI", "ENS_ENSIP25", "ERC8004_VALIDATION", "CUSTOM"],
-                "description": "DNS-based types require domain. ENS_ENSIP25 and ERC8004_VALIDATION require identifier instead."
-              },
-              "domain": { "type": "string", "format": "hostname" },
-              "identifier": { "type": "string" },
-              "dmarcPolicy": { "enum": ["none", "quarantine", "reject"] },
-              "certificateUrl": { "type": "string", "format": "uri" },
-              "logoHash": { "type": "string" },
-              "issuer": { "type": "string" },
-              "subjectHash": { "type": "string" },
-              "verifiedAt": { "type": "string", "format": "date-time" }
-            }
-          }
-        }
-      }
-    },
-    "solvencySignals": {
-      "type": "object",
-      "required": ["schemaVersion"],
-      "properties": {
-        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "cryptoSuite": {
-          "type": "object",
-          "properties": {
-            "algorithm": { "type": "string" },
-            "nistLevel": { "type": "integer", "minimum": 1, "maximum": 5 },
-            "quantumSafe": { "type": "boolean" }
-          }
-        },
-        "solvencyProof": {
-          "type": "object",
-          "properties": {
-            "type": { "enum": ["ZK_SNARK", "ZK_STARK", "BANK_API", "ESCROW"] },
-            "asset": { "enum": ["USDC", "ETH", "BTC", "FIAT"] },
-            "minimumBalance": { "type": "string" },
-            "chainId": { "type": "integer" },
-            "blockHeight": { "type": "integer" },
-            "maxBlockAge": { "type": "integer" },
-            "proof": { "type": "string" }
-          }
-        },
-        "insurancePolicy": {
-          "type": "object",
-          "properties": {
-            "provider": { "type": "string" },
-            "coverageAmount": { "type": "string" },
-            "policyHash": { "type": "string" },
-            "expiresAt": { "type": "string", "format": "date-time" }
-          }
-        },
-        "escrowHistory": {
-          "type": "object",
-          "properties": {
-            "successfulReleases": { "type": "integer" },
-            "disputes": { "type": "integer" },
-            "totalVolume": { "type": "string" }
-          }
-        }
-      }
-    },
-    "behaviorSignals": {
-      "type": "object",
-      "required": ["schemaVersion"],
-      "properties": {
-        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "disputeRate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "protocolViolations": { "type": "integer" },
-        "rateLimitAdherence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "protocolCompliance": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "protocol": { "type": "string" },
-              "version": { "type": "string" },
-              "proofHash": { "type": "string" },
-              "externalId": { "type": "string" }
-            }
-          }
-        },
-        "peerEndorsements": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "endorserAnsName": { "type": "string" },
-              "endorsementType": { "enum": ["TRUSTED_PARTNER", "VERIFIED_INTEGRATION", "PREFERRED_VENDOR"] },
-              "signatureHash": { "type": "string" }
-            }
-          }
-        },
-        "userRatings": {
-          "type": "object",
-          "properties": {
-            "averageScore": { "type": "number", "minimum": 0, "maximum": 5 },
-            "totalRatings": { "type": "integer" },
-            "responseRate": { "type": "number" }
-          }
-        },
-        "interopMetrics": {
-          "type": "object",
-          "properties": {
-            "mcpAsyncRate": { "type": "number", "minimum": 0, "maximum": 1 },
-            "a2aHandshakeSuccess": { "type": "number", "minimum": 0, "maximum": 1 },
-            "vcGrantsIssued": { "type": "integer" },
-            "vcGrantsHonored": { "type": "integer" }
-          }
-        }
-      }
-    },
-    "safetySignals": {
-      "type": "object",
-      "required": ["schemaVersion"],
-      "properties": {
-        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "guardrailCertification": {
-          "type": "object",
-          "properties": {
-            "standard": { "enum": ["OWASP_LLM_TOP10", "AISI_2026_SAFE", "CUSTOM"] },
-            "version": { "type": "string" },
-            "auditorDid": { "type": "string" },
-            "reportHash": { "type": "string" },
-            "passedAt": { "type": "string", "format": "date-time" }
-          }
-        },
-        "enclaveAttestation": {
-          "type": "object",
-          "properties": {
-            "provider": { "type": "string", "description": "TEE platform identifier" },
-            "hardwareVersion": { "type": "string" },
-            "securityVersion": { "type": "integer" },
-            "pcr0Hash": { "type": "string" },
-            "quoteSignature": { "type": "string" }
-          }
-        },
-        "dataEgressPolicy": { "enum": ["LOCAL_ONLY", "RESTRICTED", "OPEN"] },
-        "modelProvenance": {
-          "type": "object",
-          "properties": {
-            "modelId": { "type": "string" },
-            "verified": { "type": "boolean" },
-            "rekorLogIndex": { "type": "integer" },
-            "proofHash": { "type": "string" }
-          }
-        },
-        "modelCheckpointHash": {
-          "type": "string",
-          "pattern": "^SHA256:[a-f0-9]{64}$",
-          "description": "SHA-256 hash of the running model weights, self-reported by the agent. TEE attestation (enclaveAttestation) can verify it independently. A TI SHOULD compare this hash to the value recorded at the most recent guardrailCertification; a mismatch means the model changed since the last audit. See ADR 022."
-        },
-        "securityAudit": {
-          "type": "object",
-          "properties": {
-            "auditor": { "type": "string" },
-            "reportHash": { "type": "string" },
-            "auditedAt": { "type": "string", "format": "date-time" }
-          }
-        },
-        "complianceCertifications": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "standard": { "enum": ["SOC2_TYPE1", "SOC2_TYPE2", "HIPAA", "ISO27001", "GDPR", "PCI_DSS"] },
-              "issuer": { "type": "string" },
-              "reportHash": { "type": "string" },
-              "validUntil": { "type": "string", "format": "date-time" }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
+The machine-readable definition is maintained at [`../schemas/trust-manifest-v1.0.0.json`](../schemas/trust-manifest-v1.0.0.json) (JSON Schema draft 2020-12).
 
 ---
 
 ## Appendix B: Trust Evaluation Payload Schema (normative)
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Trust Evaluation Payload",
-  "type": "object",
-  "required": ["agentId", "evaluationTime", "trustVector", "recommendedProfile", "riskFactors"],
-  "properties": {
-    "agentId": { "type": "string" },
-    "evaluationTime": { "type": "string", "format": "date-time" },
-    "trustVector": {
-      "type": "object",
-      "required": ["integrity", "identity", "solvency", "behavior", "safety"],
-      "properties": {
-        "integrity": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "identity": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "solvency": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "behavior": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "safety": { "type": "integer", "minimum": 0, "maximum": 100 }
-      }
-    },
-    "compositeScore": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 100,
-      "description": "DEPRECATED. Use trustVector and recommendedProfile instead."
-    },
-    "recommendedProfile": {
-      "type": "string",
-      "enum": ["READ_ONLY", "TRANSACTIONAL", "FIDUCIARY", "UNTRUSTED"]
-    },
-    "riskFactors": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "evaluationChanged": {
-      "type": "boolean",
-      "description": "True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score shifts without caching and comparing vectors. The TI tracks each client's last-seen evaluation via client identity or session token. See ADR 021."
-    },
-    "interactionContext": {
-      "type": "object",
-      "description": "Present when the request included interaction context. See Appendix C.",
-      "properties": {
-        "authStrength": { "type": "string" },
-        "adjustedProfile": { "type": "string" },
-        "requiredAuthUpgrade": { "type": "string" }
-      }
-    }
-  }
-}
-```
+This is the canonical schema for the Trust Evaluation `credentialSubject`. Where inline descriptions in the specification body conflict with this schema, this appendix governs.
+
+The machine-readable definition is maintained at [`../schemas/trust-evaluation-payload.json`](../schemas/trust-evaluation-payload.json) (JSON Schema draft 2020-12).
 
 ---
 
@@ -1301,7 +957,7 @@ Three dimensions collapse solvency into reputation, but the ability to pay damag
 
 ## References
 
-- DESIGN.md, ANS Registry architecture (companion specification)
+- [DESIGN.md](DESIGN.md), ANS Registry architecture (companion specification)
 - RFC 1123, Requirements for Internet Hosts — Application and Support
 - RFC 2119, Key words for use in RFCs to Indicate Requirement Levels
 - RFC 6698, DNS-Based Authentication of Named Entities (DANE)

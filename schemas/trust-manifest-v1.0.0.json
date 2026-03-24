@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ans.schema.org/trust-manifest/v1.0.0",
+  "title": "ANS Trust Manifest v1.0.0",
+  "type": "object",
+  "required": ["manifestVersion", "agentIdentity", "attestationLevel", "timestamps"],
+  "properties": {
+    "manifestVersion": { "const": "1.0.0" },
+    "agentIdentity": {
+      "type": "object",
+      "required": ["ansName"],
+      "properties": {
+        "ansName": {
+          "type": "string",
+          "pattern": "^ans://v[0-9]+\\.[0-9]+\\.[0-9]+\\..+$",
+          "description": "Versioned agent identifier. The pattern is a structural hint; the RA validates against RFC 1123 hostname rules."
+        },
+        "agentHost": { "type": "string", "format": "hostname" },
+        "registrarId": { "type": "string" },
+        "agentId": { "type": "string", "format": "uuid" },
+        "principalBinding": {
+          "type": "object",
+          "required": ["type", "identifier"],
+          "properties": {
+            "type": { "enum": ["DID_WEB", "LEI", "BIOMETRIC_HASH", "ENS_ENSIP25"] },
+            "identifier": { "type": "string" },
+            "proof": { "type": "string" },
+            "priccChain": {
+              "type": "object",
+              "properties": {
+                "layers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "enum": ["LEI", "KYC_IAL2", "KYC_IAL3", "BIOMETRIC_LIVENESS", "BIOMETRIC_DOCUMENT"] },
+                      "verifier": { "type": "string", "format": "uri" }
+                    }
+                  }
+                },
+                "aggregateProof": { "type": "string" },
+                "chainedAt": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "attestationLevel": {
+      "type": "object",
+      "required": ["verificationTier", "certificateType"],
+      "properties": {
+        "verificationTier": { "enum": ["BRONZE", "SILVER", "GOLD"] },
+        "certificateType": { "enum": ["DV", "OV", "EV"] },
+        "identityGrade": { "enum": ["BASIC", "VERIFIED", "PREMIUM"] },
+        "serverCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
+        "identityCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
+        "daneEnabled": { "type": "boolean" }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["registered", "lastVerified"],
+      "properties": {
+        "registered": { "type": "string", "format": "date-time" },
+        "lastVerified": { "type": "string", "format": "date-time" },
+        "certExpiry": { "type": "string", "format": "date-time" },
+        "lastCodeChange": { "type": "string", "format": "date-time" }
+      }
+    },
+    "integritySignals": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "agentAgeDays": { "type": "integer", "minimum": 0 },
+        "versionCount": { "type": "integer", "minimum": 1 },
+        "codeVolatility": { "enum": ["STABLE", "MODERATE", "HIGH", "SUSPICIOUS"] },
+        "lastAttestationAge": { "type": "integer", "description": "Hours since last TEE attestation quote" },
+        "sbomPublished": { "type": "boolean" },
+        "sbomHash": { "type": "string" },
+        "agentCardHash": { "type": "string" },
+        "discoveryChannels": {
+          "type": "array",
+          "items": {
+            "enum": ["HCS14_AGENT", "DNSAID_SVCB", "A2A_WELLKNOWN", "MCP_WELLKNOWN"]
+          },
+          "uniqueItems": true,
+          "description": "Additional discovery channels verified as present, beyond the baseline _ans TXT record."
+        },
+        "capHashConsistent": {
+          "type": "boolean",
+          "description": "[PENDING] True when capability hashes from all available sources agree. Activates when capabilities_hash is populated in TL entries."
+        },
+        "providerAttestation": {
+          "type": "object",
+          "properties": {
+            "providerDid": { "type": "string" },
+            "providerName": { "type": "string" },
+            "hostingRegion": { "type": "string" },
+            "attestationSignature": { "type": "string" }
+          }
+        }
+      }
+    },
+    "identitySignals": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "verificationLevel": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "organizationName": { "type": "string" },
+        "organizationId": { "type": "string" },
+        "jurisdiction": { "type": "string" },
+        "physicalAddress": { "type": "boolean" },
+        "externalTrustAnchors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["BIMI_VMC", "BIMI_CMC", "BIMI_SELF_ASSERTED", "CODE_SIGNING", "CORPORATE_PKI", "ENS_ENSIP25", "ERC8004_VALIDATION", "CUSTOM"],
+                "description": "DNS-based types require domain. ENS_ENSIP25 and ERC8004_VALIDATION require identifier instead."
+              },
+              "domain": { "type": "string", "format": "hostname" },
+              "identifier": { "type": "string" },
+              "dmarcPolicy": { "enum": ["none", "quarantine", "reject"] },
+              "certificateUrl": { "type": "string", "format": "uri" },
+              "logoHash": { "type": "string" },
+              "issuer": { "type": "string" },
+              "subjectHash": { "type": "string" },
+              "verifiedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "solvencySignals": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "cryptoSuite": {
+          "type": "object",
+          "properties": {
+            "algorithm": { "type": "string" },
+            "nistLevel": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "quantumSafe": { "type": "boolean" }
+          }
+        },
+        "solvencyProof": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["ZK_SNARK", "ZK_STARK", "BANK_API", "ESCROW"] },
+            "asset": { "enum": ["USDC", "ETH", "BTC", "FIAT"] },
+            "minimumBalance": { "type": "string" },
+            "chainId": { "type": "integer" },
+            "blockHeight": { "type": "integer" },
+            "maxBlockAge": { "type": "integer" },
+            "proof": { "type": "string" }
+          }
+        },
+        "insurancePolicy": {
+          "type": "object",
+          "properties": {
+            "provider": { "type": "string" },
+            "coverageAmount": { "type": "string" },
+            "policyHash": { "type": "string" },
+            "expiresAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "escrowHistory": {
+          "type": "object",
+          "properties": {
+            "successfulReleases": { "type": "integer" },
+            "disputes": { "type": "integer" },
+            "totalVolume": { "type": "string" }
+          }
+        }
+      }
+    },
+    "behaviorSignals": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "disputeRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "protocolViolations": { "type": "integer" },
+        "rateLimitAdherence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "protocolCompliance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "protocol": { "type": "string" },
+              "version": { "type": "string" },
+              "proofHash": { "type": "string" },
+              "externalId": { "type": "string" }
+            }
+          }
+        },
+        "peerEndorsements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "endorserAnsName": { "type": "string" },
+              "endorsementType": { "enum": ["TRUSTED_PARTNER", "VERIFIED_INTEGRATION", "PREFERRED_VENDOR"] },
+              "signatureHash": { "type": "string" }
+            }
+          }
+        },
+        "userRatings": {
+          "type": "object",
+          "properties": {
+            "averageScore": { "type": "number", "minimum": 0, "maximum": 5 },
+            "totalRatings": { "type": "integer" },
+            "responseRate": { "type": "number" }
+          }
+        },
+        "interopMetrics": {
+          "type": "object",
+          "properties": {
+            "mcpAsyncRate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "a2aHandshakeSuccess": { "type": "number", "minimum": 0, "maximum": 1 },
+            "vcGrantsIssued": { "type": "integer" },
+            "vcGrantsHonored": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "safetySignals": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "guardrailCertification": {
+          "type": "object",
+          "properties": {
+            "standard": { "enum": ["OWASP_LLM_TOP10", "AISI_2026_SAFE", "CUSTOM"] },
+            "version": { "type": "string" },
+            "auditorDid": { "type": "string" },
+            "reportHash": { "type": "string" },
+            "passedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "enclaveAttestation": {
+          "type": "object",
+          "properties": {
+            "provider": { "type": "string", "description": "TEE platform identifier" },
+            "hardwareVersion": { "type": "string" },
+            "securityVersion": { "type": "integer" },
+            "pcr0Hash": { "type": "string" },
+            "quoteSignature": { "type": "string" }
+          }
+        },
+        "dataEgressPolicy": { "enum": ["LOCAL_ONLY", "RESTRICTED", "OPEN"] },
+        "modelProvenance": {
+          "type": "object",
+          "properties": {
+            "modelId": { "type": "string" },
+            "verified": { "type": "boolean" },
+            "rekorLogIndex": { "type": "integer" },
+            "proofHash": { "type": "string" }
+          }
+        },
+        "modelCheckpointHash": {
+          "type": "string",
+          "pattern": "^SHA256:[a-f0-9]{64}$",
+          "description": "SHA-256 hash of the running model weights, self-reported by the agent. TEE attestation (enclaveAttestation) can verify it independently. A TI SHOULD compare this hash to the value recorded at the most recent guardrailCertification; a mismatch means the model changed since the last audit. See ADR 022."
+        },
+        "securityAudit": {
+          "type": "object",
+          "properties": {
+            "auditor": { "type": "string" },
+            "reportHash": { "type": "string" },
+            "auditedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "complianceCertifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "standard": { "enum": ["SOC2_TYPE1", "SOC2_TYPE2", "HIPAA", "ISO27001", "GDPR", "PCI_DSS"] },
+              "issuer": { "type": "string" },
+              "reportHash": { "type": "string" },
+              "validUntil": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

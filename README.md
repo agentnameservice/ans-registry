@@ -15,12 +15,12 @@ services are federated, but the identity always anchors to a domain name.
 
 Two open specifications define the protocol and trust evaluation:
 
-**[DESIGN.md](DESIGN.md)** — Architecture and protocol. How the Registration
+**[DESIGN.md](docs/DESIGN.md)** — Architecture and protocol. How the Registration
 Authority verifies domain ownership, issues certificates, provisions DNS records,
 and seals events into the Transparency Log. Data model, identifiers, verification
 tiers, DNS record formats, mTLS exchange, and the full registration lifecycle.
 
-**[TRUST_INDEX_SPEC.md](TRUST_INDEX_SPEC.md)** — Trust evaluation. How a Trust
+**[TRUST_INDEX_SPEC.md](docs/TRUST_INDEX_SPEC.md)** — Trust evaluation. How a Trust
 Index crawls sealed data from federated Registration Authorities, combines it with
 external signals, and scores agents across five dimensions: integrity, identity,
 solvency, behavior, and safety. Trust Manifest schema, credential formats,

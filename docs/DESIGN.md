@@ -105,6 +105,7 @@ An agent's domain determines the strength of its identity signal. An agent on it
 The term "agent" appears throughout this document because autonomous AI agents are the primary registrant. The architecture is not limited to agents.
 Any software entity that needs a verifiable, domain-anchored identity can register: a web crawler with declared behavioral policies, a corporate API that requires versioning and a certificate lifecycle, a dedicated commerce client whose operator controls the domain and wants counterparties to verify the connection.
 The registration payload, certificate model, and TL semantics are identical regardless of entity type.
+What differs is the Agent Card content and the endpoints array. A consuming entity may register an Identity Certificate for mTLS without serving an Agent Card. A [Trust Index](TRUST_INDEX_SPEC.md) scores whatever signals are available; a missing card reduces the integrity dimension but does not block registration.
 
 ## 2.0 Component model
 
@@ -250,6 +251,8 @@ graph LR
 ```
 
 *Figure 3. Three independent sources converge. No single source controls the evaluation. The payment agent decides from the combined score.*
+
+The five-dimensional evaluation model (integrity, identity, solvency, behavior, safety) and Trust Vector semantics are defined in the [Trust Index Open Specification](TRUST_INDEX_SPEC.md) (Section 2, Trust Model).
 
 ### 2.5 The ANS SDK
 
