@@ -13,7 +13,7 @@ services are federated, but the identity always anchors to a domain name.
 
 ## Specifications
 
-Two open specifications define the protocol:
+Two open specifications define the protocol and trust evaluation:
 
 **[DESIGN.md](DESIGN.md)** — Architecture and protocol. How the Registration
 Authority verifies domain ownership, issues certificates, provisions DNS records,
