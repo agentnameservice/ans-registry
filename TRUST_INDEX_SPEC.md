@@ -2,6 +2,9 @@
 
 Version 1.1.0 | 2026-03-20
 
+*Spec version 1.1.0 defines Trust Manifest schema version 1.0.0.
+Non-breaking spec revisions do not bump the schema version.*
+
 ---
 
 ## 1. Introduction
@@ -48,8 +51,8 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 A **conforming Trust Index provider** MUST:
 
 1. Accept Trust Manifests conforming to the schema in Appendix A
-2. Return Trust Evaluation responses conforming to the schema in Appendix B
-3. Compute Trust Vectors with five dimensions as defined in Section 2.1
+2. Return Trust Evaluations as W3C Verifiable Credentials whose `credentialSubject` conforms to the schema in Appendix B
+3. Compute Trust Vectors with five dimensions as defined in Section 2.2
 4. Support the four recommended profiles defined in Section 2.3
 5. Verify credentials in the formats defined in Section 4
 6. Expose a Trust Evaluation API as defined in Section 7
@@ -290,7 +293,7 @@ The top-level Trust Manifest object requires four sections:
 | `behaviorSignals` | SHOULD | Behavior dimension signals |
 | `safetySignals` | SHOULD | Safety dimension signals |
 
-Within `agentIdentity`, the only REQUIRED field is `ansName`. The `principalBinding` object SHOULD be present for agents claiming Verified or Premium identity grade. The `agentHost` and `registrarId` fields SHOULD be present but are not required because they can be derived from the ANSName and TL context.
+Within `agentIdentity`, the only REQUIRED field is `ansName`. The `principalBinding` object SHOULD be present for Verified-grade agents and MUST be present for Premium (see Section 5.3). The `agentHost` and `registrarId` fields SHOULD be present but are not required because they can be derived from the ANSName and TL context.
 
 A TI receiving a Trust Manifest with missing SHOULD fields MUST still produce a Trust Vector. Missing signal blocks result in lower scores for the corresponding dimension, not in rejection of the manifest.
 
@@ -459,7 +462,9 @@ Each alternative path MUST include at least one third-party attestation. Self-as
 
 ### 5.3 Principal binding (DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25)
 
-Every agent has a `principalBinding`: a link to the real-world entity that controls it. The binding type determines how difficult it is for a bad actor to shed negative history by creating a new identity.
+An agent's `principalBinding` links it to the real-world entity that controls it.
+The binding is OPTIONAL for Basic-grade agents, SHOULD be present for Verified, and MUST be present for Premium.
+The binding type determines how difficult it is for a bad actor to shed negative history by creating a new identity.
 
 | Binding type | What it binds | Escape difficulty |
 | ------------- | --------------- | ------------------- |
@@ -589,11 +594,14 @@ A client requests a trust evaluation by identifying the agent and optionally spe
 - `fresh`: Boolean. When `true`, the TI triggers challenge-response verification for time-sensitive signals. Default: `false`.
 - `interactionContext`: An object describing the authentication method and transport security of the current interaction. See Appendix C.
 
-### 7.2 Response as W3C Verifiable Credential
+### 7.2 Response format
 
-The trust evaluation response is a W3C Verifiable Credential signed by the TI. Third parties can verify the evaluation without contacting the TI.
+The trust evaluation payload conforms to the schema in Appendix B.
+A conforming TI wraps this payload as the `credentialSubject` of a W3C Verifiable Credential signed by the TI.
+The VC envelope (`@context`, `type`, `issuer`, `proof`) follows the VC Data Model 2.0; Appendix B defines only the `credentialSubject` content.
+Third parties verify the evaluation against the TI's public key without contacting the TI.
 
-A conforming TI MUST return responses conforming to the schema in Appendix B. The response MUST include:
+The `credentialSubject` MUST include:
 
 - `agentId`: The evaluated agent's identifier
 - `evaluationTime`: ISO 8601 timestamp of the evaluation
@@ -1098,12 +1106,12 @@ This is the canonical schema. Where inline descriptions in the specification bod
 
 ---
 
-## Appendix B: Trust Evaluation API Response Schema (normative)
+## Appendix B: Trust Evaluation Payload Schema (normative)
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Trust Evaluation Response",
+  "title": "Trust Evaluation Payload",
   "type": "object",
   "required": ["agentId", "evaluationTime", "trustVector", "recommendedProfile", "riskFactors"],
   "properties": {
@@ -1248,13 +1256,13 @@ This appendix provides one decay model and recommended rates. A conforming TI MA
 
 The recommended model is exponential decay:
 
-```
+```text
 DecayedSignal = RawSignal * e^(-lambda * DaysSinceObservation)
 ```
 
 For cached oracle signals, the recommended freshness penalty is linear reduction to zero over 24 hours:
 
-```
+```text
 AdjustedSignal = CachedSignal * max(0, 1 - HoursSinceCache / 24)
 ```
 
