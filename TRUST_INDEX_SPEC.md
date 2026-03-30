@@ -20,7 +20,11 @@ Each RA carries its own RA Identifier and signing keys, so a TI that crawls mult
 This specification does not define signal weights, scoring algorithms, or deployment architectures. A conforming Trust Index provider computes Trust Vectors from the signals defined here and returns evaluations in the format defined here.
 Two providers given the same Trust Manifest MAY return different Trust Vectors because they weight signals differently, just as two credit bureaus score the same borrower differently from the same financial records. The dimensions and their semantics are fixed; the math inside each dimension is not.
 
-The Trust Index creates a feedback loop. An agent that registers with the minimum artifacts (domain, version, endpoints, identity CSR) receives a low score. Discovery Services that consume Trust Vectors rank low-scoring agents lower in search results and recommendations. The AHP sees the score and knows what to improve: host an ANS Trust Card, submit Registration Metadata so the content hash is sealed, obtain an OV certificate, add `verifiableClaims`. Each improvement raises the score, which raises discovery placement, which rewards the investment. The RA does not mandate these artifacts; the Trust Index makes their absence visible and their presence valuable.
+The Trust Index creates a feedback loop. An agent that registers with the minimum artifacts (domain, version, endpoints, identity CSR) receives a low score.
+Discovery Services that consume Trust Vectors rank low-scoring agents lower in search results and recommendations.
+The AHP sees the score and knows what to improve: host an ANS Trust Card, submit Registration Metadata so the content hash is sealed, obtain an OV certificate, add `verifiableClaims`.
+Each improvement raises the score, which raises discovery placement, which rewards the investment.
+The RA does not mandate these artifacts; the Trust Index makes their absence visible and their presence valuable.
 
 ```mermaid
 graph TD
@@ -243,7 +247,12 @@ Two properties are required regardless of the decay function chosen. First, disp
 
 For cached oracle signals, a TI SHOULD apply a freshness penalty when the source is unreachable. The penalty MUST reduce the signal's contribution toward zero as the cache ages. A TI MUST document its freshness penalty function.
 
-**Domain control staleness.** Behavioral reputation accumulates against the FQDN across version bumps. The TI determines staleness from the TL: each `AGENT_REGISTERED`, `AGENT_RENEWED`, or `AGENT_REVOKED` event carries a timestamp. The most recent event for an FQDN is the last time the RA ran ACME domain control validation. A conforming TI SHOULD discount behavioral signals when the most recent TL event for the FQDN is older than a provider-defined threshold, because no recent ACME re-validation confirms that the original operator still controls the domain. A domain transfer detected by the RA (via ACME failure, RDAP registrant handle change, or ProviderID mismatch) produces an `AGENT_REVOKED` event in the TL. The TI MUST NOT carry forward behavioral reputation from a revoked registration to a new one on the same FQDN.
+**Domain control staleness.** Behavioral reputation accumulates against the FQDN across version bumps.
+The TI determines staleness from the TL: each `AGENT_REGISTERED`, `AGENT_RENEWED`, or `AGENT_REVOKED` event carries a timestamp.
+The most recent event for an FQDN is the last time the RA ran ACME domain control validation.
+A conforming TI SHOULD discount behavioral signals when the most recent TL event for the FQDN is older than a provider-defined threshold, because no recent ACME re-validation confirms that the original operator still controls the domain.
+A domain transfer detected by the RA (via ACME failure, RDAP registrant handle change, or ProviderID mismatch) produces an `AGENT_REVOKED` event in the TL.
+The TI MUST NOT carry forward behavioral reputation from a revoked registration to a new one on the same FQDN.
 
 ### 2.6 Environment adjustments
 
@@ -252,7 +261,7 @@ The agent's score also depends on the infrastructure around it.
 | Factor | Dimension | Effect | Level |
 | :--- | :--- | :--- | :--- |
 | **TLD reputation** | Identity | `.bank` requires the registrant to be a verified financial institution (positive). High-abuse TLDs penalize. | SHOULD |
-| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain penalizes, with a larger penalty for Premium identity grade. The TL event carries a `dnssecStatus` field (`fully_validated`, `not_signed`, `signed_broken`) recorded at registration time. A TI SHOULD compare the registration-time state against a live DNSSEC query to detect zone signing changes since registration. | SHOULD |
+| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain penalizes, with a larger penalty for Premium identity grade. The TL event carries a `dnssecStatus` field recorded at registration time. | SHOULD |
 | **Certificate scope** | Integrity | Single-FQDN certificate limits blast radius to one hostname. Wildcard means a compromise affects every subdomain. Penalize wildcards. | SHOULD |
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
