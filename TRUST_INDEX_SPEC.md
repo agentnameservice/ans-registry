@@ -261,7 +261,7 @@ The agent's score also depends on the infrastructure around it.
 | Factor | Dimension | Effect | Level |
 | :--- | :--- | :--- | :--- |
 | **TLD reputation** | Identity | `.bank` requires the registrant to be a verified financial institution (positive). High-abuse TLDs penalize. | SHOULD |
-| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain penalizes, with a larger penalty for Premium identity grade. The TL event carries a `dnssecStatus` field recorded at registration time. | SHOULD |
+| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain lowers the integrity score. The penalty is larger when the agent holds a Premium identity grade, because more is at stake. DNSSEC does not affect the identity grade itself. The TL event carries a `dnssecStatus` field (`fully_validated`, `not_signed`, `signed_broken`) recorded at registration time. A TI SHOULD compare registration-time state against a live DNSSEC query to detect changes. | SHOULD |
 | **Certificate scope** | Integrity | Single-FQDN certificate limits blast radius to one hostname. Wildcard means a compromise affects every subdomain. Penalize wildcards. | SHOULD |
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
