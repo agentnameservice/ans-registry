@@ -74,7 +74,7 @@ A supplier passes a security audit on Tuesday, updates its model on Wednesday, a
 | **FQDN** | Fully Qualified Domain Name, a complete domain name such as `support.example.com`. |
 | **KMS** | Key Management System. Stores and controls access to the private keys that sign certificates and log entries. |
 | **MCP** | Model Context Protocol for agent-tool communication (Linux Foundation AAIF). |
-| **Protocol Card** | The protocol-native metadata file: an A2A Agent Card (`/.well-known/agent-card.json`), an MCP manifest, or an OpenAPI document. Created by the developer. The AHP chooses where to host it; the well-known path is a convention. The SDK translates it into Registration Metadata. |
+| **Protocol Card** | The protocol-native metadata file: an A2A Agent Card (`/.well-known/agent-card.json`), an MCP Server Card (`/.well-known/mcp/server-card.json`), or an OpenAPI document. Created by the developer. The AHP chooses where to host it; the well-known paths shown here are conventions. Both A2A and MCP have competing proposals for their discovery paths, and implementations vary. The `metadataUrl` field in the registration payload lets the AHP declare the actual location. The SDK translates the Protocol Card into Registration Metadata. |
 | **RA** | Registration Authority. Validates domain control, issues certificates, provisions DNS records, and seals events into the TL. |
 | **Registration Metadata** | The `agentCardContent` field in the registration payload. The agent's capabilities, endpoints, and protocols in the RA's format. The RA hashes it and seals the hash into the TL. |
 | **TL** | Transparency Log, an append-only, cryptographically verifiable ledger of all agent lifecycle events. |
@@ -566,7 +566,7 @@ _ans IN TXT "v=ans1; version=v2.1.0; url=https://agents.platform.example.com/met
 
 ; Multi-protocol (one record per protocol)
 _ans IN TXT "v=ans1; version=v1.0.0; p=a2a; mode=direct"
-_ans IN TXT "v=ans1; version=v1.0.0; p=mcp; url=https://api.example.com/.well-known/mcp/manifest.json"
+_ans IN TXT "v=ans1; version=v1.0.0; p=mcp; url=https://api.example.com/.well-known/mcp/server-card.json"
 ```
 
 **Resolution logic:**
@@ -690,7 +690,7 @@ The AHP submits a registration request. The payload:
 | | `agentDescription` | No | Brief capability description |
 | **Endpoints** | `protocol` | Yes | `A2A`, `MCP`, or `HTTP-API` (minimum 1 endpoint) |
 | | `agentUrl` | Yes | The endpoint URL |
-| | `metadataUrl` | No | Protocol metadata (e.g., `/.well-known/mcp/manifest.json`) |
+| | `metadataUrl` | No | Protocol metadata (e.g., `/.well-known/mcp/server-card.json`) |
 | | `documentationUrl` | No | Developer documentation for this endpoint |
 | | `functions` | No | Function declarations: `id`, `name`, optional `tags` |
 | | `transports` | No | `STREAMABLE-HTTP`, `SSE`, `JSON-RPC`, `GRPC`, `REST`, `HTTP` |
@@ -848,7 +848,7 @@ The AHP submits this payload to the RA's `/register` endpoint.
     {
       "protocol": "MCP",
       "agentUrl": "https://support.example.com/mcp",
-      "metadataUrl": "https://support.example.com/.well-known/mcp/manifest.json",
+      "metadataUrl": "https://support.example.com/.well-known/mcp/server-card.json",
       "documentationUrl": "https://dev.example.com/docs/mcp",
       "transports": ["STREAMABLE-HTTP"],
       "functions": [
@@ -910,7 +910,7 @@ Hosted by the AHP at the URL advertised in the `_ans` DNS record when the AHP ch
     {
       "protocol": "MCP",
       "agentUrl": "https://support.example.com/mcp",
-      "metadataUrl": "https://support.example.com/.well-known/mcp/manifest.json",
+      "metadataUrl": "https://support.example.com/.well-known/mcp/server-card.json",
       "documentationUrl": "https://dev.example.com/docs/mcp",
       "transports": ["STREAMABLE-HTTP"],
       "functions": [
