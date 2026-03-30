@@ -15,10 +15,12 @@ My payment agent can verify that the invoicing agent's identity is sealed in a T
 
 A Trust Index crawls Transparency Logs published by federated Registration Authorities, combines the sealed data with external signals, and computes a trust evaluation. The evaluation answers one question: given what is publicly verifiable about this agent, what category of tasks should a client delegate to it?
 
-Each RA carries its own registrar identifier and signing keys, so a TI that crawls multiple RAs can assess the RAs themselves. An RA with a history of lax validation or delayed revocations drags down the score of every agent it registered. Federation defines how Trust Manifests, Verifiable Credentials, and negative reputation signals move across RA boundaries.
+Each RA carries its own RA Identifier and signing keys, so a TI that crawls multiple RAs can assess the RAs themselves. An RA with a history of lax validation or delayed revocations drags down the score of every agent it registered. Federation defines how Trust Manifests, Verifiable Credentials, and negative reputation signals move across RA boundaries.
 
 This specification does not define signal weights, scoring algorithms, or deployment architectures. A conforming Trust Index provider computes Trust Vectors from the signals defined here and returns evaluations in the format defined here.
 Two providers given the same Trust Manifest MAY return different Trust Vectors because they weight signals differently, just as two credit bureaus score the same borrower differently from the same financial records. The dimensions and their semantics are fixed; the math inside each dimension is not.
+
+The Trust Index creates a feedback loop. An agent that registers with the minimum artifacts (domain, version, endpoints, identity CSR) receives a low score. Discovery Services that consume Trust Vectors rank low-scoring agents lower in search results and recommendations. The AHP sees the score and knows what to improve: host an ANS Trust Card, submit Registration Metadata so the content hash is sealed, obtain an OV certificate, add `verifiableClaims`. Each improvement raises the score, which raises discovery placement, which rewards the investment. The RA does not mandate these artifacts; the Trust Index makes their absence visible and their presence valuable.
 
 ```mermaid
 graph TD
@@ -33,7 +35,7 @@ graph TD
 
 ### 1.2 Terminology
 
-Terms defined in the ANS architecture document (DESIGN.md) are used here with the same meaning: RA, TL, AIM, AHP, ANSName, FQDN, KMS, Identity Certificate, Server Certificate, Protocol Card, Registration Metadata, ANS Agent Card. This table defines terms specific to the Trust Index.
+Terms defined in the ANS architecture document (DESIGN.md) are used here with the same meaning: RA, TL, AIM, AHP, ANSName, FQDN, KMS, Identity Certificate, Server Certificate, Protocol Card, Registration Metadata, ANS Trust Card. This table defines terms specific to the Trust Index.
 
 | Term | Definition |
 | ------ | ----------- |
@@ -65,7 +67,7 @@ The ANS architecture (DESIGN.md) provides the sealed events, certificates, and D
 
 | ANS concept | DESIGN.md | How the TI uses it |
 | :--- | :--- | :--- |
-| **Three-layer trust framework** | §2.4 | Layer 1 (RA-sealed identity) feeds the integrity and identity dimensions. Layer 2 (third-party attestations in the ANS Agent Card's `verifiableClaims` array) feeds solvency, safety, and portions of behavior. Layer 3 (real-time behavioral signals) feeds behavior and updates all dimensions over time. |
+| **Three-layer trust framework** | §2.4 | Layer 1 (RA-sealed identity) feeds the integrity and identity dimensions. Layer 2 (third-party attestations in the ANS Trust Card's `verifiableClaims` array, when a Trust Card is hosted) feeds solvency, safety, and portions of behavior. Layer 3 (real-time behavioral signals) feeds behavior and updates all dimensions over time. |
 | **Verification tiers** | §4.1.1 | Bronze, Silver, Gold describe what the *client* verified, not what the agent possesses. See Section 6. |
 | **Log-sealing boundary** | §5.0, §5.1.2 step d | The integrity dimension depends on the TL's immutability guarantee. The KMS signs each checkpoint. Trust Manifest integrity signals are meaningful only because this property holds. |
 | **Version coexistence** | §5.2 | Multiple ACTIVE versions of the same agent can coexist. Each version has its own ANSName, Identity Certificate, and TL entry. A conforming TI MUST score each ACTIVE version independently. |
@@ -130,9 +132,10 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Code volatility | Frequency and pattern of code changes. Monthly signed releases indicate maintenance; hourly changes indicate instability. |
 | Attestation freshness | Recency of TEE hardware attestation, verified against hardware vendors' public keys |
 | SBOM publication | Whether the agent discloses its software dependencies |
-| SCITT receipt status `[PROPOSED]` | Whether the registration carries a COSE receipt from the TL, and whether it is stapled to the ANS Agent Card or fetched from a sidecar endpoint |
+| SCITT receipt status `[PROPOSED]` | Whether the registration carries a COSE receipt from the TL, and whether it is stapled to the ANS Trust Card or fetched from a sidecar endpoint |
 | Discovery record coverage | Additional discovery channels beyond the `_ans` TXT record: DNS-AID SVCB, HCS-14 `_agent`, protocol-native well-known endpoints. Capped so discovery records alone cannot dominate this dimension. |
-| Cross-channel hash consistency `[PENDING]` | Agreement among the TL's sealed `capabilities_hash`, the DNS-AID `cap-sha256` parameter, and the live ANS Agent Card hash. Activates when `capabilities_hash` is populated in TL entries. |
+| Cross-channel hash consistency `[PENDING]` | Agreement among the TL's sealed `capabilities_hash`, the DNS-AID `cap-sha256` parameter, and the live ANS Trust Card hash. Activates when `capabilities_hash` is populated in TL entries. |
+| Trust Card presence | Whether the agent hosts an ANS Trust Card with verifiable content hash. Agents without a Trust Card still register but score lower on integrity. |
 
 **Identity: Who stands behind this agent?**
 
@@ -240,6 +243,8 @@ Two properties are required regardless of the decay function chosen. First, disp
 
 For cached oracle signals, a TI SHOULD apply a freshness penalty when the source is unreachable. The penalty MUST reduce the signal's contribution toward zero as the cache ages. A TI MUST document its freshness penalty function.
 
+**Domain control staleness.** Behavioral reputation accumulates against the FQDN across version bumps. The TI determines staleness from the TL: each `AGENT_REGISTERED`, `AGENT_RENEWED`, or `AGENT_REVOKED` event carries a timestamp. The most recent event for an FQDN is the last time the RA ran ACME domain control validation. A conforming TI SHOULD discount behavioral signals when the most recent TL event for the FQDN is older than a provider-defined threshold, because no recent ACME re-validation confirms that the original operator still controls the domain. A domain transfer detected by the RA (via ACME failure, RDAP registrant handle change, or ProviderID mismatch) produces an `AGENT_REVOKED` event in the TL. The TI MUST NOT carry forward behavioral reputation from a revoked registration to a new one on the same FQDN.
+
 ### 2.6 Environment adjustments
 
 The agent's score also depends on the infrastructure around it.
@@ -247,11 +252,11 @@ The agent's score also depends on the infrastructure around it.
 | Factor | Dimension | Effect | Level |
 | :--- | :--- | :--- | :--- |
 | **TLD reputation** | Identity | `.bank` requires the registrant to be a verified financial institution (positive). High-abuse TLDs penalize. | SHOULD |
-| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain penalizes, with a larger penalty for Premium identity grade. | SHOULD |
+| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain penalizes, with a larger penalty for Premium identity grade. The TL event carries a `dnssecStatus` field (`fully_validated`, `not_signed`, `signed_broken`) recorded at registration time. A TI SHOULD compare the registration-time state against a live DNSSEC query to detect zone signing changes since registration. | SHOULD |
 | **Certificate scope** | Integrity | Single-FQDN certificate limits blast radius to one hostname. Wildcard means a compromise affects every subdomain. Penalize wildcards. | SHOULD |
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
-| **Registrar reputation** | Identity | The registrar's public track record of abuse-rate compliance | MAY |
+| **Domain registrar reputation** | Identity | The domain name registrar's public track record of abuse-rate compliance (not the ANS Registration Authority) | MAY |
 
 ---
 
@@ -293,7 +298,7 @@ The top-level Trust Manifest object requires four sections:
 | `behaviorSignals` | SHOULD | Behavior dimension signals |
 | `safetySignals` | SHOULD | Safety dimension signals |
 
-Within `agentIdentity`, the only REQUIRED field is `ansName`. The `principalBinding` object SHOULD be present for Verified-grade agents and MUST be present for Premium (see Section 5.3). The `agentHost` and `registrarId` fields SHOULD be present but are not required because they can be derived from the ANSName and TL context.
+Within `agentIdentity`, the only REQUIRED field is `ansName`. The `principalBinding` object SHOULD be present for Verified-grade agents and MUST be present for Premium (see Section 5.3). The `agentHost` and `registrarId` (RA Identifier) fields SHOULD be present but are not required because they can be derived from the ANSName and TL context.
 
 A TI receiving a Trust Manifest with missing SHOULD fields MUST still produce a Trust Vector. Missing signal blocks result in lower scores for the corresponding dimension, not in rejection of the manifest.
 
@@ -422,7 +427,7 @@ A TI SHOULD score receipt presence as an integrity signal:
 
 | Receipt delivery | Integrity signal strength |
 | ----------------- | -------------------------- |
-| Stapled (embedded in ANS Agent Card COSE unprotected header) | Strongest: offline verification, no RA connectivity required |
+| Stapled (embedded in ANS Trust Card COSE unprotected header) | Strongest: offline verification, no RA connectivity required |
 | Sidecar (fetched from `_ans-badge` endpoint) | Strong: same cryptographic proof, requires network call |
 | Absent | Weakest: TI must crawl TL and compare hashes directly |
 
@@ -438,6 +443,76 @@ A conforming TI MUST implement verification for each credential format:
 | W3C VC | Resolve issuer DID. Retrieve public key. Verify signature. Check expiration. Validate `@context` and `type`. |
 | ZK proof | Verify mathematical proof against the claimed statement. Check `blockHeight` against `maxBlockAge`. Validate `chainId`. |
 | SCITT receipt `[PROPOSED]` | Reconstruct Merkle root from inclusion proof and original entry. Verify TL signature against TL public key. Validate tree type. |
+| ANS_DELEGATION VC | Resolve issuer DID. Verify VC signature. Check expiration and credential status. Confirm `delegate.providerId` matches TL event. Confirm FQDN matches `scope.fqdnPattern`. Verify `lei` via GLEIF. |
+
+### 4.6 Hosted-platform delegation (`ANS_DELEGATION`)
+
+My payment agent is about to wire $50,000 to an invoicing agent at `acme-invoicing.platform.example.net`. The Trust Index sees that the platform controls the domain. But I'm not paying the platform. I'm paying the tenant. The `lei` field in the registration names the tenant, but the platform typed that in. The tenant never signed anything.
+
+The `ANS_DELEGATION` claim type closes this gap. The tenant issues a W3C Verifiable Credential authorizing the platform to register on its behalf. The platform includes the VC in the ANS Trust Card's `verifiableClaims` array. The TI verifies the tenant's signature, confirms the delegation matches the registration's ProviderID and FQDN, and scores the identity dimension accordingly.
+
+**Claim structure:**
+
+```json
+{
+  "type": "ANS_DELEGATION",
+  "issuer": "did:web:acmecorp.example.com",
+  "delegate": {
+    "providerId": "PID-Platform",
+    "organization": "Platform Corp."
+  },
+  "scope": {
+    "fqdnPattern": "*.platform.example.net",
+    "protocols": ["A2A", "MCP"]
+  },
+  "lei": "549300EXAMPLE00LEI17",
+  "hash": "SHA256:a1b2c3...",
+  "url": "https://acmecorp.example.com/.well-known/ans-delegation.json",
+  "credentialStatus": {
+    "type": "BitstringStatusListEntry",
+    "statusListCredential": "https://acmecorp.example.com/.well-known/status/1",
+    "statusListIndex": "42",
+    "statusPurpose": "revocation"
+  },
+  "issuedAt": "2026-03-01T00:00:00Z",
+  "expiresAt": "2027-03-01T00:00:00Z"
+}
+```
+
+| Field | Required | Description |
+| :--- | :--- | :--- |
+| `type` | Yes | `ANS_DELEGATION` |
+| `issuer` | Yes | The tenant's DID. The TI resolves this to retrieve the tenant's public key. |
+| `delegate.providerId` | Yes | The platform's ProviderID as assigned by the RA. The TI confirms this matches the ProviderID in the TL event. Prevents replay across platforms. |
+| `scope.fqdnPattern` | Yes | Which FQDNs the delegation covers. The TI confirms the agent's FQDN matches. |
+| `scope.protocols` | No | Which protocols the delegation authorizes. When absent, all protocols are authorized. |
+| `lei` | Required for Verified/Premium | The tenant's Legal Entity Identifier. The TI verifies against GLEIF per §5.3. |
+| `hash` | Yes | SHA-256 hash of the VC document at `url`, for integrity verification when fetched remotely. |
+| `url` | Yes | Where the signed VC is hosted, for independent retrieval. |
+| `credentialStatus` | Required for FIDUCIARY | W3C VC status mechanism (Bitstring Status List or equivalent). Enables immediate revocation before `expiresAt`. |
+| `issuedAt` | Yes | When the delegation was issued. |
+| `expiresAt` | Yes | When the delegation expires. |
+
+**Verification steps:**
+
+1. Resolve `issuer` DID. Fetch the DID Document. Retrieve the tenant's public key.
+2. Verify the VC signature against the tenant's public key. Reject if invalid.
+3. Check `expiresAt`. Reject if expired.
+4. If `credentialStatus` is present, check the status list. Reject if revoked.
+5. Confirm `delegate.providerId` matches the ProviderID in the TL event. Reject if mismatched.
+6. Confirm the agent's FQDN matches `scope.fqdnPattern`. Reject if out of scope.
+7. Verify `lei` against the GLEIF database per §5.3. Reject if inactive or invalid.
+
+**Scoring impact:**
+
+| Delegation DID type | Maximum identity grade | Rationale |
+| :--- | :--- | :--- |
+| `did:web` | Verified | DNS-anchored; a DNS compromise can replace the DID document and forge a delegation. |
+| Ledger-anchored DID (`did:ion`, `did:ethr`) | Premium | Survives DNS compromise; the signing key is on a ledger the tenant controls. |
+
+Without a delegation VC, the TI sees Salesforce's DV certificate and an unverified LEI. Identity grade: Basic. With a verified delegation VC signed by AcmeCorp's ledger-anchored DID and a GLEIF-verified LEI, the grade reaches Premium. The recommended profile shifts from `READ_ONLY` to `FIDUCIARY`.
+
+The delegation VC travels with the Trust Card or Trust Manifest. Any TI crawling any RA's TL verifies the delegation independently. No RA-specific knowledge is required.
 
 ---
 
@@ -570,7 +645,7 @@ A tier describes what the *client* verified, not a property the RA assigned. Two
 
 A verifier MAY additionally check the `_ans-identity._tls` TLSA record. The RA cannot write this record; only the agent owner or AHP manages it. A matching record proves separation of duties: the RA issued the certificate, and the owner independently published its fingerprint through a channel the RA does not control.
 
-`[PENDING]` When DNS-AID SVCB records carry `cap-sha256`, a Gold verifier SHOULD compare that hash against the TL's sealed `capabilities_hash` and the live ANS Agent Card hash.
+`[PENDING]` When DNS-AID SVCB records carry `cap-sha256`, a Gold verifier SHOULD compare that hash against the TL's sealed `capabilities_hash` and the live ANS Trust Card hash.
 
 `[PENDING]` When public checkpoints are available from an independent ledger, a verifier MAY compare the TL's root against a published checkpoint. Gold with checkpoint confirmation scores higher on integrity than Gold without. The tier label stays Gold; the score reflects the additional verification.
 If the TL presents a root that contradicts a published checkpoint, the TI MUST flag the discrepancy.
@@ -644,7 +719,7 @@ A conforming challenge-response protocol MUST satisfy four security properties:
 3. **Expiry.** The challenge carries a deadline. If the agent does not respond before the deadline, the TI falls back to its cached evaluation and reports the timeout as a risk factor.
 4. **Verification.** The TI checks mathematical validity, nonce match, and block recency, then returns the updated Trust Evaluation. `evaluationTime` reflects the time of the fresh verification, not a cached timestamp.
 
-The agent publishes its challenge endpoint in its ANS Agent Card at `trustManifest.challengeEndpoint`, falling back to `/.well-known/ans-challenge`. The wire format of the challenge and response is an implementation choice; the four properties above are the conformance requirements.
+The agent publishes its challenge endpoint in its ANS Trust Card at `trustManifest.challengeEndpoint`, falling back to `/.well-known/ans-challenge`. The wire format of the challenge and response is an implementation choice; the four properties above are the conformance requirements.
 
 #### 7.4.2 Failure modes
 
@@ -825,7 +900,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "description": "Versioned agent identifier. The pattern is a structural hint; the RA validates against RFC 1123 hostname rules."
         },
         "agentHost": { "type": "string", "format": "hostname" },
-        "registrarId": { "type": "string" },
+        "registrarId": { "type": "string", "description": "RA Identifier. The field name is historical; it identifies a Registration Authority, not a domain name registrar." },
         "agentId": { "type": "string", "format": "uuid" },
         "principalBinding": {
           "type": "object",
