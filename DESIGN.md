@@ -1039,7 +1039,7 @@ Badge consumers query `GET /v1/agents/{agentId}`. The response contains the seal
             "_ans-badge": "v=ans-badge1; version=v1.5.0; url=https://{tl_host}/v1/agents/550e8400-e29b-41d4-a716-446655440000"
           },
           "domainValidation": "ACME-DNS-01",
-    "dnssecStatus": "fully_validated"
+          "dnssecStatus": "fully_validated"
         },
         "expiresAt": "2026-10-05T18:00:00.000000Z",
         "issuedAt": "2025-10-05T18:00:00.000000Z",
