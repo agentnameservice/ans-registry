@@ -10,13 +10,13 @@ My company's payment agent receives an instruction to wire $50,000 to a supplier
 
 Without reliable answers, things go wrong. An attacker registers a look-alike domain such as `payments-supplier.example.com` and presents a valid certificate for it.
 Assuming there's no prior history recorded, the payment agent has no way to tell this impostor from the real supplier, because the certificate may prove only that someone controls the domain, but not that the domain belongs to the right organization.
-Separately, what if a legitimate supplier passes a security audit, then quietly updates its model? The certificate stays valid, the endpoint stays up, but the code behind it is no longer what was audited. No one notices until payments fail, and then no one can determine which version of the code was running when.
+Separately, what if a legitimate supplier passes a security audit, then quietly updates its model? The certificate stays valid, the endpoint stays up, but the code behind it is no longer what was audited. No one notices until payments fail, and then no one can determine which version was registered when.
 
-ANS prevents both by combining three cryptographic mechanisms. First, the agent's identity is anchored to a domain name whose ownership the Registration Authority (RA) has verified. Second, every change to the agent's software produces a new version number and a new identity certificate, which records which code is running.
-Third, every one of the invoicing agent's lifecycle events is sealed into a Transparency Log, an append-only ledger where entries cannot be altered or removed after the fact. Domain control alone does not detect code swaps. Identity certificates alone do not create a versioned audit trail. The append-only log alone does not prove who issued the certificate. The three together close the gaps.
+ANS prevents both by combining three cryptographic mechanisms. First, the agent's identity is anchored to a domain name whose ownership the Registration Authority (RA) has verified. Second, every change to the agent's software produces a new version number and a new identity certificate, which records which version is registered.
+Third, every one of the invoicing agent's lifecycle events is sealed into a Transparency Log, an append-only ledger where entries cannot be altered or removed after the fact. Domain control alone does not detect code swaps. Identity certificates alone do not create a versioned audit trail. The append-only log alone does not prove who issued the certificate. The three together close the gaps at the registration layer: they prove which version was declared and when. Resolving the $50,000 trust question requires additional signals (organizational identity, behavioral reputation, solvency) described in §2.4.
 
 Now suppose the supplier doesn't run its own infrastructure. Instead, a hosting platform operates the invoicing agent on the supplier's behalf, at a domain the platform owns: `supplier-invoicing.platform.example.com`. The RA's domain challenge confirms that the platform controls `platform.example.com`. It does. But the domain tells my payment agent nothing about the supplier hosted on it.
-The version-bound certificate and the Transparency Log still work: they prevent one tenant from impersonating another on the same platform, and they record which code was running when. The missing piece is the link between the domain and the organization. An agent registered on its own domain carries that link.
+The version-bound certificate and the Transparency Log still work: they prevent one tenant from impersonating another on the same platform, and they record which version was registered when. The missing piece is the link between the domain and the organization. An agent registered on its own domain carries that link.
 An agent on a hosting domain does not, and a trust evaluation should reflect the difference.
 
 The RA acts as the notary in this system. A company or platform that hosts agents submits a registration request. The RA verifies domain ownership, issues the identity certificate, specifies precise DNS records so other agents can discover the new identity, and writes the registration event into the log. The RA does not score agents or evaluate their behavior.
@@ -51,12 +51,12 @@ Five design decisions follow from this foundation:
 
 2. **Decentralized discovery.** The TL publishes sealed lifecycle events after the RA seals them. Third-party discovery services subscribe, verify signatures, and build their own indexes. The protocol supports multiple independent discovery providers; no single service controls the lookup.
 
-3. **Version-bound lifecycle.** Every change to an agent's software or capabilities requires a new version number and a new registration. Each version gets its own TL entry, so the audit trail records which code was running at any point. Relaxing this constraint opens attack surfaces.
-A supplier passes a security audit on Tuesday, updates its model on Wednesday, and the certificate stays valid through both. Clients keep trusting it. When the transactions go wrong on Thursday, no one can reconstruct which code was active on Wednesday, because the identity didn't change when the code did.
+3. **Version-bound lifecycle.** Every change to an agent's software or capabilities requires a new version number and a new registration. Each version gets its own TL entry, so the audit trail records which version was registered at any point. Relaxing this constraint opens attack surfaces.
+A supplier passes a security audit on Tuesday, updates its model on Wednesday, and the certificate stays valid through both. Clients keep trusting it. When the transactions go wrong on Thursday, no one can reconstruct which version was active on Wednesday, because the identity didn't change when the software did.
 
 4. **Dual-certificate model.** Two certificates resolve the conflict between public web trust and software versioning. A Server (SSL) Certificate from a public CA secures the stable FQDN. A Client (Identity) Certificate from a private CA attests to the version-bound `ANSName`. Each has its own lifecycle.
 
-5. **Discoverable schemas.** The ANS Agent Card links each protocol to a canonical URL. Schemas are public, versioned artifacts that clients can fetch and validate against. The ANS Agent Card is built from protocol-native metadata (the Protocol Card) and augmented with ANS trust fields.
+5. **Discoverable schemas.** The ANS Trust Card, when hosted, links each protocol to a canonical URL. Schemas are public, versioned artifacts that clients can fetch and validate against. The Trust Card is built from the Protocol Card and augmented with ANS trust fields. Hosting it is optional at registration; the Trust Index rewards its presence with a higher integrity score.
 
 ### 1.4 Terminology
 
@@ -65,16 +65,16 @@ A supplier passes a security audit on Tuesday, updates its model on Wednesday, a
 | **A2A** | Agent-to-Agent protocol for agent collaboration (Linux Foundation AAIF). |
 | **ACME** | Automatic Certificate Management Environment (RFC 8555). The protocol the RA uses to verify domain control. |
 | **AHP** | Agent Hosting Platform, a service that hosts agent code and manages registration on the owner's behalf. |
-| **AIM** | Agent Integrity Monitor. Continuously checks DNS records, ANS Agent Cards, and certificates against registered state. |
+| **AIM** | Agent Integrity Monitor. Continuously checks DNS records and certificates against registered state. When an ANS Trust Card is hosted, the AIM also verifies its content hash. |
 | **ANS** | Agent Name Service, the directory and trust layer described in this document. |
-| **ANS Agent Card** | The metadata document the AHP hosts at `agent_card_url` after registration. Contains protocol-native metadata augmented with ANS trust fields (`verifiableClaims`, ANSName, trust references). The AIM fetches and hashes this document for integrity verification. |
+| **ANS Trust Card** | An optional metadata document the AHP may host after registration. Contains protocol-native metadata augmented with ANS trust fields (`verifiableClaims`, ANSName, trust references). When hosted and when Registration Metadata was submitted, the AIM verifies the content hash against what the RA sealed. Hosting a Trust Card raises the Trust Index integrity score. |
 | **CA** | Certificate Authority, an entity that issues digital certificates. |
 | **CSR** | Certificate Signing Request, a message from an applicant to a CA requesting a certificate. |
 | **DANE** | DNS-Based Authentication of Named Entities (RFC 6698). Binds a certificate to a DNS record via TLSA. |
 | **FQDN** | Fully Qualified Domain Name, a complete domain name such as `support.example.com`. |
 | **KMS** | Key Management System. Stores and controls access to the private keys that sign certificates and log entries. |
 | **MCP** | Model Context Protocol for agent-tool communication (Linux Foundation AAIF). |
-| **Protocol Card** | The protocol-native metadata file: an A2A Agent Card (`/.well-known/agent.json`), an MCP manifest, or an OpenAPI document. Created by the developer. The SDK translates it into Registration Metadata. |
+| **Protocol Card** | The protocol-native metadata file: an A2A Agent Card (`/.well-known/agent-card.json`), an MCP manifest, or an OpenAPI document. Created by the developer. The AHP chooses where to host it; the well-known path is a convention. The SDK translates it into Registration Metadata. |
 | **RA** | Registration Authority. Validates domain control, issues certificates, provisions DNS records, and seals events into the TL. |
 | **Registration Metadata** | The `agentCardContent` field in the registration payload. The agent's capabilities, endpoints, and protocols in the RA's format. The RA hashes it and seals the hash into the TL. |
 | **TL** | Transparency Log, an append-only, cryptographically verifiable ledger of all agent lifecycle events. |
@@ -82,21 +82,23 @@ A supplier passes a security audit on Tuesday, updates its model on Wednesday, a
 ### 1.5 Goals
 
 AI agents buy supplies, book travel, and sign contracts without a human in the loop. The ones handling real money need proof of who stands behind them. No system provides that proof using the infrastructure the internet already runs on: DNS, X.509 certificates, DNSSEC, and the operational practices that keep them working under abuse and at scale.
-The registry automates the mechanics: verifying domain ownership, issuing certificates, publishing DNS records, and writing events into the log. The standard is open and the services are federated, but the identity always anchors to a domain name.
+The registry automates the mechanics: verifying domain ownership, issuing certificates, specifying DNS records, and writing events into the log. The identity always anchors to a domain name.
+
+The protocol is designed for an open, federated market. Any organization can operate an RA, a TL, a Trust Index, or a Discovery Service. Multiple RAs can coexist, each issuing certificates and sealing events into its own TL. Multiple Trust Index providers can crawl the same logs and produce competing evaluations. The protocol does not require agents to register with a specific RA or be scored by a specific Trust Index. An RA that is also a DNS provider, a certificate authority, or a blockchain operator gains operational efficiency from that vertical integration, but the protocol does not grant it privileged access. Every component communicates through public interfaces that any conforming implementation can use.
 
 ### 1.6 Deployment topologies
 
 The same RA, TL, and certificate infrastructure can run at different scopes depending on the trust boundary an organization needs.
 
-**Public ANS.** The RA, TL, and event feeds are internet-facing. Anyone can verify any agent's identity and audit its history. Multiple environments (production, OTE, development) serve different stages of the integration lifecycle.
+**Public ANS.** The RA, TL, and event feeds are internet-facing. Any verifier that has installed the Private CA root can verify any agent's identity and audit its history. The Private CA root is distributed via the Trust Provisioner. The CA's practices are externally auditable.
 
-**Internal ANS.** An organization runs its own RA and TL behind its corporate network, the same way a company runs internal DNS and uses RFC 1918 address space. Agents registered internally are visible only to participants on that network.
+**Internal ANS.** An organization runs its own RA and TL behind its corporate network, the same way a company runs internal DNS and uses RFC 1918 address space. Agents registered internally are visible only to participants on that network. The Private CA root is distributed through the organization's device management. The CA's practices are governed by internal policy. CA/B Forum Baseline Requirements do not apply to private CAs.
 
-**Enterprise ANS as a service.** A hosted internal ANS instance, operated on behalf of an enterprise in their own cloud account. The enterprise controls access, data residency, and retention policy.
+**Enterprise ANS as a service.** A hosted internal ANS instance, operated on behalf of an enterprise in their own cloud account. The enterprise controls access, data residency, and retention policy. The Private CA root is scoped to the enterprise's trust store.
 
-**Extranet ANS.** A semi-private deployment shared among a defined set of partner organizations. Participants trust the shared RA and TL, but the infrastructure is not open to the public internet.
+**Extranet ANS.** A semi-private deployment shared among a defined set of partner organizations. Participants trust the shared RA and TL, but the infrastructure is not open to the public internet. The Private CA root is distributed to all participating organizations via the Trust Provisioner or a shared trust bundle.
 
-Each topology runs the same protocol. The difference is who can see the TL and who can query the event feeds. Federation between topologies is a future capability.
+Each topology runs the same protocol. The difference is who can see the TL, who can query the event feeds, and who controls the Private CA. For a given registration, the same entity may operate both the RA and the TL that seals it. If that entity is compromised, it could forge events with no independent check, because the KMS key that signs checkpoints is under the same operator's control. HCS-27 consensus checkpoints (§1.2.1) are the primary mitigation: the TL's root hash is anchored to an independently verifiable ledger that neither the RA nor the TL controls. An observer who checks the consensus topic detects any rewriting. Federation adds a second layer: an agent can register with an RA operated by one entity and have events sealed by a TL operated by another.
 
 An agent's domain determines the strength of its identity signal. An agent on its own domain carries a cryptographic chain that traces to the controlling organization. An agent on a hosting platform's domain traces to the platform. Both are valid registrations.
 
@@ -105,6 +107,22 @@ An agent's domain determines the strength of its identity signal. An agent on it
 The term "agent" appears throughout this document because autonomous AI agents are the primary registrant. The architecture is not limited to agents.
 Any software entity that needs a verifiable, domain-anchored identity can register: a web crawler with declared behavioral policies, a corporate API that requires versioning and a certificate lifecycle, a dedicated commerce client whose operator controls the domain and wants counterparties to verify the connection.
 The registration payload, certificate model, and TL semantics are identical regardless of entity type.
+
+### 1.8 Registration progression
+
+The RA acts as a notary. It witnesses domain control, issues certificates, provisions DNS records, and seals the event into the TL. It does not require the registrant to present every possible trust artifact. The minimum registration is intentionally low: a domain, a version, at least one endpoint, and an identity CSR.
+
+Registration at the floor produces a sealed TL event, discoverable DNS records, and a dual certificate pair. That is enough for Bronze verification and a basic Trust Index score. The Trust Index then creates the economic incentive to improve: higher scores mean better placement in discovery feeds and stronger trust signals to counterparties. Each step above the floor costs the AHP time and money. The protocol supports every step but mandates only the first.
+
+| Artifact | Required | Trust Index effect |
+| :--- | :--- | :--- |
+| Domain + version + endpoints + identity CSR | Yes | Baseline registration. Bronze-eligible. |
+| OV or EV Server Certificate | No | Raises identity score from Basic to Verified or Premium. |
+| ANS Trust Card hosted at FQDN | No | Raises integrity score. Enables content hash verification when Registration Metadata is submitted. |
+| Registration Metadata (`agentCardContent`) | No | Sealed hash enables AIM integrity verification of the Trust Card. |
+| `verifiableClaims` in Trust Card | No | Feeds Layer 2 signals: SOC 2, SBOM, compliance certifications. |
+| Principal binding (LEI, DID, biometric) | No | Raises identity score. Required for Premium grade. |
+| SCITT receipt stapled to Trust Card | No | Enables offline Gold verification. Highest integrity signal. |
 
 ## 2.0 Component model
 
@@ -124,7 +142,7 @@ graph TD
 
 ### 2.1 The Registration Authority system
 
-**2.1.1 RA.** Receives a registration request from an AHP. Validates that the AHP controls the domain via ACME. Issues an Identity Certificate from the Private CA and obtains a Server Certificate from the Public CA (or accepts one the AHP brings).
+**2.1.1 RA.** Receives a registration request from an AHP. Validates that the AHP controls the domain via ACME. Requests an Identity Certificate from the Private CA and obtains a Server Certificate from the Public CA (or accepts one the AHP brings).
 Generates the DNS records that make the agent discoverable, and ultimately seals the entire registration into the TL so the event becomes part of the permanent record.
 
 **2.1.2 KMS.** Signs every TL checkpoint. If this key is compromised, every sealed record in the log becomes untrustworthy.
@@ -138,19 +156,19 @@ Agent discovery flows from the Event Stream through independent indexing service
 
 ### 2.2 The Agent Hosting Platform system
 
-**2.2.1 AHP.** Hosts the agent's code and serves the live endpoints and ANS Agent Card at the agent's FQDN. During registration, the AHP responds to ACME challenges so the RA can verify domain control, then receives both certificates and installs them in its keystore.
-For external domains, the AHP provisions DNS records using content the RA generates; for RA-managed domains, the RA may provision DNS directly. When the agent's code changes, the AHP initiates a new version registration.
+**2.2.1 AHP.** Hosts the agent's code and serves the live endpoints at the agent's FQDN. During registration, the AHP responds to ACME challenges so the RA can verify domain control, then receives both certificates and installs them in its keystore. The AHP may also host an ANS Trust Card; the Trust Index rewards its presence.
+The AHP provisions DNS records using content the RA generates. When the agent's code changes, the AHP initiates a new version registration.
 
 **2.2.2 Interfaces hosted by the AHP:**
 * **Agent Functional Endpoint.** The live service exposing the agent's capabilities.
-* **ANS Agent Card.** The metadata document describing the agent's capabilities, endpoints, supported protocols, and ANS trust fields.
+* **ANS Trust Card (optional).** A metadata document describing the agent's capabilities, endpoints, supported protocols, and ANS trust fields. Agents without a Trust Card are fully registered; the Trust Index scores their integrity lower.
 
 ### 2.3 Infrastructure and dependencies
 
 **2.3.1 Transparency Log**
 
 The TL receives signed events from the RA, validates each signature, and seals the events into a cryptographic append-only structure. That structure produces two kinds of proof: inclusion proofs (proving a specific event exists in the log) and consistency proofs (proving the log has only grown, never shrunk or rewritten).
-Without inclusion proofs, a client cannot verify that its agent's registration is in the log. Without consistency proofs, an auditor cannot detect if the TL operator deleted or modified historical entries. The KMS signs each checkpoint, and the proof format is an implementation choice. Implementations SHOULD target SCITT compliance.
+Without inclusion proofs, a client cannot verify that its agent's registration is in the log. Without consistency proofs, an auditor cannot detect if the TL operator deleted or modified historical entries. The KMS signs each checkpoint. A conforming TL MUST operate as a SCITT Transparency Service (RFC 9943), issuing binary COSE receipts as proof of inclusion.
 
 Each event receives a sequence number that increases with every entry and never repeats. Events become visible only after the KMS signs a checkpoint, so a client querying the log always sees a consistent, finalized view. Each event carries a schema version, so that field renames in future schemas do not break existing consumers.
 
@@ -179,7 +197,7 @@ Verification MUST NOT require access to producer public keys, authentication for
 
 **2.3.2 Event Stream**
 
-The Event Stream makes sealed events queryable. Every payload carries the TL's signature, so consumers can verify authenticity without contacting the TL.
+The Event Stream makes sealed events queryable. Every payload carries the RA's signature, verifiable against keys the RA registered at the TL. Consumers verify authenticity without contacting the TL.
 
 | Endpoint | Purpose |
 | :--- | :--- |
@@ -191,7 +209,7 @@ The TL MUST verify that each event came from an authorized RA instance before se
 
 **2.3.4 DNS provider**
 
-The external service that hosts the agent's DNS zone. The RA generates DNS record content; the AHP or RA provisions it at the DNS provider depending on who manages the domain.
+The external service that hosts the agent's DNS zone. The RA generates DNS record content; the AHP provisions it at the DNS provider.
 
 **2.3.5 Certificate Authorities (CAs)**
 
@@ -199,9 +217,9 @@ Two CAs, two trust roots, two revocation paths:
 
 * **Public CA.** Revocation propagates through public OCSP/CRL.
 
-* **Private CA**, operated by the RA. Revocation stays within the ANS ecosystem.
+* **Private CA.** Issues Identity Certificates on the RA's behalf. The RA requests issuance; the Private CA signs. The Private CA may be operated by the RA operator or by a separate organization that provides private CA services. Revocation stays within the ANS ecosystem. The Private CA is on the critical path for every registration: if the CA is unavailable, no new agents can activate.
 
-The Identity Certificate requires a URI SAN that no Public CA can issue. Only the Private CA, operating under its own issuance policy, can.
+The Identity Certificate requires a URI SAN that no Public CA can issue. Only a Private CA, operating under its own issuance policy and certificate practice statement, can. The Private CA's root is not in public trust stores; the Trust Provisioner distributes it (ADR 009).
 
 **Validity period trajectory.** The CA/B Forum is reducing Server Certificate maximum validity from 200 days to 47 days between 2026 and 2029 (Ballot SC-081). The Identity Certificate's validity period is not subject to BR constraints.
 
@@ -212,7 +230,7 @@ graph TD
     AHP["AHP"] -->|"registration request"| RA["RA"]
     RA -->|"ACME challenge"| AHP
     AHP -->|"challenge response"| RA
-    RA -->|"issue Identity Cert"| PriCA["Private CA<br/>(RA-operated)"]
+    RA -->|"issue Identity Cert"| PriCA["Private CA"]
     PriCA -->|"Identity Certificate"| RA
     RA -->|"request Server Cert"| PubCA["Public CA"]
     PubCA -->|"Server Certificate"| RA
@@ -228,7 +246,7 @@ After the RA has sealed the invoicing agent's identity into the transparency log
 
 **Layer 1: Foundational identity.** This layer is the scope of this document.
 
-**Layer 2: Operational maturity (third-party attestors).** The invoicing agent's SOC 2 report, its HIPAA compliance certificate, its software bill of materials all arrive as references in the ANS Agent Card's `verifiableClaims` array. They update on the attestor's cycle; annually for an audit, quarterly for a compliance scan.
+**Layer 2: Operational maturity (third-party attestors).** The invoicing agent's SOC 2 report, its HIPAA compliance certificate, its software bill of materials all arrive as references in the ANS Trust Card's `verifiableClaims` array, when the AHP hosts a Trust Card. Agents without a Trust Card can still receive Layer 2 signals through the Trust Manifest's external signal blocks. Attestors update on their own cycle: annually for an audit, quarterly for a compliance scan.
 
 **Layer 3: Behavioral reputation (real-time scoring).** These are transaction records. For instance, the invoicing agent completed 14,000 micropayment transactions last quarter with a 99.7% settlement rate, recorded on-chain. It has no unresolved dispute flags. While these signals may go back months and years, they update in seconds.
 
@@ -251,6 +269,10 @@ graph LR
 
 *Figure 3. Three independent sources converge. No single source controls the evaluation. The payment agent decides from the combined score.*
 
+**How the layers compose.** A companion Trust Index specification (TRUST_INDEX_SPEC.md) defines how a Trust Index provider consumes data from all three layers and produces a Trust Vector: five independent scores (integrity, identity, solvency, behavior, safety) delivered as a signed Verifiable Credential. The Trust Vector maps to recommended profiles (READ_ONLY, TRANSACTIONAL, FIDUCIARY, UNTRUSTED) that clients use for authorization decisions. ANS alone tells my payment agent who registered the invoicing agent and when. The Trust Index tells my payment agent whether to wire the $50,000.
+
+The Trust Index scores each agent based on its registration artifacts, which creates a feedback loop. Agents that register with the minimum (domain, version, endpoints) score low. Agents that host an ANS Trust Card, obtain OV certificates, add `verifiableClaims`, and submit Registration Metadata score higher. Discovery Services rank higher-scoring agents more prominently. The scoring incentivizes registration improvements without the RA mandating them.
+
 ### 2.5 The ANS SDK
 
 The version-bound lifecycle requires a new registration on every code change. Without tooling, that means a developer who ships a one-line fix must also generate a key pair, build a CSR, submit it to the RA, wait for domain validation, install the new certificate, and update DNS. The SDK collapses that sequence into a single command.
@@ -270,11 +292,11 @@ Example: `ans://v1.0.0.sentiment-analyzer.example.com`
 | **version** | Semantic version, numeric only: `major.minor.patch`. No pre-release or build metadata suffixes. Prefixed with `v`. | `v1.0.0` |
 | **agentHost** | FQDN per RFC 1035 and RFC 1123. Each label is at most 63 octets, uses LDH characters (letters, digits, hyphens), and does not begin or end with a hyphen. The complete FQDN MUST NOT exceed 237 octets (derivation below). | `sentiment-analyzer.example.com` |
 
-**The 237-octet host limit.** The RA provisions derived DNS record names by prepending labels to the `agentHost`. The longest is `_acme-challenge.{agentHost}`, used during ACME domain validation. `_acme-challenge` is 15 octets; with the label separator, the prefix consumes 16 octets of the 253-octet domain name limit (RFC 1035 §2.3.4). 253 minus 16 leaves 237.
+**The 237-octet host limit.** The RA derives DNS record names by prepending labels to the `agentHost`. The longest is `_acme-challenge.{agentHost}`, used during ACME domain validation. `_acme-challenge` is 15 octets; with the label separator, the prefix consumes 16 octets of the 253-octet domain name limit (RFC 1035 §2.3.4). 253 minus 16 leaves 237.
 
 **The 400-octet ANSName limit.** The complete ANSName MUST NOT exceed 400 octets. The `ans://v` prefix is 7 octets. A semver string with three 5-digit segments and two dots is at most 17 octets. Added to the 237-octet host, the structured maximum is 261 octets. The 400-octet cap provides headroom for safe transport across HTTP headers, TLS fields, and database columns.
 
-**Design decision.** The original IETF draft (draft-narajala-ans) embedded provider name, protocol, and capability fields in the identifier. This design removes them. The identifier carries two facts: which version of the code is running, and which domain is accountable.
+**Design decision.** The original IETF draft (draft-narajala-ans) embedded provider name, protocol, and capability fields in the identifier. This design removes them. The identifier carries two facts: which version is registered, and which domain is accountable.
 
 **Registration metadata.** Two fields accompany the ANSName at registration but are not part of the identifier:
 
@@ -291,16 +313,18 @@ The display name is the human-readable label shown in discovery UIs. It supports
 
 | Identifier | Format | Assigned by | Mutable | Scope | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ANSName** | `ans://v{ver}.{host}` | Derived from registration fields | No | Global | Which code is running on which domain |
+| **ANSName** | `ans://v{ver}.{host}` | Derived from registration fields | No | Global | Which version is registered on which domain |
 | **FQDN** | RFC 1035 domain name | Submitted by AHP | No | Global | The domain name, stable across all versions |
 | **Agent ID** | UUID v4 string | RA, at registration | No | Issuing RA | The registration record's unique key; used in API paths (`/agents/{agentId}`) |
 | **ProviderID** | RA-defined | RA, from authentication system | No | Issuing RA | Who controls the domain |
 | **Supersedes ID** | Registration ID reference | RA, when a new version registers | No | Issuing RA | The previous version's registration record |
 
 **ProviderID constraints.** The RA assigns the ProviderID; the AHP does not submit it. It names the entity that controls the domain, not the entity that authored the software. The identifier MUST be stable: the same entity always receives the same ProviderID from a given RA, regardless of credential. The identifier MUST be scoped to the issuing RA.
-In a federated ecosystem, consumers scope the ProviderID by the Registrar Identifier to avoid collisions.
+In a federated ecosystem, consumers scope the ProviderID by the RA Identifier to avoid collisions.
 
 The ProviderID does not span RAs. The FQDN does. An agent moves between RAs by updating DNS records, not by changing its name. For cross-RA correlation, the registration payload accepts an optional `lei` field (Legal Entity Identifier, ISO 17442). When absent, correlation falls back to the domain and OV/EV certificate subject.
+
+**Hosted-platform delegation.** When a platform registers an agent on behalf of a tenant, the ProviderID and `lei` field identify the platform and the tenant respectively. These are identity assertions, not delegation proofs. The tenant can close this gap by issuing a W3C Verifiable Credential (`ANS_DELEGATION` claim type) authorizing the platform to register on its behalf. The tenant signs the VC with its DID key; the platform includes the VC in the ANS Trust Card's `verifiableClaims` array. The Trust Index verifies the tenant's signature, confirms the delegation matches the registration's ProviderID and FQDN, and scores the identity dimension accordingly. The claim type and verification steps are defined in the Trust Index specification (§4.2).
 
 #### 3.2.2 Transparency Log identifiers
 
@@ -317,18 +341,23 @@ The ProviderID does not span RAs. The FQDN does. An agent moves between RAs by u
 | :--- | :--- | :--- |
 | **RA Instance ID** | `raId` | Tags each sealed event with the runtime instance that processed it; isolates events from a compromised instance |
 | **Producer Key ID** | `keyId` | Identifies the key that signed individual events |
-| **Registrar ID** | `registrarId` | Stable, public identifier for each RA in a federated ecosystem |
+| **RA Identifier** | `registrarId` | Stable, public identifier for each RA in a federated ecosystem. The field name `registrarId` is historical; it identifies a Registration Authority, not a domain name registrar. |
 
 The checkpoint signature is signed by the KMS key. Its field name is implementation-defined.
 
-#### 3.2.4 Future: persistent identifiers
+#### 3.2.4 Reputation continuity
 
-The ANSName resets on every version bump. Reputation needs continuity across versions.
+The FQDN and Server Certificate together identify the agent's TLS endpoint across version bumps. When AcmeCorp registers `support.example.com` at version 1.0.0, then bumps to 1.1.0, the domain and the Server Certificate stay the same. The ANSName resets. A Trust Index that accumulates reputation against the FQDN sees the full transaction history across both versions. The `supersedes` field in each TL event links the version chain.
 
-| Identifier | Mechanism | Trust root | Status |
-| :--- | :--- | :--- | :--- |
-| **On-chain ID** | Optional field in registration payload; referenced in ANS Agent Card `verifiableClaims` | The ledger (e.g., Ethereum, Hedera) | Planned; ERC-8004 and ENSIP-25 are candidate bindings |
-| **DID** | Bidirectional binding: DID Document references FQDN, TL entry records DID | DNS (`did:web`) or ledger (`did:ethr`, `did:ion`) | Planned |
+This continuity holds as long as the same operator controls the domain. Three mechanisms detect a change in control:
+
+- **ACME re-validation.** The RA re-runs domain control validation at each renewal and version bump. When the original operator no longer controls DNS, the ACME challenge fails and the RA revokes the registration.
+- **RDAP monitoring.** The AIM monitors the registrant entity in the registrar's RDAP response. A change in the registrant entity handle or a fresh `last changed` timestamp signals a transfer. The level of detail visible in RDAP varies by registrar and by the observer's authorization level (RFC 9083).
+- **Provider mismatch.** The RA assigns a ProviderID from its authentication system at registration (§3.2.1). When a new operator registers a version for an FQDN that already has an ACTIVE registration under a different ProviderID, the RA detects the conflict and MUST revoke the prior registration.
+
+Upon detection of a control change via any of these mechanisms, the RA MUST revoke the previous registration by sealing an `AGENT_REVOKED` event into the TL. Between a domain transfer and detection, stale reputation remains attached to the FQDN. Trust Indexes determine staleness from TL event timestamps: the most recent `AGENT_REGISTERED`, `AGENT_RENEWED`, or `AGENT_REVOKED` event for an FQDN records when the RA last validated domain control. The Trust Index specification (§2.5) defines the discount and revocation rules.
+
+The FQDN is a proxy for persistent identity, not the real thing. When AcmeCorp sells `support.example.com` to MegaCorp, the FQDN persists but the operator changed. Reputation accumulated under AcmeCorp should not transfer to MegaCorp. A principal binding closes this gap. An LEI identifies the organization regardless of which domain it operates. An on-chain ID identifies the principal regardless of which RA registered it. When the `lei` field is present, a Trust Index can aggregate behavioral signals across all registrations sharing that LEI. AcmeCorp's remaining 40,000 agents still carry its reputation. MegaCorp's new registrations on the transferred domains start fresh under MegaCorp's LEI. The Trust Index specification (§2.5) defines the staleness and revocation rules that govern this separation.
 
 ```mermaid
 graph TD
@@ -414,7 +443,7 @@ Revocation is idempotent. Cancellation before activation produces no TL event be
 
 | Layer | Mechanism | What it proves |
 | :--- | :--- | :--- |
-| **Identity** | Version-bound ANSName | Which code is running on which domain |
+| **Identity** | Version-bound ANSName | Which version is registered on which domain |
 | **Cryptographic** | KMS-signed checkpoint | The log has not been tampered with |
 | **Operational** | `raId` per event | Which RA instance performed the validation |
 
@@ -428,7 +457,7 @@ A client verifies an agent through independent checks, each using a different tr
 | 2 | DANE record validation | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_443._tcp.{agentHost}`. A compromised CA alone cannot forge this record. |
 | 3 | TL verification | TL (KMS-signed log) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof. |
 
-**TLSA parameters.** The RA provisions `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
+**TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
 
 **DNSSEC prerequisite.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose validation state is not "secure" MUST be treated as bogus. If an agent's zone is not DNSSEC-signed, Silver and Gold tiers are unreachable. The RA SHOULD verify DNSSEC status before provisioning TLSA records.
 
@@ -450,7 +479,7 @@ A tier describes what the *client* verified, not a property the RA assigned. Two
 
 #### 4.2.1 DNS trust anchor
 
-The RA provisions one `_ans-badge` TXT record per ACTIVE version, pointing to that version's badge in the TL.
+The RA specifies one `_ans-badge` TXT record per ACTIVE version, pointing to that version's badge in the TL. The AHP provisions it.
 
 **Record syntax:** `_ans-badge.{agentHost} IN TXT "v=ans-badge1; version=v1.0.0; url=https://{tl_host}/v1/agents/{agentId}"`
 
@@ -459,7 +488,7 @@ The RA provisions one `_ans-badge` TXT record per ACTIVE version, pointing to th
 | `v` | Yes | Always `ans-badge1` |
 | `version` | Yes | Semver prefixed with `v`. Identifies which ACTIVE version this badge represents. |
 | `url` | Yes | Badge URL at the RA's TL (`{tl_host}` is the TL hostname) |
-| `registrar` | No | Registrar ID of the issuing RA. Reserved for federated deployments. |
+| `ra` | No | RA Identifier of the issuing Registration Authority. Reserved for federated deployments. |
 
 When multiple versions are ACTIVE, each has its own `_ans-badge` record. A verifier that knows the version (from the Identity Certificate's URI SAN) selects the matching record. A verifier that does not know the version selects the highest version or compares fingerprints against each badge.
 
@@ -482,9 +511,9 @@ When multiple versions are ACTIVE, each has its own `_ans-badge` record. A verif
 
 ### 4.4 Agent discovery model
 
-Discovery is decoupled from the RA. A Discovery Service subscribes to the event feed, verifies each payload's signature, and indexes the metadata by FQDN. Its crawler then fetches the ANS Agent Card from the `agent_card_url` in the event payload to augment the index with capability descriptions and schemas.
+Discovery is decoupled from the RA. A Discovery Service subscribes to the event feed, verifies each payload's signature, and indexes the metadata by FQDN. The `_ans` record's `url` field points the crawler to the agent's metadata endpoint. The SDK requests the Trust Card first (`application/cose`). If the endpoint returns it, the SDK has a signed COSE_Sign1 document with protocol-native metadata, ANS trust fields, and a stapled SCITT receipt. If the endpoint returns JSON instead (because the AHP has not upgraded that agent registration), the SDK has the Protocol Card and falls back to sidecar receipt verification via the `_ans-badge` record. If the endpoint is unreachable, the Discovery Service falls back to the TL event it already consumed from the event feed, which carries the registration metadata, endpoints, and certificate fingerprints.
 
-**DNS record set.** The RA provisions records at child labels under the agent's FQDN. All child-label records coexist with a CNAME at the FQDN itself, because child labels are separate DNS nodes.
+**DNS record set.** The RA generates record content for child labels under the agent's FQDN. The AHP or domain owner provisions the records using the content the RA specifies. All child-label records coexist with a CNAME (when present) at the FQDN itself, because child labels are separate DNS nodes.
 
 | Record | Label | Type | Purpose | Per-version |
 | :--- | :--- | :--- | :--- | :--- |
@@ -494,7 +523,7 @@ Discovery is decoupled from the RA. A Discovery Service subscribes to the event 
 | HTTPS | `{agentHost}` | HTTPS | ALPN hints, ECH parameters | No (blocked by CNAME; requires flattening) |
 | Identity DANE | `_ans-identity._tls.{agentHost}` | TLSA | Identity Certificate fingerprint (ADR 010). Managed by the AHP, not the RA. | No |
 
-When the last ACTIVE version for an FQDN is revoked, the RA removes the shared records it provisioned: the Server DANE record at `_443._tcp` and the HTTPS record. The Identity DANE record at `_ans-identity._tls` is managed by the AHP, not the RA, and the AHP must remove it.
+When the last ACTIVE version for an FQDN is revoked, the AHP removes all ANS records it provisioned for that FQDN. The RA's revocation response lists the records to delete.
 
 #### 4.4.1 The `_ans` DNS record
 
@@ -507,7 +536,7 @@ The `_ans` TXT record is a connection hint published in DNS. It tells a client w
 | `v` | Yes | Always `ans1` |
 | `version` | Yes | Semver prefixed with `v`. Implementations strip the `v` before comparison. |
 | `p` | No | `a2a`, `mcp`, `http`. When omitted, the record applies to any protocol. |
-| `url` | Unless `mode=direct` | URL to the metadata file. Fallback: `/.well-known/agent-card.json`. |
+| `url` | Unless `mode=direct` | URL to the agent's metadata endpoint. The SDK requests `application/cose` first (returns the ANS Trust Card with stapled receipt) and falls back to `application/json` (returns the Protocol Card). Fallback path: `/.well-known/agent-card.json`. |
 | `mode` | Unless `url` present | `card` (default): fetch the file at `url`. `direct`: connect to the FQDN. |
 
 **Configurations:**
@@ -554,7 +583,7 @@ A domain owner can publish DNS-AID SVCB records (`[agent-id]._[protocol]._agents
 The RA MAY provision DNS-AID SVCB records during activation (§5.1.2 step b). The `_agents` subtree sits under the registrable domain (`_agents.example.com`), not under the agent's FQDN, so the RA needs parent-zone credentials it may not hold. For hosted agents, the customer may have authorized the RA to write records under the agent's FQDN but not under the customer's parent zone.
 DNS-AID provisioning stays opt-in until a delegation model for parent-zone writes exists.
 
-When both record families exist for the same agent, the endpoint in the `_ans` record's `url` field and the SVCB target SHOULD point to the same service. If the SVCB record carries `cap-sha256`, its value SHOULD equal the `capabilities_hash` that the RA sealed into the TL for the same version. Both are SHA-256 hashes of the Agent Card content.
+When both record families exist for the same agent, the endpoint in the `_ans` record's `url` field and the SVCB target SHOULD point to the same service. If the SVCB record carries `cap-sha256`, its value SHOULD equal the `capabilities_hash` that the RA sealed into the TL for the same version. Both are SHA-256 hashes of the Trust Card content.
 A mismatch is an integrity finding, not a registration failure. This cross-check is not yet active; it requires `capabilities_hash` to be populated in TL entries.
 
 **TLSA selector difference.** ANS uses TLSA selector 0 (full Server Certificate hash) because the same hash doubles as the badge fingerprint in the TL. DNS-AID examples use selector 1 (public key hash). Both selectors are valid under RFC 6698. When a zone carries both, two TLSA records with different selectors coexist at the same owner name.
@@ -574,6 +603,8 @@ An agent at a stable FQDN supports multiple authentication protocols simultaneou
 6. Caller verifies the server's versioned identity via `_ans-badge` TXT record or TL query.
 
 Steps 1–5 are standard mTLS. Step 6 is ANS-specific: the caller confirms the server's Server Certificate fingerprint matches the badge the RA sealed at registration. This two-step process (TLS for channel security, badge/TL for identity) avoids requiring the server to present different certificates to different clients.
+
+**Step 6 under TL unavailability.** When the agent's ANS Trust Card carries a stapled SCITT receipt, the caller verifies locally with no TL call. When the Trust Card is absent or uses the sidecar path, the caller fetches the receipt from the `_ans-badge` URL, which requires the TL's receipt endpoint to be reachable. If the TL is unreachable, the caller falls back to Silver verification (PKI + DANE) and records the downgrade.
 
 **Adaptive authorization.** An agent MAY accept multiple authentication methods simultaneously (API key, OAuth, mTLS). The Trust Index specification defines authentication strength levels and step-up requirements. The RA does not evaluate authentication strength.
 
@@ -607,7 +638,7 @@ Rotation uses an overlap window: new keys are registered with future `validFrom`
 
 **Query privacy.** Out of scope for the RA. Discovery Services SHOULD implement privacy-preserving techniques (Private Information Retrieval, Anonymized Query Relays).
 
-**Connection privacy.** The TLS handshake reveals the agent's hostname to network observers. Encrypted Client Hello (ECH, RFC 9180) encrypts it. When an AHP provides an ECH configuration during registration, the RA publishes it in the HTTPS record.
+**Connection privacy.** The TLS handshake reveals the agent's hostname to network observers. Encrypted Client Hello (ECH, RFC 9849) encrypts it. When an AHP provides an ECH configuration during registration, the RA publishes it in the HTTPS record.
 
 ### 4.10 Ecosystem integrity and remediation
 
@@ -620,9 +651,9 @@ The AIM is external to the RA. A malicious monitor could disable valid agents by
 | **Quorum before action** | The RA MUST NOT act on a single report from one monitor. Corroboration from multiple independent monitors is required. |
 | **Evidence must be verifiable** | Every finding MUST include cryptographic proof of the discrepancy. The RA re-verifies independently. |
 
-The RA's remediation scope is infrastructure integrity: do the live DNS records, Server Certificate, and ANS Agent Card match what the RA sealed? The RA does not evaluate an agent's behavior or quality. The Trust Index evaluates behavior.
+The RA's remediation scope is infrastructure integrity: do the live DNS records and Server Certificate match what the RA sealed? When an ANS Trust Card is hosted and its content was hashed at registration, the AIM also verifies the card's integrity. The RA does not evaluate an agent's behavior or quality. The Trust Index evaluates behavior.
 
-**Suppression before revocation.** When the AIM detects an integrity mismatch, the RA's first response is to suppress the agent from discovery feeds, not to revoke the Identity Certificate. Suppression is reversible. Revocation is permanent. The AHP retains time to investigate and correct the discrepancy.
+**Suppression before revocation.** The AIM records integrity findings in its own data store. A conforming RA MUST poll or subscribe to these findings. When a finding meets the quorum requirement (corroboration from multiple monitors), the RA independently re-verifies the reported mismatch against the TL's sealed records. If confirmed, the RA publishes a suppression event to the TL. Discovery services that consume the event feed remove the agent from their indexes. Suppression is reversible. Revocation is permanent. The AHP retains time to investigate and correct the discrepancy.
 
 **Domain lifecycle monitoring.** The AIM SHOULD monitor WHOIS/RDAP status and NS record changes for registered agents' domains. Status transitions to `pendingDelete`, `redemptionPeriod`, or `serverHold` indicate the domain is at risk. NS record changes indicate a potential provider migration. Both produce findings for the RA.
 
@@ -633,6 +664,8 @@ The RA maintains a mutable database where registrations progress through states.
 Before sealing, a registration is a draft in the RA's database. The AHP can cancel it. The RA can update internal state. No TL event exists yet.
 
 After sealing, the identity-bound fields are immutable. There is no API to modify an ACTIVE registration's ANSName, FQDN, version, endpoints, or Registration Metadata in place. Every change requires a new version and a new TL event. The one exception is ECH key rotation, which does not affect identity.
+
+**Change-boundary scope.** The protocol enforces version discipline at the declared identity boundary: the ANSName, the Trust Card content, and the certificate. An AHP SHOULD re-register when any of the following change: executable code, model weights, prompt templates, retrieval corpus version, safety policy configuration, tool permissions, or protocol schema. The protocol cannot enforce this requirement; changes that do not alter the declared artifacts are invisible to it. The AIM detects Trust Card drift after activation; it cannot detect runtime changes that leave the Trust Card unchanged. The Trust Index's code volatility signal creates economic incentives for version discipline: agents that re-register frequently with small changes score as maintained; agents with long gaps followed by undeclared behavioral shifts score as unstable when detected by peer reports or behavioral monitoring.
 
 ### 5.1 Initial registration flow
 
@@ -668,9 +701,9 @@ The AHP submits a registration request. The payload:
 | **On-chain** | `onChainId` | No | Persistent ledger identifier. The AIM verifies post-activation. |
 | | `ensName` | No | ENS name with bidirectional binding. The AIM verifies post-activation. |
 | **Organization** | `lei` | No | Legal Entity Identifier (ISO 17442) |
-| **Privacy** | `echConfigList` | No | Base64-encoded ECHConfigList (RFC 9180) |
+| **Privacy** | `echConfigList` | No | Base64-encoded ECHConfigList (RFC 9849) |
 
-When `agentCardContent` is provided, the RA hashes the Registration Metadata and seals the hash into the TL at activation. When omitted, the AIM hashes the live ANS Agent Card post-activation.
+When `agentCardContent` is provided, the RA hashes the Registration Metadata and seals the hash into the TL at activation, enabling content integrity verification. When omitted, a conforming AIM computes the baseline hash from the live ANS Trust Card on first successful fetch, if one is hosted. Agents registered without `agentCardContent` and without a hosted Trust Card receive DNS and certificate verification only.
 
 If valid, the RA constructs the ANSName and sets the registration to `PENDING`.
 
@@ -683,13 +716,14 @@ If valid, the RA constructs the ANSName and sets the registration to `PENDING`.
 | Domain control | ACME DNS-01 (RFC 8555 §8.4) or HTTP-01 (RFC 8555 §8.3, port 80 only) |
 | Organization identity | Separate OV-level process when applicable |
 | Schema integrity | Fetch each `metadataUrl`, hash, compare against expected value |
+| DNSSEC presence | Query for DNSKEY at the agent's zone. Advisory: warn if absent; do not block. The RA records the result as a `dnssecStatus` field in the TL event payload, with one of three values: `fully_validated`, `not_signed`, or `signed_broken`. Verifiers and Trust Indexes read this field to know the DNSSEC state at registration time without re-querying DNS. |
 
 **Activation sequence** (irreversible once step d completes):
 
 | Step | Action |
 | :--- | :--- |
 | a. Certificate issuance | RA obtains Identity Certificate. Server Certificate: from Public CA (if CSR) or validated BYOC. |
-| b. DNS record generation | RA generates record set content per §4.4. RA-managed domains: RA provisions directly. External: AHP provisions. |
+| b. DNS record generation | RA generates record set content per §4.4. AHP provisions the records. |
 | c. Event payload | RA hashes Registration Metadata (if submitted) and assembles the event payload. |
 | d. Log sealing | RA submits signed event to TL. Point of no return. |
 | e. Artifact delivery | RA delivers certificates to AHP. |
@@ -699,7 +733,7 @@ If valid, the RA constructs the ANSName and sets the registration to `PENDING`.
 
 | Operation | Trigger | AHP submits | RA processes | RA submits to TL | DNS effect |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Version bump** | Code or config change | New version + fresh Identity CSR | Re-validates, issues new Identity Certificate | `AGENT_REGISTERED` | New per-version records added; old version's records unchanged |
+| **Version bump** | Code or config change | New version + fresh Identity CSR | Re-validates, issues new Identity Certificate | `AGENT_REGISTERED` | New per-version records added (`_ans`, `_ans-badge`); shared records unchanged (`_443._tcp`). The AHP updates `_ans-identity._tls` for the new Identity Certificate. |
 | **Renewal** | Identity Certificate approaching expiration, code unchanged | New CSR, same ANSName | Re-validates, issues fresh Identity Certificate | `AGENT_RENEWED` | None |
 | **Revocation** | Agent shutdown or version retirement | RFC 5280 reason code | Revokes Identity Certificate at Private CA | `AGENT_REVOKED` | Per-version records removed immediately; shared records removed when last ACTIVE version is gone |
 
@@ -712,12 +746,12 @@ If valid, the RA constructs the ANSName and sets the registration to `PENDING`.
 | Actor | Initial Registration Tasks | Ongoing Lifecycle Tasks | Deregistration Tasks |
 | :--- | :--- | :--- | :--- |
 | **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. | Autonomous DNS updates, monitors renewals, submits config changes. | Submits deregistration request, revokes RA access. |
-| **RA** | Generates ACME challenge, verifies record, generates permanent record content. | Re-runs ACME challenge, updates records. | Deletes agent-specific records when last ACTIVE version is deregistered. |
+| **RA** | Generates ACME challenge, verifies record, generates permanent record content. | Re-runs ACME challenge at each renewal and version bump; updates record content. | Specifies records for deletion when last ACTIVE version is deregistered. |
 | **DNS provider** | Hosts authorization endpoint, processes AHP's API requests to provision ANS records. | Processes AHP's modification requests (upon RA instruction). | Processes deletion requests from the AHP. |
 
 A CNAME at the agent's FQDN blocks HTTPS and SVCB records at the same label (RFC 1034 §3.6.2) but does not affect child-label records (`_ans`, `_ans-badge`, `_443._tcp`). When the RA detects a CNAME, it skips the HTTPS record. CNAME flattening by the DNS provider avoids this restriction entirely.
 
-**Parallel release tracks.** A `releaseChannel` field in the ANS Agent Card (e.g., `stable`, `beta`) labels which track a version belongs to. Each version has a unique ANSName; each channel's lifecycle is independent.
+**Parallel release tracks.** A `releaseChannel` field in the ANS Trust Card (e.g., `stable`, `beta`) labels which track a version belongs to. Each version has a unique ANSName; each channel's lifecycle is independent.
 
 **Rollbacks.** The AHP deploys the old stable code as a new version (`v1.0.2`), registers it, and revokes the buggy version. If the previous version is still ACTIVE, traffic can shift back immediately while the new registration completes.
 
@@ -727,13 +761,16 @@ An AIM MUST distinguish between "Unreachable" (transient network failure, retry 
 
 The AIM verifies each ACTIVE registration independently:
 
-| Check | What the AIM does | Pass condition |
-| :--- | :--- | :--- |
-| **DNS pointer** | Authoritative query for `_ans` and `_ans-badge` with DNSSEC validation | Records exist and validate |
-| **ANS Agent Card integrity** | Fetch ANS Agent Card from `agent_card_url`, hash the content | Hash matches the `capabilities_hash` sealed at registration |
-| **Schema integrity** | Fetch each `schema.url` in the ANS Agent Card, hash the content | Hash matches the `schema.hash` in the ANS Agent Card |
+| Check | What the AIM does | Pass condition | Required |
+| :--- | :--- | :--- | :--- |
+| **DNS pointer** | Authoritative query for `_ans` and `_ans-badge` with DNSSEC validation | Records exist and validate | Yes |
+| **Server Certificate** | TLS handshake to the FQDN, extract certificate fingerprint | Fingerprint matches what the RA sealed | Yes |
+| **ANS Trust Card integrity** | Fetch Trust Card from the `card` URL in the `_ans` record, hash the content | Hash matches the `capabilities_hash` sealed at registration | Only when Trust Card is hosted and Registration Metadata was submitted |
+| **Schema integrity** | Fetch each `schema.url` in the Trust Card, hash the content | Hash matches the `schema.hash` in the Trust Card | Only when Trust Card is hosted |
 
-When Registration Metadata was submitted, the RA sealed its hash at activation. When omitted, the AIM computes the baseline hash from the live ANS Agent Card on first successful fetch. ANS Agent Cards behind authentication cannot be fetched by the AIM; the Trust Index scores integrity lower when no hash is available.
+Most registered agents do not host a Trust Card. For those agents, the AIM verifies DNS records and Server Certificate only. The Trust Index scores agents without a verifiable Trust Card lower on the integrity dimension, creating an incentive for AHPs to host one.
+
+When Registration Metadata was submitted, the RA sealed its hash at activation. When omitted, a conforming AIM computes the baseline hash from the live ANS Trust Card on first successful fetch, if one is hosted. Trust Cards behind authentication cannot be fetched by the AIM; the Trust Index scores integrity lower when no hash is available.
 
 **ECH key rotation.** AHPs rotate ECH keys via `PATCH /v1/agents/{agentId}/ech` without creating a TL entry. ECH is a transport-layer optimization, not an identity change.
 
@@ -756,10 +793,11 @@ Requirements that add quantitative thresholds beyond what §§1–5 specify. Beh
 | :--- | :--- | :--- |
 | NFR-A-01 | RA | 99.9% uptime |
 | NFR-A-02 | AIM | 99.9% uptime |
-| NFR-P-01 | RA | Registration end-to-end < 120s median |
+| NFR-P-01a | RA | Activation processing < 120s median, measured from the RA receiving a validated ACME challenge response to the TL sealing the event and returning the certificates. Excludes time waiting for the AHP to provision the ACME challenge record and time waiting for the AHP to provision ANS DNS records after activation. |
+| NFR-P-01b | AHP + DNS | ANS DNS record propagation after activation. The RA generates the record content; the AHP provisions it. Propagation time depends on the AHP's DNS provider and is outside the RA's control. |
 | NFR-P-02 | TL | Sealing < 500ms median |
 | NFR-P-03 | Private CA | Revocation reflected in OCSP/CRL < 5 min |
-| NFR-P-04 | AIM | DNS change detection < 24h |
+| NFR-P-04 | AIM | DNS change detection < 24h. Certificate revocation per NFR-P-03 is the primary security backstop for compromised agents. AIM detection is an integrity alerting SLA, not the first line of defense. |
 | NFR-P-05 | TL | Batch processing < 5s |
 | NFR-P-06 | TL | Append: O(log n) |
 | NFR-P-07 | TL | Inclusion proof generation < 100ms |
@@ -769,7 +807,7 @@ Requirements that add quantitative thresholds beyond what §§1–5 specify. Beh
 | NFR-S-07 | TL | Billions of events, sub-second append |
 | NFR-S-08 | TL | Each batch reconstructible from its metadata |
 | NFR-S-09 | TL | Historical states preserved for consistency proofs |
-| NFR-C-01 | RA | Validation adheres to OV and DCV policies |
+| NFR-C-01 | RA | The RA performs domain control validation (DCV) via ACME. The RA verifies that presented Server Certificates (DV, OV, or EV) were issued by a trusted Public CA. OV and EV vetting is performed by the Public CA, not the RA. |
 | NFR-C-02 | TL | Standardized inclusion and consistency proof interfaces |
 
 ### 7.1 Failure modes
@@ -777,7 +815,7 @@ Requirements that add quantitative thresholds beyond what §§1–5 specify. Beh
 | Scenario | Consequence | RA response |
 | :--- | :--- | :--- |
 | AHP unavailable for extended period | Identity Certificate expires. mTLS fails. Public endpoint inaccessible. | RA detects expired status. Cannot auto-renew (AHP controls its private keys). |
-| Domain name expires | Endpoint unreachable. Domain control validation fails. | RA treats persistent DCV failure as a security event and revokes associated registrations. |
+| Domain name expires | Endpoint unreachable. ACME challenge at next renewal or version bump fails. | RA treats the DCV failure as a security event and MUST revoke associated registrations. AIM RDAP monitoring (§3.2.4) may detect the expiry earlier via `pendingDelete` or `redemptionPeriod` status. |
 
 ## Appendix A: Data structure examples
 
@@ -841,10 +879,10 @@ The AHP submits this payload to the RA's `/register` endpoint.
 
 The RA constructs the ANSName from these fields: `ans://v1.5.0.support.example.com`.
 
-`agentCardContent` is the Registration Metadata. When provided, the RA hashes it at activation and seals the hash into the TL, so the AIM can later verify the live ANS Agent Card against what was registered. When omitted, the AIM hashes the live ANS Agent Card post-activation.
+`agentCardContent` is the Registration Metadata. When provided, the RA hashes it at activation and seals the hash into the TL, so the AIM can later verify the live ANS Trust Card against what was registered. When omitted and when the AHP hosts a Trust Card, a conforming AIM computes the baseline hash from the live card on first successful fetch.
 
-### A.2 ANS Agent Card
-Hosted by the AHP at `agent_card_url`. Built from the Protocol Card, augmented with ANS trust fields (`verifiableClaims`, `ansName`, `securitySchemes`).
+### A.2 ANS Trust Card
+Hosted by the AHP at the URL advertised in the `_ans` DNS record when the AHP chooses to publish one. Built from the Protocol Card, augmented with ANS trust fields (`verifiableClaims`, `ansName`, `securitySchemes`). This artifact is optional. Agents registered without a Trust Card are fully operational; the Trust Index scores their integrity lower.
 
 ```json
 {
@@ -951,7 +989,8 @@ The TL seals the RA's event and publishes it to subscribers. Each published mess
       "_ans": "v=ans1; version=v1.5.0; url=https://support.example.com/.well-known/agent-card.json",
       "_ans-badge": "v=ans-badge1; version=v1.5.0; url=https://{tl_host}/v1/agents/550e8400-e29b-41d4-a716-446655440000"
     },
-    "domainValidation": "ACME-DNS-01"
+    "domainValidation": "ACME-DNS-01",
+    "dnssecStatus": "fully_validated"
   },
   "expiresAt": "2026-10-05T18:00:00.000000Z",
   "issuedAt": "2025-10-05T18:00:00.000000Z",
@@ -997,7 +1036,8 @@ Badge consumers query `GET /v1/agents/{agentId}`. The response contains the seal
             "_ans": "v=ans1; version=v1.5.0; url=https://support.example.com/.well-known/agent-card.json",
             "_ans-badge": "v=ans-badge1; version=v1.5.0; url=https://{tl_host}/v1/agents/550e8400-e29b-41d4-a716-446655440000"
           },
-          "domainValidation": "ACME-DNS-01"
+          "domainValidation": "ACME-DNS-01",
+    "dnssecStatus": "fully_validated"
         },
         "expiresAt": "2026-10-05T18:00:00.000000Z",
         "issuedAt": "2025-10-05T18:00:00.000000Z",
@@ -1030,7 +1070,7 @@ Badge consumers query `GET /v1/agents/{agentId}`. The response contains the seal
 
 The `path` array contains log₂(`treeSize`) hashes: about 30 for a billion events (under 1 KB).
 
-The field names in the `inclusionProof` assume a hash-tree structure. A SCITT-compliant TL may return a COSE receipt instead; the proof content differs but the verification semantics are the same.
+The field names in the `inclusionProof` section above use JSON for readability. A conforming TL returns a binary COSE receipt (§2.3.1); the verification semantics are the same.
 
 ### A.5 AIM failure report
 Published by an AIM worker when it detects a mismatch between live DNS and the registered state. The RA's remediation process consumes these reports. The AIM uses its own schema (snake_case), independent of the RA/TL event format.
@@ -1091,7 +1131,8 @@ Same structure as A.3, with two additions: `revocationReasonCode` and `revokedAt
       "_ans": "v=ans1; version=v1.5.0; url=https://support.example.com/.well-known/agent-card.json",
       "_ans-badge": "v=ans-badge1; version=v1.5.0; url=https://{tl_host}/v1/agents/550e8400-e29b-41d4-a716-446655440000"
     },
-    "domainValidation": "ACME-DNS-01"
+    "domainValidation": "ACME-DNS-01",
+    "dnssecStatus": "fully_validated"
   },
   "expiresAt": "2026-10-05T18:00:00.000000Z",
   "revocationReasonCode": "CESSATION_OF_OPERATION",
@@ -1105,7 +1146,7 @@ Same structure as A.3, with two additions: `revocationReasonCode` and `revokedAt
 `eventType` is `AGENT_REVOKED`. `timestamp` reflects the revocation time, not the original registration.
 
 ### A.8 DNS records
-The complete DNS zone for a registered agent. The AHP manages the location records (A/AAAA). The RA generates the content for the discovery, badge, DANE, and HTTPS records; the AHP or RA provisions them depending on who manages the domain. The Identity DANE record at `_ans-identity._tls` is managed exclusively by the AHP.
+The complete DNS zone for a registered agent. The AHP manages the location records (A/AAAA). The RA generates the content for the discovery, badge, and DANE records; the AHP provisions them. The Identity DANE record at `_ans-identity._tls` is managed exclusively by the AHP.
 
 ```DNS Zone file
 $ORIGIN support.example.com.
@@ -1115,10 +1156,10 @@ $TTL 3600
 @           IN  A      203.0.113.50
 @           IN  AAAA   2001:db8::50
 
-; --- (Records below provisioned by RA) ---
+; --- (RA generates the content below; AHP provisions the records) ---
 ; Service binding: HTTP/2 support and Encrypted Client Hello (when AHP provides ECH config)
-; The ech= parameter contains a base64-encoded ECHConfigList. Clients supporting ECH
-; will encrypt the hostname in the TLS handshake, hiding it from network observers.
+; Blocked by CNAME at @ when the FQDN is behind a hosting platform.
+; When no CNAME is present, the AHP provisions this record.
 @           IN  HTTPS  1 . alpn=h2 ech=AEn+DQBFKwAgACBh3V7JEKAS...
 
 ; Binds the TLS certificate to the DNS name via DNSSEC
@@ -1156,8 +1197,8 @@ Each RA instance registers its signing key with the TL before submitting events.
 
 The TL returns the `keyId`, status, and a fingerprint of the registered key.
 
-### A.10 Revocation response (external domains)
-For externally-managed domains, the RA returns the DNS records the AHP must delete.
+### A.10 Revocation response
+The RA returns the DNS records the AHP must delete.
 
 ```json
 {
@@ -1195,4 +1236,4 @@ For externally-managed domains, the RA returns the DNS records the AHP must dele
 }
 ```
 
-For RA-managed domains, the RA deletes these records automatically. The response contains only the status confirmation fields.
+The AHP deletes the records using the list in the response.
