@@ -69,8 +69,10 @@ A supplier passes a security audit on Tuesday, updates its model on Wednesday, a
 | **ANS** | Agent Name Service, the directory and trust layer described in this document. |
 | **ANS Trust Card** | An optional metadata document the AHP may host after registration. Contains protocol-native metadata augmented with ANS trust fields (`verifiableClaims`, ANSName, trust references). When hosted and when Registration Metadata was submitted, the AIM verifies the content hash against what the RA sealed. Hosting a Trust Card raises the Trust Index integrity score. |
 | **CA** | Certificate Authority, an entity that issues digital certificates. |
+| **COSE** | CBOR Object Signing and Encryption (RFC 9052). A binary signing envelope for Agent Cards and SCITT receipts. |
 | **CSR** | Certificate Signing Request, a message from an applicant to a CA requesting a certificate. |
 | **DANE** | DNS-Based Authentication of Named Entities (RFC 6698). Binds a certificate to a DNS record via TLSA. |
+| **DID** | Decentralized Identifier (W3C DID 1.0). A URI that resolves to a DID Document containing verification methods. Used for principal binding. |
 | **FQDN** | Fully Qualified Domain Name, a complete domain name such as `support.example.com`. |
 | **KMS** | Key Management System. Stores and controls access to the private keys that sign certificates and log entries. |
 | **MCP** | Model Context Protocol for agent-tool communication (Linux Foundation AAIF). |
