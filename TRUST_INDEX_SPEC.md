@@ -44,7 +44,7 @@ Terms defined in the ANS architecture document (DESIGN.md) are used here with th
 | Term | Definition |
 | ------ | ----------- |
 | **Identity Grade** | A classification (Basic, Verified, Premium) describing how thoroughly the agent's operator was vetted. See Section 5. |
-| **Principal Binding** | A link between an agent and the real-world entity that controls it, expressed as a DID, Legal Entity Identifier, or biometric hash. |
+| **Principal Binding** | A link between an agent and the real-world entity that controls it, expressed as a DID (Decentralized Identifier, a URI that resolves to a document containing verification keys; see [W3C DID 1.1](https://www.w3.org/TR/did-1.1/)), Legal Entity Identifier, or biometric hash. The spec is DID-method-agnostic: `did:web`, ledger-anchored methods (`did:ion`, `did:ethr`), and authority-scoped schemes all work. |
 | **Trust Index (TI)** | A service that crawls Transparency Logs, evaluates agent metadata, and publishes Trust Vectors. |
 | **Trust Manifest** | A JSON document conforming to the schema in Appendix A. Core fields come from TL-sealed data; signal blocks aggregate inputs from the TL, agent-submitted VCs, oracles, and peer endorsements. |
 | **Trust Vector** | A five-integer tuple (integrity, identity, solvency, behavior, safety), each value 0–100, representing an agent's trustworthiness along five independent dimensions. |
@@ -72,10 +72,11 @@ The ANS architecture (DESIGN.md) provides the sealed events, certificates, and D
 | ANS concept | DESIGN.md | How the TI uses it |
 | :--- | :--- | :--- |
 | **Three-layer trust framework** | §2.4 | Layer 1 (RA-sealed identity) feeds the integrity and identity dimensions. Layer 2 (third-party attestations in the ANS Trust Card's `verifiableClaims` array, when a Trust Card is hosted) feeds solvency, safety, and portions of behavior. Layer 3 (real-time behavioral signals) feeds behavior and updates all dimensions over time. |
-| **Verification tiers** | §4.1.1 | Bronze, Silver, Gold describe what the *client* verified, not what the agent possesses. See Section 6. |
+| **Verification tiers** | §4.1.1 | The TI derives the tier from the manifest and reports it in the evaluation response. The tier reflects what the agent's DNS and TL posture supports, not what any specific client checked. See Section 6. |
 | **Log-sealing boundary** | §5.0, §5.1.2 step d | The integrity dimension depends on the TL's immutability guarantee. The KMS signs each checkpoint. Trust Manifest integrity signals are meaningful only because this property holds. |
 | **Version coexistence** | §5.2 | Multiple ACTIVE versions of the same agent can coexist. Each version has its own ANSName, Identity Certificate, and TL entry. A conforming TI MUST score each ACTIVE version independently. |
 | **Dual-certificate model** | §3.3, ADR 006 | The identity dimension treats Identity Certificates (Private CA, version-bound) differently from Server Certificates (Public CA, FQDN-bound). See Section 4.1. |
+| **Conformance roles** | §1.9 | The TI is one of five conformance roles. RA and TL conformance require the full protocol for their respective components. Discovery Services, Trust Index providers, and Verifiers have separate, narrower requirements. |
 
 ```mermaid
 graph TD
@@ -299,7 +300,7 @@ The top-level Trust Manifest object requires four sections:
 | ------- | ---------- | ------------- |
 | `manifestVersion` | MUST | Schema version string (e.g., "1.0.0") |
 | `agentIdentity` | MUST | Agent identification and principal binding |
-| `attestationLevel` | MUST | Verification tier and certificate type |
+| `attestationLevel` | MUST | Certificate type, identity grade, certificate fingerprints, and DANE/DNSSEC status |
 | `timestamps` | MUST | Registration, verification, and expiry timestamps |
 | `integritySignals` | SHOULD | Integrity dimension signals |
 | `identitySignals` | SHOULD | Identity dimension signals |
@@ -388,6 +389,7 @@ Example evaluation response as a VC:
       "solvency": 12, "behavior": 78, "safety": 91
     },
     "recommendedProfile": "READ_ONLY",
+    "verificationTier": "GOLD",
     "riskFactors": ["SOLVENCY_PROOF_STALE"]
   },
   "proof": {
@@ -640,7 +642,11 @@ A TI MUST verify that anchor domains match the agent's registered domain. A TI S
 
 ## 6. Verification Tiers
 
-A tier describes what the *client* verified, not a property the RA assigned. Two Gold-verified agents can have different integrity scores; the tier label stays the same, the Trust Vector captures the difference.
+A tier describes what checks a verifier performed, not a property of the agent. The TI derives it from two Trust Manifest fields, `dnssecStatus` and `daneEnabled`, plus whether a TL inclusion proof is available for the agent's sealed registration. The tier appears in the evaluation response alongside the Trust Vector and recommended profile.
+
+Two agents verified at the same tier can have different integrity scores. The tier label stays the same; the Trust Vector captures the difference.
+
+A client performing its own checks at connection time may reach a lower tier than what the manifest supports, but never a higher one.
 
 | Tier | Checks performed | What it adds |
 | ------ | ----------------- | ------------- |
@@ -695,6 +701,7 @@ The `credentialSubject` MUST include:
 - `riskFactors`: An array of strings identifying specific concerns (e.g., `SOLVENCY_PROOF_STALE`, `NO_INSURANCE_POLICY`, `DNSSEC_BROKEN`)
 
 The response MAY include:
+- `verificationTier`: Bronze, Silver, or Gold. The tier of checks the TI performed for this agent at `evaluationTime`. Absent when the TI has not assessed DNSSEC, DANE, or TL fields.
 - `compositeScore`: Deprecated single integer 0-100
 - `evaluationChanged`: Boolean. True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score changes without caching and comparing vectors themselves. The TI tracks each client's last-seen evaluation via client identity or session token.
 
@@ -941,14 +948,17 @@ This is the canonical schema. Where inline descriptions in the specification bod
     },
     "attestationLevel": {
       "type": "object",
-      "required": ["verificationTier", "certificateType"],
+      "required": ["certificateType"],
       "properties": {
-        "verificationTier": { "enum": ["BRONZE", "SILVER", "GOLD"] },
         "certificateType": { "enum": ["DV", "OV", "EV"] },
         "identityGrade": { "enum": ["BASIC", "VERIFIED", "PREMIUM"] },
         "serverCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
         "identityCertFingerprint": { "pattern": "^SHA256:[a-f0-9]{64}$" },
-        "daneEnabled": { "type": "boolean" }
+        "daneEnabled": { "type": "boolean" },
+        "dnssecStatus": {
+          "enum": ["fully_validated", "not_signed", "signed_broken"],
+          "description": "DNSSEC validation state from the TL event at registration time."
+        }
       }
     },
     "timestamps": {
@@ -1223,6 +1233,11 @@ This is the canonical schema. Where inline descriptions in the specification bod
       "type": "string",
       "enum": ["READ_ONLY", "TRANSACTIONAL", "FIDUCIARY", "UNTRUSTED"]
     },
+    "verificationTier": {
+      "type": "string",
+      "enum": ["BRONZE", "SILVER", "GOLD"],
+      "description": "Highest tier the agent's DNSSEC, DANE, and TL posture supports. Absent when the TI has not assessed these fields."
+    },
     "riskFactors": {
       "type": "array",
       "items": { "type": "string" }
@@ -1373,6 +1388,8 @@ Three dimensions collapse solvency into reputation, but the ability to pay damag
 **Why vectors over composite scores?** A composite score of 70 hides whether the agent scores 0 on solvency and 100 on safety, or vice versa. A stock trader and a news reader need different things. The vector lets each client apply its own thresholds. The composite score remains for backward compatibility but is deprecated for high-stakes decisions.
 
 **Why three verification tiers?** Ask someone whether an agent is Bronze, Silver, or Gold, and they answer. Ask them to compare 82 to 78 across five dimensions, and they hesitate. The tier is a conversational handle. The Trust Vector's numeric scores carry the actual trust data.
+
+**Why does the tier live in the evaluation response, not the Trust Manifest?** The manifest carries verifiable facts: certificate type, fingerprints, DANE presence, DNSSEC status. The tier is a conclusion drawn from those facts. If one TI's conclusion were baked into the shared manifest, every other TI would inherit that judgment or ignore a required field. The evaluation response is where TI-specific conclusions belong.
 
 **Why `did:web` over `did:ion`?** `did:web` resolves in milliseconds via a standard HTTP fetch and costs nothing to maintain. `did:ion` (Bitcoin-anchored) provides stronger immutability but takes 10-60 minutes to resolve. The specification allows optional `did:ion` anchoring for high-value use cases but does not require it.
 `did:key` is ephemeral and cannot carry reputation across sessions; it is not suitable for principal binding.
