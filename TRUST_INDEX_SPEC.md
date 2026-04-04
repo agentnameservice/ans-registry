@@ -262,7 +262,7 @@ The agent's score also depends on the infrastructure around it.
 | Factor | Dimension | Effect | Level |
 | :--- | :--- | :--- | :--- |
 | **TLD reputation** | Identity | `.bank` requires the registrant to be a verified financial institution (positive). High-abuse TLDs penalize. | SHOULD |
-| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain lowers the integrity score. The penalty is larger when the agent holds a Premium identity grade, because more is at stake. DNSSEC does not affect the identity grade itself. The TL event carries a `dnssecStatus` field (`fully_validated`, `not_signed`, `signed_broken`) recorded at registration time. A TI SHOULD compare registration-time state against a live DNSSEC query to detect changes. | SHOULD |
+| **DNSSEC** | Integrity | A valid chain from root to the agent's domain. A broken or absent chain lowers the integrity score. The penalty is larger when the agent holds a Premium identity grade. DNSSEC does not affect the identity grade itself. The TL event carries `dnssecStatus` (`fully_validated`, `not_signed`, `signed_broken`) at registration time. A TI SHOULD compare against a live DNSSEC query to detect changes. | SHOULD |
 | **Certificate scope** | Integrity | Single-FQDN certificate limits blast radius to one hostname. Wildcard means a compromise affects every subdomain. Penalize wildcards. | SHOULD |
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
@@ -1389,7 +1389,7 @@ Three dimensions collapse solvency into reputation, but the ability to pay damag
 
 **Why three verification tiers?** Ask someone whether an agent is Bronze, Silver, or Gold, and they answer. Ask them to compare 82 to 78 across five dimensions, and they hesitate. The tier is a conversational handle. The Trust Vector's numeric scores carry the actual trust data.
 
-**Why does the tier live in the evaluation response, not the Trust Manifest?** The manifest carries verifiable facts: certificate type, fingerprints, DANE presence, DNSSEC status. The tier is a conclusion drawn from those facts. If one TI's conclusion were baked into the shared manifest, every other TI would inherit that judgment or ignore a required field. The evaluation response is where TI-specific conclusions belong.
+**Why does the tier live in the evaluation response, not the Trust Manifest?** The manifest carries verifiable facts: certificate type, fingerprints, DANE presence, DNSSEC status. The tier is a conclusion drawn from those facts. If one TI's conclusion were baked into the shared manifest, every other TI would inherit that judgment or ignore a required field. TI-specific conclusions belong in the evaluation response.
 
 **Why `did:web` over `did:ion`?** `did:web` resolves in milliseconds via a standard HTTP fetch and costs nothing to maintain. `did:ion` (Bitcoin-anchored) provides stronger immutability but takes 10-60 minutes to resolve. The specification allows optional `did:ion` anchoring for high-value use cases but does not require it.
 `did:key` is ephemeral and cannot carry reputation across sessions; it is not suitable for principal binding.
