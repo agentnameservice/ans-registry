@@ -15,6 +15,24 @@ My payment agent can verify that the invoicing agent's identity is sealed in a T
 
 A Trust Index crawls Transparency Logs published by federated Registration Authorities, combines the sealed data with external signals, and computes a trust evaluation. The evaluation answers one question: given what is publicly verifiable about this agent, what category of tasks should a client delegate to it?
 
+```mermaid
+sequenceDiagram
+    participant P as Payment Agent
+    participant TI as Trust Index
+    participant TL as Transparency Log
+    participant DNS as DNS
+
+    P->>TI: Evaluate invoicing agent (ANSName)
+    TI->>TL: Fetch sealed registration + inclusion proof
+    TI->>DNS: Check DNSSEC, DANE, _ans records
+    TI-->>TI: Compute Trust Vector (5 dimensions)
+    TI->>P: Signed evaluation (VC)
+    Note over P: identity: 95, solvency: 12<br/>Profile: READ_ONLY<br/>Risk: SOLVENCY_PROOF_STALE
+    P-->>P: Reject $50,000 wire (solvency too low)
+```
+
+*Figure 1. The payment agent's question answered. The TI checks the invoicing agent's sealed registration and DNS posture, scores five dimensions, and returns a signed credential. The payment agent reads the solvency score and refuses the wire.*
+
 Each RA carries its own RA Identifier and signing keys, so a TI that crawls multiple RAs can assess the RAs themselves. An RA with a history of lax validation or delayed revocations drags down the score of every agent it registered. Federation defines how Trust Manifests, Verifiable Credentials, and negative reputation signals move across RA boundaries.
 
 This specification does not define signal weights, scoring algorithms, or deployment architectures. A conforming Trust Index provider computes Trust Vectors from the signals defined here and returns evaluations in the format defined here.
@@ -35,7 +53,7 @@ graph TD
     Sign --> Client["Requesting Client"]
 ```
 
-*Figure 1. Two inputs converge: TL-sealed data and external signals. The output is a signed credential that any third party can verify without contacting the TI.*
+*Figure 2. Two inputs converge: TL-sealed data and external signals. The output is a signed credential that any third party can verify without contacting the TI.*
 
 ### 1.2 Terminology
 
@@ -88,7 +106,7 @@ graph TD
     TI --> Client["Requesting Client"]
 ```
 
-*Figure 2. The TI crawls sealed events from multiple federated RAs and combines them with external inputs. The consortium accredits verifiers. The TI signs the result as a credential that any third party can verify without contacting the TI.*
+*Figure 3. The TI crawls sealed events from multiple federated RAs and combines them with external inputs. The consortium accredits verifiers. The TI signs the result as a credential that any third party can verify without contacting the TI.*
 
 ### 1.5 Evolutionary design
 
@@ -770,7 +788,7 @@ graph TD
     TI_2 -->|Trust Vector VC| C2["Client"]
 ```
 
-*Figure 6. Each TI crawls all federated RAs and scores the same agents independently. Negative reputation flows between TI providers so that a principal with misconduct history at one RA cannot start clean at another. Each TI signs its own Trust Vector as a Verifiable Credential.*
+*Figure 5. Each TI crawls all federated RAs and scores the same agents independently. Negative reputation flows between TI providers so that a principal with misconduct history at one RA cannot start clean at another. Each TI signs its own Trust Vector as a Verifiable Credential.*
 
 ### 8.1 Cross-provider Trust Manifest portability
 
@@ -1277,7 +1295,7 @@ graph LR
     Low -.->|"upgrade auth"| Caller
 ```
 
-*Figure 7. The branching point is the agent: strong callers reach critical operations, weak callers get read-only access and a step-up signal. The dashed line is the upgrade path.*
+*Figure 6. The branching point is the agent: strong callers reach critical operations, weak callers get read-only access and a step-up signal. The dashed line is the upgrade path.*
 
 ### C.1 Authentication strength classification
 
