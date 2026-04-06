@@ -1,4 +1,4 @@
-## A Layered Security Analysis
+# A Layered Security Analysis
 
 This document applies the MAESTRO framework to the Agent Name Service (ANS) architecture,
 mapping threats to the mechanisms that address them.
