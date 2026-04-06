@@ -62,6 +62,10 @@ DN-ANR's `_agent.{domain}` label for security metadata overlaps with AID's label
 **AgentDNS.** Liang's AgentDNS draft (draft-liang-agentdns-00, individual submission, October 2025) defines an application-layer namespace (`agentdns://` URIs) with semantic discovery, centralized authentication, and integrated billing.
 AgentDNS does not use DNS records; it is a separate naming system despite the name. ANS operates at the DNS layer; AgentDNS operates above it.
 
+**AGNTCY Agent Directory Service.** Muscariello and Polic's ADS draft (draft-mp-agntcy-ads-01, individual submission, February 2026) defines a distributed directory that indexes agents by skill and capability.
+A client queries ADS for agents matching specific constraints, receives directory records that reference a Protocol Card and optionally an ANS name. When an ANS name is present, the client resolves it to verify identity before connecting.
+ADS handles discovery and selection. ANS handles identity and trust. The two do not overlap.
+
 **Agent communication and execution protocols.** Google's A2A defines how agents collaborate across services. Anthropic's MCP defines how a model interacts with local tools and data sources. Neither defines how an agent proves its identity to an agent it has never met.
 
 ### 1.3 Foundational principles
