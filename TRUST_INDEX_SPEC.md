@@ -707,7 +707,7 @@ A client requests a trust evaluation by identifying the agent and optionally spe
 
 The trust evaluation payload conforms to the schema in Appendix B.
 A conforming TI wraps this payload as the `credentialSubject` of a W3C Verifiable Credential signed by the TI.
-The VC envelope (`@context`, `type`, `issuer`, `proof`) follows the VC Data Model 2.0; Appendix B defines only the `credentialSubject` content.
+The VC envelope (`@context`, `type`, `issuer`, `proof`) follows the VC Data Model 2.0; Appendix B defines only the `credentialSubject` content. The proof SHOULD use the Data Integrity specification with cryptosuite `eddsa-rdfc-2022` or equivalent (see §4.2 for accepted proof types).
 Third parties verify the evaluation against the TI's public key without contacting the TI.
 
 The `credentialSubject` MUST include:
