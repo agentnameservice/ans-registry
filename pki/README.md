@@ -1,10 +1,13 @@
 # ANS PKI Trust Material
 
-This directory contains the public CA certificates for the Agent Name Service (ANS). SDK consumers and service operators use these bundles to verify TLS connections and certificate chains when interacting with ANS endpoints.
+This directory contains the public CA certificates for the
+Agent Name Service (ANS). SDK consumers and service operators
+use these bundles to verify TLS connections and certificate
+chains when interacting with ANS endpoints.
 
 ## Directory Structure
 
-```
+```text
 pki/
 ├── README.md
 ├── ote/
@@ -15,9 +18,11 @@ pki/
 
 ## Certificate Hierarchy
 
-ANS uses a two-level CA hierarchy. Each environment has a single root CA and per-region sub-CAs that issue leaf certificates directly.
+ANS uses a two-level CA hierarchy. Each environment has a
+single root CA and per-region sub-CAs that issue leaf
+certificates directly.
 
-```
+```text
 Root CA (self-signed, per-environment)
   CN = gd-domain-parking
   O  = GoDaddy, OU = Engineering, C = US
@@ -29,14 +34,22 @@ Root CA (self-signed, per-environment)
 
 ## Environments
 
-- **`prod/`** — Production CA chain. Includes the root CA and per-region sub-CAs.
-- **`ote/`** — OTE (test) CA chain. Includes per-region sub-CAs only. Separate CA hierarchy from prod.
+- **`prod/`** — Production CA chain. Includes the root CA
+  and per-region sub-CAs.
+- **`ote/`** — OTE (test) CA chain. Includes per-region
+  sub-CAs only. Separate CA hierarchy from prod.
 
-Inspect individual certificates for details (subject, validity, extensions, etc.) using the commands in the [Verifying Certificates](#verifying-certificates) section.
+Inspect individual certificates for details (subject,
+validity, extensions, etc.) using the commands in the
+[Verifying Certificates](#verifying-certificates) section.
 
 ## Bundle Format
 
-Each `ca-bundle.pem` contains all CA certificates for its environment as concatenated PEM blocks. Region comments (e.g. `# us-east-1`) are included between certificates for human readability. Certificates are ordered by region; the root CA (when present) appears first.
+Each `ca-bundle.pem` contains all CA certificates for its
+environment as concatenated PEM blocks. Region comments
+(e.g. `# us-east-1`) are included between certificates for
+human readability. Certificates are ordered by region; the
+root CA (when present) appears first.
 
 ## Verifying Certificates
 
@@ -91,14 +104,28 @@ openssl x509 -in pki/prod/ca-bundle.pem -noout -text
 
 ## Rotation Policy
 
-- Root CAs have a **10-year** validity window (prod) to minimize rotation overhead.
-- Sub-CAs have **5-year** (prod) or **2-year** (OTE) validity windows.
-- New certificates will be committed to this repo **before expiry** of the outgoing cert, with both old and new present in the bundle during the transition period.
-- Retired certificates will be moved to a `retired/` subdirectory with a commit message noting the reason and date.
-- Git history is the version record. Do not create versioned subdirectories.
+- Root CAs have a **10-year** validity window (prod) to
+  minimize rotation overhead.
+- Sub-CAs have **5-year** (prod) or **2-year** (OTE)
+  validity windows.
+- New certificates will be committed to this repo **before
+  expiry** of the outgoing cert, with both old and new
+  present in the bundle during the transition period.
+- Retired certificates will be moved to a `retired/`
+  subdirectory with a commit message noting the reason
+  and date.
+- Git history is the version record. Do not create versioned
+  subdirectories.
 
 ## Important Notes
 
-- **Do not pin individual certificate serial numbers.** Regional sub-CAs may be reissued independently. Pin the root CA fingerprint or load the full bundle.
-- **OTE and prod are separate trust domains.** Never load `ote/` bundles in production configurations. The environments use completely independent CA hierarchies.
-- **Verify bundle integrity after download.** Use the fingerprint commands in the [Verifying Certificates](#verifying-certificates) section to confirm certificates match expected values.
+- **Do not pin individual certificate serial numbers.**
+  Regional sub-CAs may be reissued independently. Pin the
+  root CA fingerprint or load the full bundle.
+- **OTE and prod are separate trust domains.** Never load
+  `ote/` bundles in production configurations. The
+  environments use completely independent CA hierarchies.
+- **Verify bundle integrity after download.** Use the
+  fingerprint commands in the
+  [Verifying Certificates](#verifying-certificates) section
+  to confirm certificates match expected values.
