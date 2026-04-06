@@ -12,7 +12,8 @@ Without reliable answers, things go wrong. An attacker registers a look-alike do
 Assuming there's no prior history recorded, the payment agent has no way to tell this impostor from the real supplier, because the certificate may prove only that someone controls the domain, but not that the domain belongs to the right organization.
 Separately, what if a legitimate supplier passes a security audit, then quietly updates its model? The certificate stays valid, the endpoint stays up, but the code behind it is no longer what was audited. No one notices until payments fail, and then no one can determine which version was registered when.
 
-ANS closes the registration gaps by combining three mechanisms. First, the agent's identity is anchored to a domain name whose control the Registration Authority (RA) has verified via ACME. The impostor's domain is a different FQDN from the real supplier's, so any transaction history, TL entries, and behavioral reputation accumulated under the real domain do not transfer. The impostor starts cold. But domain control alone does not prove organizational identity; that requires an OV or EV certificate, a principal binding, or both.
+ANS closes the registration gaps by combining three mechanisms. First, the agent's identity is anchored to a domain name whose control the Registration Authority (RA) has verified via ACME. The impostor's domain is a different FQDN from the real supplier's, so any transaction history, TL entries, and behavioral reputation accumulated under the real domain do not transfer. The impostor starts cold.
+But domain control alone does not prove organizational identity; that requires an OV or EV certificate, a principal binding, or both.
 Second, every change to the agent's software produces a new version number and a new identity certificate, which records which version is registered. The version is a declarative label that the AHP submits and the RA seals into the log. It is not a cryptographic binding to the running code.
 Third, every one of the invoicing agent's lifecycle events is sealed into a Transparency Log, an append-only ledger where entries cannot be altered or removed after the fact. Domain control alone does not detect code swaps. Identity certificates alone do not create a versioned audit trail. The append-only log alone does not prove who issued the certificate.
 The three together close the gaps at the registration layer: they prove which domain was registered, which version was declared, and when. Resolving the $50,000 trust question requires additional signals (organizational identity, behavioral reputation, solvency) described in §2.4.
@@ -51,11 +52,15 @@ The ANS Transparency Log follows the SCITT model (RFC 9943), using these receipt
 A client may resolve a DNS-AID record to get the endpoint address, then check an `_ans-badge` record to verify the agent's identity before opening a connection.
 GoDaddy and Infoblox are collaborating on DNS record alignment for agent discovery at [jmozley-infoblox/DNS_for_agents_collaboration](https://github.com/jmozley-infoblox/DNS_for_agents_collaboration).
 
-**AID (Agent Identity and Discovery).** Nemethi's AID draft (draft-nemethi-aid-agent-identity-discovery-00, individual submission, March 2026) places a single `_agent.{domain}` TXT record carrying an endpoint URI, protocol token, and authentication hint. AID identifies agents by domain name, like ANS, but uses a lighter mechanism: HTTP Message Signatures for endpoint proof rather than X.509 certificates and TLSA records. The `_agent` label and the `_ans` label occupy different DNS names under the same domain and do not collide. An agent can publish both.
+**AID (Agent Identity and Discovery).** Nemethi's AID draft (draft-nemethi-aid-agent-identity-discovery-00, individual submission, March 2026) places a single `_agent.{domain}` TXT record carrying an endpoint URI, protocol token, and authentication hint.
+AID identifies agents by domain name, like ANS, but uses a lighter mechanism: HTTP Message Signatures for endpoint proof rather than X.509 certificates and TLSA records. The `_agent` label and the `_ans` label occupy different DNS names under the same domain and do not collide.
 
-**DNS-Native Agent Naming and Resolution.** Cui's DN-ANR draft (draft-cui-dns-native-agent-naming-resolution-01, individual submission, March 2026) uses FQDNs as stable agent identifiers and resolves them to verified endpoints via SVCB records with DNSSEC integrity. DN-ANR deliberately excludes semantic metadata from DNS and does not define discovery, ranking, or trust evaluation. ANS occupies the trust layer that DN-ANR leaves open: certificates, transparency receipts, and trust scoring. DN-ANR's `_agent.{domain}` label for security metadata overlaps with AID's label at the same name; neither collides with ANS's `_ans` label.
+**DNS-Native Agent Naming and Resolution.** Cui's DN-ANR draft (draft-cui-dns-native-agent-naming-resolution-01, individual submission, March 2026) uses FQDNs as stable agent identifiers and resolves them to verified endpoints via SVCB records with DNSSEC integrity.
+DN-ANR excludes semantic metadata from DNS and does not define discovery, ranking, or trust evaluation. ANS occupies the trust layer that DN-ANR leaves open: certificates, transparency receipts, and trust scoring.
+DN-ANR's `_agent.{domain}` label for security metadata overlaps with AID's label at the same name; neither collides with ANS's `_ans` label.
 
-**AgentDNS.** Liang's AgentDNS draft (draft-liang-agentdns-00, individual submission, October 2025) defines an application-layer namespace (`agentdns://` URIs) with semantic discovery, centralized authentication, and integrated billing. AgentDNS does not use DNS records; it is a separate naming system despite the name. ANS operates at the DNS layer; AgentDNS operates above it. The two have no technical overlap.
+**AgentDNS.** Liang's AgentDNS draft (draft-liang-agentdns-00, individual submission, October 2025) defines an application-layer namespace (`agentdns://` URIs) with semantic discovery, centralized authentication, and integrated billing.
+AgentDNS does not use DNS records; it is a separate naming system despite the name. ANS operates at the DNS layer; AgentDNS operates above it.
 
 **Agent communication and execution protocols.** Google's A2A defines how agents collaborate across services. Anthropic's MCP defines how a model interacts with local tools and data sources. Neither defines how an agent proves its identity to an agent it has never met.
 
@@ -155,17 +160,21 @@ The protocol defines five roles. An organization may fill more than one. A searc
 
 **Registration Authority.** Validates domain control via ACME, issues Identity Certificates from a Private CA, obtains or accepts Server Certificates from a Public CA, generates DNS record content, and submits lifecycle events to a Transparency Log. A conforming RA implements the full protocol described in this document.
 
-The Identity Certificate and the Transparency Log are the protocol, not optional extensions. Strip the Identity Certificate and the agent proves domain control but not which software version is running. Strip the TL and registration events become RA assertions that no third party can independently verify. An RA that skips either is a verified agent directory, not a conforming ANS Registration Authority.
+The Identity Certificate and the Transparency Log are the protocol, not optional extensions. Strip the Identity Certificate and the agent proves domain control but not which software version is running.
+Strip the TL and registration events become RA assertions that no third party can independently verify. An RA that skips either is a verified agent directory, not a conforming ANS Registration Authority.
 
 **Discovery Service.** Subscribes to the Event Stream, verifies the RA's signature on each payload, and indexes agents by FQDN, protocol, and metadata. A Discovery Service does not issue certificates, does not write to the TL, and does not perform ACME validation. It consumes RA output. Any DNS provider, search engine, or marketplace can operate one.
 
 A Discovery Service that also publishes DNS-AID SVCB records alongside `_ans` records extends discoverability to DNS-AID clients without duplicating data.
 
-**Transparency Log operator.** Receives signed events from one or more RA instances, validates each signature, seals the events into an append-only cryptographic structure, signs checkpoints, and exposes a public verification API. A conforming TL operates as a SCITT Transparency Service (RFC 9943). The RA and the TL may be operated by the same entity or by different entities. When operated separately, a compromised RA cannot rewrite sealed events without the TL operator's collusion.
+**Transparency Log operator.** Receives signed events from one or more RA instances, validates each signature, seals the events into an append-only cryptographic structure, signs checkpoints, and exposes a public verification API.
+A conforming TL operates as a SCITT Transparency Service (RFC 9943). The RA and the TL may be operated by the same entity or by different entities. When operated separately, a compromised RA cannot rewrite sealed events without the TL operator's collusion.
 
 **Trust Index provider.** Crawls Transparency Log events from one or more federated RAs, assembles Trust Manifests, computes Trust Vectors, and publishes evaluations as signed Verifiable Credentials. Conformance requirements are defined in the Trust Index specification.
 
-**Verifier.** A client that checks an agent's identity before connecting. Verification is a client-side act, not a property the RA assigns. A verifier can check the TLS certificate alone, add the DANE TLSA record for a second trust channel, or add the TL inclusion proof for a third. The verifier needs no relationship with the RA. It needs the TL's public verification key (available at `/root-keys`) and the agent's DNS records. Two agents can verify each other with local math.
+**Verifier.** A client that checks an agent's identity before connecting. Verification is a client-side act, not a property the RA assigns.
+A verifier can check the TLS certificate alone, add the DANE TLSA record for a second trust channel, or add the TL inclusion proof for a third. The verifier needs no relationship with the RA.
+It needs the TL's public verification key (available at `/root-keys`) and the agent's DNS records. Two agents can verify each other with local math.
 
 ## 2.0 Component model
 
@@ -213,7 +222,9 @@ The AHP provisions DNS records using content the RA generates. When the agent's 
 The TL receives signed events from the RA, validates each signature, and seals the events into a cryptographic append-only structure. That structure produces two kinds of proof: inclusion proofs (proving a specific event exists in the log) and consistency proofs (proving the log has only grown, never shrunk or rewritten).
 Without inclusion proofs, a client cannot verify that its agent's registration is in the log. Without consistency proofs, an auditor cannot detect if the TL operator deleted or modified historical entries. The KMS signs each checkpoint. A conforming TL MUST operate as a SCITT Transparency Service (RFC 9943), issuing binary COSE receipts as proof of inclusion.
 
-Inclusion proofs are served per-agent via the badge and audit endpoints. Consistency verification uses the checkpoint history and tile endpoints: an auditor fetches two checkpoints at different tree sizes, retrieves the hash tiles that span the gap, and confirms that the later tree extends the earlier one without altering existing leaves. No dedicated consistency proof endpoint is required when the tile-based structure is publicly readable.
+Inclusion proofs are served per-agent via the badge and audit endpoints.
+Consistency verification uses the checkpoint history and tile endpoints: an auditor fetches two checkpoints at different tree sizes, retrieves the hash tiles that span the gap, and confirms that the later tree extends the earlier one without altering existing leaves.
+No dedicated consistency proof endpoint is required when the tile-based structure is publicly readable.
 
 Each event receives a sequence number that increases with every entry and never repeats. Events become visible only after the KMS signs a checkpoint, so a client querying the log always sees a consistent, finalized view. Each event carries a schema version, so that field renames in future schemas do not break existing consumers.
 
@@ -512,7 +523,9 @@ A client verifies an agent through independent checks, each using a different tr
 
 **TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
 
-**DNSSEC prerequisite.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation. Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The Trust Vector scores the agent on all signals regardless. The RA SHOULD verify DNSSEC status before provisioning TLSA records.
+**DNSSEC prerequisite.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation.
+Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The Trust Vector scores the agent on all signals regardless.
+The RA SHOULD verify DNSSEC status before provisioning TLSA records.
 
 **TL verification strategies.** Trust On First Use (TOFU) caches the fingerprint locally on first contact. TL-Backed Verification queries the TL directly and works in ephemeral environments (containers, serverless). A client performing step 3 MAY use either. New implementations SHOULD use TL-Backed Verification.
 
@@ -723,7 +736,9 @@ Before sealing, a registration is a draft in the RA's database. The AHP can canc
 
 After sealing, the identity-bound fields are immutable. There is no API to modify an ACTIVE registration's ANSName, FQDN, version, endpoints, or Registration Metadata in place. Every change requires a new version and a new TL event. The one exception is ECH key rotation, which does not affect identity.
 
-**Change-boundary scope.** The version number is a declarative label. The AHP submits it; the RA seals it into the TL. No mechanism binds the label to the running code. The protocol enforces version discipline only at the declared identity boundary: the ANSName, the Trust Card content, and the certificate. An AHP SHOULD re-register when any of the following change: executable code, model weights, prompt templates, retrieval corpus version, safety policy configuration, tool permissions, or protocol schema.
+**Change-boundary scope.** The version number is a declarative label. The AHP submits it; the RA seals it into the TL. No mechanism binds the label to the running code.
+The protocol enforces version discipline only at the declared identity boundary: the ANSName, the Trust Card content, and the certificate.
+An AHP SHOULD re-register when any of the following change: executable code, model weights, prompt templates, retrieval corpus version, safety policy configuration, tool permissions, or protocol schema.
 The protocol cannot enforce this requirement; changes that do not alter the declared artifacts are invisible to it. The AIM detects Trust Card drift after activation; it cannot detect runtime changes that leave the Trust Card unchanged.
 The Trust Index's code volatility signal creates economic incentives for version discipline: agents that re-register frequently with small changes score as maintained; agents with long gaps followed by undeclared behavioral shifts score as unstable when detected by peer reports or behavioral monitoring.
 
@@ -1013,7 +1028,9 @@ This artifact is optional. Agents registered without a Trust Card are fully oper
 
 ### A.3 Pub/Sub event payload (registration)
 
-The TL seals the RA's event and publishes it to subscribers. Each published message carries the TL's signature, so subscribers verify authenticity without contacting the TL. The `agent` object in the examples below includes optional fields (`lei`) that the TL stores in the raw event JSON but does not parse into typed fields. The TL's V1 event schema models `host`, `name`, `version`, and `providerId`; additional fields survive in the stored payload for downstream consumers.
+The TL seals the RA's event and publishes it to subscribers. Each published message carries the TL's signature, so subscribers verify authenticity without contacting the TL.
+The `agent` object in the examples below includes optional fields (`lei`) that the TL stores in the raw event JSON but does not parse into typed fields.
+The TL's V1 event schema models `host`, `name`, `version`, and `providerId`; additional fields survive in the stored payload for downstream consumers.
 
 **Pub/Sub message envelope:**
 
