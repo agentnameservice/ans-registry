@@ -31,13 +31,13 @@ and HCS-14 cross-registry discovery `[DRAFT:HCS-14]`.
 Where a proposal changes the threat picture, the text says so.
 Unmarked mitigations describe the architecture as it stands.
 
-### The scenario
+## The scenario
 
 Human → Claude Code (your initial agent)
 Claude Code → Agent B (trip planner, RA-registered)
 Agent B → Agent C (tour specialist, RA-registered)
 
-### Secure delegation (Claude Code → Agent B)
+## Secure delegation (Claude Code → Agent B)
 
 Your initial agent (a Claude Code session, for example) discovers and connects to a trip-planning agent (Agent B).
 The interaction operates at two security levels.
@@ -58,18 +58,18 @@ Claude Code verifies it locally using only the TL's public key, without contacti
 `[PROPOSED]` The Trust Index scores receipt presence as an integrity signal;
 stapled receipts are the strongest delivery mode.
 
-### Secure sub-contracting (Agent B → Agent C)
+## Secure sub-contracting (Agent B → Agent C)
 
 Agent B delegates a sub-task (booking a tour) to a specialist (Agent C).
 The same two-layer model applies: mTLS channel with Identity Certificate,
 JWS-signed messages serving as purchase order and confirmation.
 
-### Secure human interaction (You → Agent B)
+## Secure human interaction (You → Agent B)
 
 You authorize the trip. Standard web security:
 TLS with Agent B's Server Certificate and OAuth 2.0 for authorization.
 
-### Security models in the chain
+## Security models in the chain
 
 | Step | Interaction | Security Model | Primary Credential |
 | :--- | :--- | :--- | :--- |
@@ -79,7 +79,7 @@ TLS with Agent B's Server Certificate and OAuth 2.0 for authorization.
 
 *`[DRAFT:HCS-27]` After HCS integration, add optional public checkpoint anchoring via a Hiero consensus topic.*
 
-### Threat analysis across seven layers
+## Threat analysis across seven layers
 
 The happy path works as described.
 Problems can arise across a chain of serial dependencies that are automatically discovered and utilized.
