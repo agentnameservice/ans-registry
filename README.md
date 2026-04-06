@@ -13,7 +13,8 @@ services are federated, but the identity always anchors to a domain name.
 
 ## Specifications
 
-Two open specifications define the protocol and trust evaluation:
+Two open specifications define the protocol and trust evaluation,
+with a companion security analysis:
 
 **[DESIGN.md](DESIGN.md)** — Architecture and protocol. How the Registration
 Authority verifies domain ownership, issues certificates, provisions DNS records,
@@ -25,6 +26,12 @@ Index crawls sealed data from federated Registration Authorities, combines it wi
 external signals, and scores agents across five dimensions: integrity, identity,
 solvency, behavior, and safety. Trust Manifest schema, credential formats,
 identity grades, federation, and security considerations.
+
+**[MAESTRO.md](MAESTRO.md)** — Security analysis. Applies the CSA
+[MAESTRO](https://cloudsecurityalliance.org/blog/2025/02/06/agentic-ai-threat-modeling-framework-maestro)
+threat modeling framework to the ANS architecture. Maps threats and mitigations
+across all seven layers, from foundation models through the agent ecosystem,
+using a concrete multi-agent travel-booking scenario.
 
 ## API
 
