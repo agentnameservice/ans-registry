@@ -33,6 +33,14 @@ threat modeling framework to the ANS architecture. Maps threats and mitigations
 across all seven layers, from foundation models through the agent ecosystem,
 using a concrete multi-agent travel-booking scenario.
 
+## Exploratory
+
+**[SENDER_VERIFICATION_SPEC.md](SENDER_VERIFICATION_SPEC.md)** — Per-sender
+email verification. Applies ANS principles (per-entity signing keys, SCITT
+transparency log, DNS discovery) to email senders. Targets business email
+compromise where domain-level authentication (DKIM/SPF/DMARC) passes but the
+sender is not who they claim. Exploratory sketch, not an ANS protocol feature.
+
 ## API
 
 - [OpenAPI specification](https://developer.godaddy.com/doc/endpoint/ans)
