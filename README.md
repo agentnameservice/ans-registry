@@ -33,13 +33,13 @@ threat modeling framework to the ANS architecture. Maps threats and mitigations
 across all seven layers, from foundation models through the agent ecosystem,
 using a concrete multi-agent travel-booking scenario.
 
-## Exploratory
+## Related
 
 **[SENDER_VERIFICATION_SPEC.md](SENDER_VERIFICATION_SPEC.md)** — Per-sender
-email verification. Applies ANS principles (per-entity signing keys, SCITT
-transparency log, DNS discovery) to email senders. Targets business email
+email verification. JWS header-only signing with key bindings sealed in a
+SCITT transparency log, discoverable via DNS. Targets business email
 compromise where domain-level authentication (DKIM/SPF/DMARC) passes but the
-sender is not who they claim. Exploratory sketch, not an ANS protocol feature.
+sender is not who they claim. Not an ANS protocol feature.
 
 ## API
 
