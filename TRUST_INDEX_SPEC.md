@@ -159,6 +159,8 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Discovery record coverage | Additional discovery channels beyond the `_ans` TXT record: DNS-AID SVCB, HCS-14 `_agent`, protocol-native well-known endpoints. Capped so discovery records alone cannot dominate this dimension. |
 | Cross-channel hash consistency `[PENDING]` | Agreement among the TL's sealed `capabilities_hash`, the DNS-AID `cap-sha256` parameter, and the live ANS Trust Card hash. Activates when `capabilities_hash` is populated in TL entries. |
 | Trust Card presence | Whether the agent hosts an ANS Trust Card with verifiable content hash. Agents without a Trust Card still register but score lower on integrity. |
+| Unresolved integrity warning | Whether the TL contains an `INTEGRITY_WARNING` event for this agent without a subsequent `INTEGRITY_RESOLVED`. The RA publishes these events when the AIM confirms a discrepancy between live DNS or certificates and the TL's sealed records. An unresolved warning lowers the integrity score. A resolved warning restores it. |
+| ERC-8004 token transfer | Whether the agent's ERC-8004 token has transferred (ERC-721 `Transfer` event). The agent wallet clears; solvency proof goes stale. Registration and reputation history persist. |
 
 **Identity: Who stands behind this agent?**
 
@@ -173,7 +175,7 @@ The specification defines five signal categories, ordered from cryptographic fac
 
 | Signal | What the TI checks |
 | :--- | :--- |
-| Wallet proof | Zero-knowledge proof that the agent controls funds above a threshold, without revealing the balance |
+| Wallet proof | Zero-knowledge proof that the agent controls funds above a threshold, without revealing the balance. When the agent has an ERC-8004 registration with a distinct agent wallet (`setAgentWallet`), the proof SHOULD check the agent wallet, not the token owner. On token transfer, the wallet clears; a conforming TI SHOULD apply a freshness penalty until the new owner re-establishes it. |
 | Payment network history | Transaction volume, settlement rate, and chargeback ratio. Reflects willingness to pay, not just ability. |
 | Insurance | Active liability policy from a recognized insurer |
 | Escrow history | Track record of successful fund releases and disputes |
@@ -187,14 +189,14 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Peer endorsements | Signed attestations from other registered agents |
 | User ratings | Aggregated scores from verified interactions, weighted by reviewer identity grade |
 | Interop compliance | Handshake success rates, async response rates, credential grant honoring |
-| On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. Transaction fees make fabrication expensive. |
+| On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. A conforming TI SHOULD weight each review by its transaction cost (`gasUsed * effectiveGasPrice`), not by count. L2 feedback costs orders of magnitude less than mainnet and carries proportionally less weight. Feedback persists across token transfers (keyed to agentId, not owner). |
 | License adherence | Whether the agent operates within machine-readable license terms. A recorded violation is a negative signal. |
 
 **Safety: Will this agent leak data or cause harm?**
 
 | Signal | What the TI checks |
 | :--- | :--- |
-| Guardrail certification | Adversarial testing results from a recognized auditor |
+| Guardrail certification | Results from adversarial testing, whether performed by a human auditor or an automated agent security scanning tool. When findings carry standardized threat taxonomy codes and severity levels, a TI can score at finer granularity than pass/fail. |
 | Data egress policy | Declared data flow restrictions, verifiable through TEE attestation |
 | Model provenance | Which LLM powers the agent, verified through a software signing transparency log |
 | Enclave attestation | TEE hardware details: provider, hardware version, SVN. Known-vulnerable generations are penalized. |
@@ -474,6 +476,12 @@ A conforming TI MUST implement verification for each credential format:
 | SCITT receipt `[PROPOSED]` | Reconstruct Merkle root from inclusion proof and original entry. Verify TL signature against TL public key. Validate tree type. |
 | ANS_DELEGATION VC | Resolve issuer DID. Verify VC signature. Check expiration and credential status. Confirm `delegate.providerId` matches TL event. Confirm FQDN matches `scope.fqdnPattern`. Verify `lei` via GLEIF. |
 
+When an RA's verification pipeline has already verified a credential before sealing the event, the TI is not required to re-verify it.
+The RA's Merkle proof and checkpoint signature attest to the verification having occurred. This applies to principal bindings,
+Trust Card integrity checks, and credential signatures that the RA's AIM verified at or after registration.
+The TI MUST still verify credentials it encounters independently of the RA's pipeline,
+such as agent-submitted VCs from oracle feeds or peer endorsements.
+
 ### 4.6 Hosted-platform delegation (`ANS_DELEGATION`)
 
 My payment agent is about to wire $50,000 to an invoicing agent at `acme-invoicing.platform.example.net`. The Trust Index sees that the platform controls the domain. But I'm not paying the platform. I'm paying the tenant. The `lei` field in the registration names the tenant, but the platform typed that in. The tenant never signed anything.
@@ -576,7 +584,8 @@ The binding type determines how difficult it is for a bad actor to shed negative
 | `DID_WEB` | Domain control | Easy (register new domain) |
 | `LEI` | Legal entity (via vLEI, ISO 17442) | Medium (requires forming a new corporation) |
 | `BIOMETRIC_HASH` | Physical person | Hard (requires a new person) |
-| `ENS_ENSIP25` | Ethereum account (via ENS name with ENSIP-25 bidirectional agent-registration record) | Medium (registering an ENS name costs ETH; creating many is expensive but requires no legal entity) |
+| `ENS_ENSIP25` (native `.eth`) | Ethereum account (via ENS name with ENSIP-25 bidirectional agent-registration record) | Medium (registering a `.eth` name costs ETH and is permanently on-chain; creating many is expensive but requires no legal entity) |
+| `ENS_ENSIP25` (ENSIP-17 DNS) | Ethereum account (via DNSSEC-resolved DNS domain with ENSIP-25 bidirectional agent-registration record) | Easy (domain registration fee, often under $15, plus free DNSSEC enablement; same barrier as `DID_WEB`) |
 
 A conforming TI MUST verify the principal binding against the declared type:
 - `DID_WEB`: Resolve `did:web:{domain}` by fetching `/.well-known/did.json`. Verify the DID Document exists and contains a valid verification method.
@@ -655,6 +664,8 @@ A TI MUST verify that anchor domains match the agent's registered domain. A TI S
 | Self-asserted BIMI | Weak | Domain owner claims this logo, no CA verification |
 | DMARC `p=reject` | Moderate | Domain enforces strict email authentication |
 | Code signing certificate | Moderate | Publisher identity verified by CA |
+| ENS_ENSIP25 | Strong | DNS domain resolves via ENS (Gasless DNS Resolution, ENSIP-17) with full DNSSEC proof chain verified by ENS contracts. |
+| ERC8004_VALIDATION | Moderate | Agent has validation responses from accredited validators in the ERC-8004 Validation Registry, with the validator's contract address confirmed by the governance body. Signal quality depends on the validator's methodology (stake-secured re-execution, zkML, TEE attestation). |
 
 ---
 
@@ -858,7 +869,7 @@ Unanswered questions block AI-adjudicated disputes: What prompts produce fair ad
 
 ### 8.5 Accredited verifiers
 
-The consortium governance body accredits third-party verifiers for specific signal categories: identity verification firms, safety auditors, and solvency verifiers. The consortium sets standards; the verifier does the work. Individual RAs are registration services, not accreditation bodies.
+The consortium governance body accredits third-party verifiers for specific signal categories: identity verification firms, safety auditors (including operators of automated agent security scanning tools), and solvency verifiers. The consortium sets standards; the verifier does the work. Individual RAs are registration services, not accreditation bodies.
 
 If a verifier's attestations prove fraudulent, the governance body revokes accreditation. Enforcement follows a ladder: warning, probation, suspension, distrust.
 
@@ -1161,6 +1172,11 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "properties": {
             "standard": { "enum": ["OWASP_LLM_TOP10", "AISI_2026_SAFE", "CUSTOM"] },
             "version": { "type": "string" },
+            "standardUri": {
+              "type": "string",
+              "format": "uri",
+              "description": "When standard is CUSTOM, a URI where a TI can fetch the taxonomy definition."
+            },
             "auditorDid": { "type": "string" },
             "reportHash": { "type": "string" },
             "passedAt": { "type": "string", "format": "date-time" }
