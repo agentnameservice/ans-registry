@@ -476,6 +476,8 @@ A conforming TI MUST implement verification for each credential format:
 | SCITT receipt `[PROPOSED]` | Reconstruct Merkle root from inclusion proof and original entry. Verify TL signature against TL public key. Validate tree type. |
 | ANS_DELEGATION VC | Resolve issuer DID. Verify VC signature. Check expiration and credential status. Confirm `delegate.providerId` matches TL event. Confirm FQDN matches `scope.fqdnPattern`. Verify `lei` via GLEIF. |
 
+When an RA's verification pipeline has already verified a credential before sealing the event, the TI is not required to re-verify it. The RA's Merkle proof and checkpoint signature attest to the verification having occurred. This applies to principal bindings, Trust Card integrity checks, and credential signatures that the RA's AIM verified at or after registration. The TI MUST still verify credentials it encounters independently of the RA's pipeline, such as agent-submitted VCs from oracle feeds or peer endorsements.
+
 ### 4.6 Hosted-platform delegation (`ANS_DELEGATION`)
 
 My payment agent is about to wire $50,000 to an invoicing agent at `acme-invoicing.platform.example.net`. The Trust Index sees that the platform controls the domain. But I'm not paying the platform. I'm paying the tenant. The `lei` field in the registration names the tenant, but the platform typed that in. The tenant never signed anything.

@@ -103,7 +103,7 @@ A supplier passes a security audit on Tuesday, updates its model on Wednesday, a
 | **A2A** | Agent-to-Agent protocol for agent collaboration (Linux Foundation AAIF). |
 | **ACME** | Automatic Certificate Management Environment (RFC 8555). The protocol the RA uses to verify domain control. |
 | **AHP** | Agent Hosting Platform, a service that hosts agent code and manages registration on the owner's behalf. |
-| **AIM** | Agent Integrity Monitor. Continuously checks DNS records and certificates against registered state. When an ANS Trust Card is hosted, the AIM also verifies its content hash. |
+| **AIM** | Agent Integrity Monitor. The RA's verification worker. Continuously verifies agent state against the TL's sealed records, DNS infrastructure, certificate chains, principal bindings, and credential signatures. Reports findings to the RA. |
 | **ANS** | Agent Name Service, the directory and trust layer described in this document. |
 | **ANS Trust Card** | An optional COSE_Sign1 document at `/.well-known/ans/trust-card.json`. Protocol-native metadata plus ANS trust fields and a stapled SCITT receipt. The AIM verifies the content hash when Registration Metadata was submitted. |
 | **CA** | Certificate Authority, an entity that issues digital certificates. |
@@ -206,9 +206,10 @@ graph TD
     AIM["AIM"] -.->|"findings"| RA
     AIM -.->|"verify"| AHP
     AIM -.->|"read"| TL
+    AIM -.->|"verification results"| TI
 ```
 
-*Figure 1. System boundaries. All trust artifacts flow through two chokepoints: the RA, where identity enters the system, and the TL, where sealed evidence leaves it. Only the RA writes to the log. The AHP, AIM, Discovery Services, and Trust Index read from it but cannot alter it. The AIM reports findings to the RA; the RA decides whether to seal an integrity event.*
+*Figure 1. System boundaries. All trust artifacts flow through two chokepoints: the RA, where identity enters the system, and the TL, where sealed evidence leaves it. Only the RA writes to the log. The AIM is the RA's verification worker: it checks agent state against sealed records, DNS, certificates, principal bindings, and credential signatures. Integrity findings go to the RA. Verification results flow to the Trust Index, which scores without re-verifying what the AIM already checked.*
 
 ### 2.1 The Registration Authority system
 
@@ -219,7 +220,7 @@ Generates the DNS records that make the agent discoverable, and ultimately seals
 
 **2.1.3 Provider Registry.** Decouples an entity's legal name from its identifier. When "AcmeCorp" becomes "MegaCorp," one record updates instead of re-registering thousands of agents.
 
-**2.1.4 AIM.** Compares the live internet against what the RA sealed. When something doesn't match, it publishes a finding. It cannot revoke certificates or command state changes.
+**2.1.4 AIM.** The RA's verification worker. Checks agent state against multiple sources of truth: the TL's sealed records, DNS infrastructure, certificate chains, principal bindings (ENS, DID, LEI), and credential signatures. When something doesn't match, it publishes a finding. It cannot revoke certificates or command state changes.
 
 **2.1.5 RA API.** The AHP registers an agent, submits CSRs for both certificate types, and triggers ACME and DNS verification. It can query registration status at any point, including partial registrations not yet sealed into the TL. It resolves an ANSName to its current registration and revokes a version at the AHP's request.
 Agent discovery flows from the Event Stream through independent indexing services, not through the RA.
@@ -870,6 +871,11 @@ The AIM verifies each ACTIVE registration independently:
 | **Server Certificate** | TLS handshake to the FQDN, extract certificate fingerprint | Fingerprint matches what the RA sealed | Yes |
 | **ANS Trust Card integrity** | Fetch Trust Card from the `card` URL in the `_ans` record, hash the content | Hash matches the `capabilities_hash` sealed at registration | Only when Trust Card is hosted and Registration Metadata was submitted |
 | **Schema integrity** | Fetch each `schema.url` in the Trust Card, hash the content | Hash matches the `schema.hash` in the Trust Card | Only when Trust Card is hosted |
+| **Principal binding (ENS_ENSIP25)** | Resolve ENS name, verify `agent-registration[<registry>][<tokenId>]` text record, verify ERC-8004 registration file lists ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
+| **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID Document exists and contains a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
+| **Principal binding (LEI)** | Verify vLEI credential signature against issuing organization's key | Signature valid and LEI active in GLEIF database | Only when `principalBinding.type` is `LEI` |
+| **VC signature** | Resolve issuer DID, retrieve public key, verify signature, check expiration | Signature valid and credential not expired | Only when `verifiableClaims` are present in the Trust Card |
+| **On-chain identity (ERC-8004)** | Verify agentId ownership on the Identity Registry, check Reputation Registry for active feedback | Owner address matches `principalBinding.identifier` | Only when `onChainId` references an ERC-8004 registration |
 
 Most registered agents do not host a Trust Card. For those agents, the AIM verifies DNS records and Server Certificate only. The Trust Index scores agents without a verifiable Trust Card lower on the integrity dimension, creating an incentive for AHPs to host one.
 
