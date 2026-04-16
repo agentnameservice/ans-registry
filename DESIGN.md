@@ -209,7 +209,10 @@ graph TD
     AIM -.->|"verification results"| TI
 ```
 
-*Figure 1. System boundaries. All trust artifacts flow through two chokepoints: the RA, where identity enters the system, and the TL, where sealed evidence leaves it. Only the RA writes to the log. The AIM is the RA's verification worker: it checks agent state against sealed records, DNS, certificates, principal bindings, and credential signatures. Integrity findings go to the RA. Verification results flow to the Trust Index, which scores without re-verifying what the AIM already checked.*
+*Figure 1. System boundaries. All trust artifacts flow through two chokepoints: the RA, where identity enters the system, and the TL,
+where sealed evidence leaves it. Only the RA writes to the log. The AIM is the RA's verification worker: it checks agent state against
+sealed records, DNS, certificates, principal bindings, and credential signatures. Integrity findings go to the RA. Verification results
+flow to the Trust Index, which scores without re-verifying what the AIM already checked.*
 
 ### 2.1 The Registration Authority system
 
