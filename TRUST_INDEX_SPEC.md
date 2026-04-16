@@ -160,7 +160,7 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Cross-channel hash consistency `[PENDING]` | Agreement among the TL's sealed `capabilities_hash`, the DNS-AID `cap-sha256` parameter, and the live ANS Trust Card hash. Activates when `capabilities_hash` is populated in TL entries. |
 | Trust Card presence | Whether the agent hosts an ANS Trust Card with verifiable content hash. Agents without a Trust Card still register but score lower on integrity. |
 | Unresolved integrity warning | Whether the TL contains an `INTEGRITY_WARNING` event for this agent without a subsequent `INTEGRITY_RESOLVED`. The RA publishes these events when the AIM confirms a discrepancy between live DNS or certificates and the TL's sealed records. An unresolved warning lowers the integrity score. A resolved warning restores it. |
-| ERC-8004 token transfer | Whether the agent's ERC-8004 token (if any) has been transferred to a new owner, detectable via the ERC-721 `Transfer(from, to, tokenId)` event. The identity survives, but the agent wallet clears at the contract level. A conforming TI SHOULD treat a transfer the way it treats an ANS version bump: the registration persists, but the solvency proof is stale until the new owner re-establishes the wallet. |
+| ERC-8004 token transfer | Whether the agent's ERC-8004 token has transferred (ERC-721 `Transfer` event). The agent wallet clears; solvency proof goes stale. Registration and reputation history persist. |
 
 **Identity: Who stands behind this agent?**
 
@@ -175,7 +175,7 @@ The specification defines five signal categories, ordered from cryptographic fac
 
 | Signal | What the TI checks |
 | :--- | :--- |
-| Wallet proof | Zero-knowledge proof that the agent controls funds above a threshold, without revealing the balance. When the agent has an ERC-8004 registration with a distinct agent wallet (set via `setAgentWallet`, separate from the token owner), the solvency proof SHOULD check the agent wallet address. The agent wallet is the address authorized to send payments. A proof against the owner address demonstrates organizational solvency but not the agent's spending authority. When the ERC-8004 token has been transferred (detectable via the ERC-721 `Transfer` event), the agent wallet clears at the contract level; a conforming TI SHOULD apply a freshness penalty to the solvency dimension until the new owner re-establishes the wallet and submits a solvency proof. |
+| Wallet proof | Zero-knowledge proof that the agent controls funds above a threshold, without revealing the balance. When the agent has an ERC-8004 registration with a distinct agent wallet (`setAgentWallet`), the proof SHOULD check the agent wallet, not the token owner. On token transfer, the wallet clears; a conforming TI SHOULD apply a freshness penalty until the new owner re-establishes it. |
 | Payment network history | Transaction volume, settlement rate, and chargeback ratio. Reflects willingness to pay, not just ability. |
 | Insurance | Active liability policy from a recognized insurer |
 | Escrow history | Track record of successful fund releases and disputes |
@@ -189,7 +189,7 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Peer endorsements | Signed attestations from other registered agents |
 | User ratings | Aggregated scores from verified interactions, weighted by reviewer identity grade |
 | Interop compliance | Handshake success rates, async response rates, credential grant honoring |
-| On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. A conforming TI SHOULD weight feedback by the transaction cost at submission time (`gasUsed * effectiveGasPrice` from the transaction receipt). Feedback submitted on Ethereum mainnet during high-gas periods carries more weight than feedback submitted on L2 chains, where the fabrication cost per review can be two to three orders of magnitude lower. ERC-8004 Reputation Registry feedback persists across token transfers because it is keyed to the agentId, not the owner address; a conforming TI SHOULD continue scoring the full feedback history after a transfer. |
+| On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. A conforming TI SHOULD weight each review by its transaction cost (`gasUsed * effectiveGasPrice`), not by count. L2 feedback costs orders of magnitude less than mainnet and carries proportionally less weight. Feedback persists across token transfers (keyed to agentId, not owner). |
 | License adherence | Whether the agent operates within machine-readable license terms. A recorded violation is a negative signal. |
 
 **Safety: Will this agent leak data or cause harm?**

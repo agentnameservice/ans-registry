@@ -72,7 +72,10 @@ ADS handles discovery and selection. ANS handles identity and trust. The two do 
 {"name": "ANS", "endpoint": "ans://v1.0.0.agent.example.com", "version": "1.0.0"}
 ```
 
-The `endpoint` carries the full ANSName. The `version` carries the semver string separately. ENSIP-17 (Gasless DNS Resolution) lets any DNSSEC-enabled domain resolve through ENS to a wallet address without gas fees, using the same DNSSEC chain ANS checks for domain validation. ENSIP-25 defines a text record (`agent-registration[<registry>][<agentId>]`) on the ENS name attesting association with an ERC-8004 token. The Trust Index verifies both directions: the ENSIP-25 record points from the ENS name to the agentId, and the registration file's services array points back to the ENS name (§5.3 of the Trust Index specification).
+The `endpoint` carries the full ANSName. The `version` carries the semver string separately.
+ENSIP-17 (Gasless DNS Resolution) lets any DNSSEC-enabled domain resolve through ENS to a wallet address without gas fees, using the same DNSSEC chain ANS checks for domain validation.
+ENSIP-25 defines a text record (`agent-registration[<registry>][<agentId>]`) on the ENS name attesting association with an ERC-8004 token.
+The Trust Index verifies both directions: the ENSIP-25 record points from the ENS name to the agentId, and the registration file's services array points back to the ENS name (§5.3 of the Trust Index specification).
 
 **Agent communication and execution protocols.** Google's A2A defines how agents collaborate across services. Anthropic's MCP defines how a model interacts with local tools and data sources. Neither defines how an agent proves its identity to an agent it has never met.
 
@@ -398,7 +401,9 @@ In a federated ecosystem, consumers scope the ProviderID by the RA Identifier to
 
 The ProviderID does not span RAs. The FQDN does. An agent moves between RAs by updating DNS records, not by changing its name. For cross-RA correlation, the registration payload accepts an optional `lei` field (Legal Entity Identifier, ISO 17442). When absent, correlation falls back to the domain and OV/EV certificate subject.
 
-When the agent has an ERC-8004 registration, the `agentId` (ERC-721 tokenId on Ethereum mainnet) is an additional cross-RA correlation identifier. The tokenId is globally unique, permanently on-chain, and harder to shed than a domain name (minting costs gas; the token's reputation and validation history is permanent even after transfer). The registration file's `registrations` array supports multiple entries across chains and registries.
+When the agent has an ERC-8004 registration, the `agentId` (ERC-721 tokenId on Ethereum mainnet) is an additional cross-RA correlation identifier.
+The tokenId is globally unique, permanently on-chain, and harder to shed than a domain name (minting costs gas; the token's reputation and validation history is permanent even after transfer).
+The registration file's `registrations` array supports multiple entries across chains and registries.
 
 **Hosted-platform delegation.** When a platform registers an agent on behalf of a tenant, the ProviderID and `lei` field identify the platform and the tenant respectively. These are identity assertions, not delegation proofs. The tenant can close this gap by issuing a W3C Verifiable Credential (`ANS_DELEGATION` claim type) authorizing the platform to register on its behalf.
 The tenant signs the VC with its DID key; the platform includes the VC in the ANS Trust Card's `verifiableClaims` array. The Trust Index verifies the tenant's signature, confirms the delegation matches the registration's ProviderID and FQDN, and scores the identity dimension accordingly. The claim type and verification steps are defined in the Trust Index specification (§4.2).
