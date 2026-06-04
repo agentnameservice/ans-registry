@@ -275,7 +275,7 @@ A base-only registration has no ANSName, no Identity Certificate, and no version
 
 ### 7.3 Migration: base-only to versioned
 
-A base-only registration that later wants version discipline submits a new registration with a `versionSelector` and `identityCsr`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records, so the "MUST NOT mix versioned and unversioned" constraint in [ANS-3 §6.2](ans-3-dns-publication.md#62-legacy-_ans-txt-family-status-compatibility-only) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
+A base-only registration that later wants version discipline submits a new registration with a `versionSelector` and `identityCsr`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records, so the "MUST NOT mix versioned and unversioned" constraint in [ANS-3 §6.2](ans-3-dns-publication.md#62-legacy-_ans-txt-family-status-active) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
 
 After the swap, the AHP submits `AGENT_REVOKED` for the base-only registration. The TL records both the new versioned registration and the base-only revocation, in order.
 
@@ -507,7 +507,7 @@ Operators that staple SHOULD republish the Trust Card on every `AGENT_RENEWED` e
 
 ## Appendix B: Worked examples (non-normative)
 
-Non-normative worked examples (registration request, event payloads, Trust Card overview) live at [`docs/spec/examples/ans-1-examples.md`](examples/ans-1-examples.md).
+Non-normative worked examples (registration request, event payloads, Trust Card overview) live at [`examples/ans-1-examples.md`](examples/ans-1-examples.md).
 
 ## References
 

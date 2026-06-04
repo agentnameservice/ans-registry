@@ -7,16 +7,16 @@ Non-normative worked examples for ans-1-registration. Implementers MAY use these
 ```json
 {
   "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentHost": "support.example.com",
   "ansName": "ans://v1.5.0.support.example.com",
   "eventType": "AGENT_REGISTERED",
-  "agent": {
-    "host": "support.example.com",
-    "name": "Acme Support Agent",
-    "version": "v1.5.0",
-    "ownerId": "OID-8294",
+  "ownerId": "OID-8294",
+  "lei": "549300EXAMPLE00LEI17",
+  "claim": {
     "anchorType": "fqdn",
-    "anchorResolvedId": "support.example.com",
-    "lei": "549300EXAMPLE00LEI17"
+    "resolvedId": "support.example.com",
+    "publicKey": { "kty": "EC", "crv": "P-256", "x": "f83Or...", "y": "x_FEz..." },
+    "issuedAt": "2025-10-05T17:55:00.000000Z"
   },
   "attestations": {
     "identityCert": {
@@ -41,20 +41,21 @@ Non-normative worked examples for ans-1-registration. Implementers MAY use these
 }
 ```
 
-`agent.version` carries the `v` prefix (`v1.5.0`) because the TL stores the ANSName-formatted version. The registration request (`RegisterInput.versionSelector`) accepts `1.5.0` without the prefix; the RA adds it.
+`ansName` carries the `v` prefix on the version segment because the TL stores the ANSName-formatted version. The registration request (`RegisterInput.versionSelector`) accepts `1.5.0` without the prefix; the RA adds it.
 
 ### A.2 `AGENT_REGISTERED` event (base-only, DID-anchored)
 
 ```json
 {
   "agentId": "f3c2d4e5-1234-5678-9abc-def012345678",
+  "agentHost": "sdk-did-agent.plang.example.com",
   "eventType": "AGENT_REGISTERED",
-  "agent": {
-    "host": "sdk-did-agent.plang.example.com",
-    "name": "P-Lang DID Demo Agent",
-    "ownerId": "OID-9302",
+  "ownerId": "OID-9302",
+  "claim": {
     "anchorType": "did",
-    "anchorResolvedId": "did:web:sdk-did-agent.plang.example.com"
+    "resolvedId": "did:web:sdk-did-agent.plang.example.com",
+    "publicKey": { "kty": "OKP", "crv": "Ed25519", "x": "11qYAY..." },
+    "issuedAt": "2026-05-17T09:55:00Z"
   },
   "attestations": {
     "serverCert": {
@@ -74,7 +75,7 @@ Non-normative worked examples for ans-1-registration. Implementers MAY use these
 }
 ```
 
-No `ansName`, no `identityCert`. `anchorType` and `anchorResolvedId` carry the DID. `agent.host` is the operational endpoint; `anchorResolvedId` is the identity. The two diverge per ANS-0 §3.1.
+No `ansName`, no `identityCert`. `claim.anchorType` and `claim.resolvedId` carry the DID. `agentHost` is the operational endpoint; `claim.resolvedId` is the identity. The two diverge per ANS-0 §3.1.
 
 ### A.3 `EQUIVALENCE_LINK` event
 

@@ -235,7 +235,7 @@ A conformant ANS-4 implementation:
 6. Accepts at least one witness profile if the deployment involves cross-organizational verification.
 7. Distributes verification keys via `/root-keys` with historical keys retained.
 8. Honors JCS canonicalization, JWS Detached signatures, and the protected-header set defined in the cryptographic-standards section above.
-9. Passes the conformance test vectors at `docs/tests/conformance/ans-4/` once that directory is published (vectors planned).
+
 
 **Optional surface.** Which witness profile to deploy is operator choice within the multi-operator-deployment constraint; SCITT alternative profiles (`draft-ietf-scitt-architecture` admits implementation choices the spec leaves open); TL operator policy (rotation cadence, checkpoint frequency, batching window). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator chose witness profile 4.A over 4.C (or vice versa), and MUST NOT reject a receipt because the operator's checkpoint cadence differs from another deployment's.
 
@@ -268,7 +268,7 @@ The TL records `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_REVOKED`, `EQUIVALENC
 
 ## Appendix A: Worked examples
 
-Non-normative worked examples (registration request, event payloads) live at [`docs/spec/examples/ans-4-examples.md`](examples/ans-4-examples.md).
+Non-normative worked examples (Pub/Sub envelope, TL badge response, revocation event, producer key registration) live at [`examples/ans-4-examples.md`](examples/ans-4-examples.md).
 
 ## 14. References
 

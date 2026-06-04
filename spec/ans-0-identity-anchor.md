@@ -131,7 +131,7 @@ Failures at any step throw a typed error. The error type carries the failed step
 
 ## 5. Anchor types
 
-Three anchor types are normative: FQDN, DID, LEI. Each section below specifies the resolution sequence, the key authenticity check, the freshness budget, and the conformance posture. Test vectors will live at `docs/tests/conformance/anchor-<type>/` once published.
+Three anchor types are normative: FQDN, DID, LEI. Each section below specifies the resolution sequence, the key authenticity check, the freshness budget, and the conformance posture.
 
 ### 5.1 FQDN (Status: Active)
 

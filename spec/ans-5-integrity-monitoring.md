@@ -122,9 +122,9 @@ A conformant ANS-5 implementation:
 5. Does not score, rank, or filter agents; emits per-check results only (per the scope section).
 6. Honors the integrity-reporting principles.
 7. Marks records as `degraded` when the underlying ANS-0 claim was retrieved via the soft-stale fallback.
-8. Passes the conformance test vectors at `docs/tests/conformance/ans-5/` once that directory is published (vectors planned).
 
-**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); RDAP availability per RFC 9083 (the operator MAY opt out, and unavailability records as a missing check rather than a failure); WHOIS-based monitoring as a deployment-specific extension; AIM verification cadence per the operating-cadence section. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
+
+**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); RDAP availability per RFC 9083 (the operator MAY opt out, and unavailability records as a missing check rather than a failure); WHOIS-based monitoring as a deployment-specific extension; AIM verification cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
 
 ## 10. Security considerations
 
@@ -138,7 +138,7 @@ The evidence bundle the AIM links to is itself subject to tampering. A finding t
 
 ## Appendix A: Worked examples
 
-Non-normative worked examples (registration request, event payloads) live at `docs/spec/examples/ans-5-examples.md`.
+Non-normative worked example (AIM finding payload) lives at [`examples/ans-5-examples.md`](examples/ans-5-examples.md).
 
 ## 13. References
 

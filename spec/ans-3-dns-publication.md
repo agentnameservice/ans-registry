@@ -248,7 +248,7 @@ A conformant ANS-3 implementation:
 6. Honors the per-version TTL parameter from operator policy.
 7. Operates in lookup-mode for any deployment exposed to external verifiers; declares noop-bypass mode explicitly when used.
 8. Publishes records in public DNS, queryable by any third party.
-9. Passes the conformance test vectors at `docs/tests/conformance/ans-3/` once that directory is published (vectors planned).
+
 
 **Optional surface.** Record-style choice (Legacy, Consolidated, or both); DNS verification mode (lookup vs noop-bypass, with noop-bypass non-conformant for external-facing deployments); the TLSA-write duty split (per §8.1, the RA MUST NOT write `_ans-identity._tls`; the AHP MUST); the per-anchor-type emission table that lists "None" for non-FQDN anchors. A conforming verifier MUST NOT downgrade integrity scoring solely because an operator chose Legacy over Consolidated (or vice versa), and MUST NOT reject a registration because its `claim.anchorType` cell reads "None."
 
