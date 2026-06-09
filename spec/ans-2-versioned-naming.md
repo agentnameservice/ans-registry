@@ -8,7 +8,8 @@ Audience: implementers adding semantic-version routing and Private-key Confirmat
 
 ## 1. Scope
 
-ANS-2 is **optional** at registration time and through the registration's life. A conforming Core deployment skips it entirely. A base-only registration is one created with no ANSName and no Identity Certificate. An existing versioned registration MAY add, remove, or roll its Identity Certificate via the `IDENTITY_CERT_UPDATED` event (defined in [ANS-1](ans-1-registration.md#66-identity_cert_updated)); the registration's `agentId`, `agentHost`, ANSName, and anchor binding are unchanged across the event.
+ANS-2 is **optional** at registration time and through the registration's life. A conforming Core deployment skips it entirely. A base-only registration is one created with no ANSName and no Identity Certificate. An existing versioned registration MAY add, remove, or roll its Identity Certificate via the `IDENTITY_CERT_UPDATED` event (defined in
+[ANS-1](ans-1-registration.md#66-identity_cert_updated)); the registration's `agentId`, `agentHost`, ANSName, and anchor binding are unchanged across the event.
 
 When present, ANS-2 specifies:
 
@@ -30,7 +31,7 @@ Example: `ans://v1.0.0.sentiment-analyzer.example.com`
 The ANSName exists when the registrant declares a version. A base-only registration has no ANSName; its identity is the ANS-0 anchor alone.
 
 | Component | Constraints | Example |
-|---|---|---|
+| --- | --- | --- |
 | **protocol** | Fixed. Always `ans` | `ans` |
 | **version** | Semantic version, numeric only: `major.minor.patch`. No pre-release or build-metadata suffixes. Prefixed with `v` | `v1.0.0` |
 | **agentHost** | FQDN per RFC 1035 and RFC 1123. Each label is at most 63 octets, uses LDH characters (letters, digits, hyphens), and does not begin or end with a hyphen. Total FQDN length MUST NOT exceed 237 octets | `sentiment-analyzer.example.com` |
@@ -38,7 +39,7 @@ The ANSName exists when the registrant declares a version. A base-only registrat
 ### 2.1 Length limits
 
 | Limit | Octets | Derivation |
-|---|---|---|
+| --- | --- | --- |
 | `agentHost` (FQDN) | ≤237 | The 253-octet domain-name limit (RFC 1035 §2.3.4) less 16 octets reserved for `_acme-challenge.` plus the label separator used during ACME validation |
 | Full ANSName | ≤400 | Structured maximum is 7 (`ans://v` prefix) + 17 (three 5-digit semver segments and two dots) + 237 (host) = 261; the 400-octet cap reserves headroom for transport across HTTP headers, TLS fields, and database columns |
 
@@ -47,9 +48,9 @@ The ANSName exists when the registrant declares a version. A base-only registrat
 Two fields accompany the ANSName at registration but are not part of the identifier:
 
 | Field | Max length | Required | Unique | Example |
-|---|---|---|---|---|
-| `displayName` | 64 chars | Yes | No | `Acme Sentiment Analyzer` |
-| `description` | 150 chars | No | No | `Classifies customer-feedback prose as positive, neutral, or negative.` |
+| --- | --- | --- | --- | --- |
+| `agentDisplayName` | 64 chars | Yes | No | `Acme Sentiment Analyzer` |
+| `agentDescription` | 150 chars | No | No | `Classifies customer-feedback prose as positive, neutral, or negative.` |
 
 The display name is the human-readable label shown in discovery UIs. It supports spaces, capitalization, and special characters. The FQDN is the unique identifier; display names need not be unique.
 
@@ -61,16 +62,17 @@ A patch bump may coexist for hours; a major version change may coexist for month
 
 ## 3. The Identity Certificate
 
-When a registrant submits a `versionSelector` and `identityCsr`, the RA's Private CA issues an Identity Certificate.
+When a registrant submits a `version` and `identityCsrPEM`, the RA's Private CA issues an Identity Certificate.
 
 | Property | Value |
-|---|---|
+| --- | --- |
 | Issuer | Private CA operated by the RA |
 | SAN type | `uniformResourceIdentifier` |
 | SAN value | The full ANSName (`ans://v{version}.{agentHost}`) |
 | Purpose | Binds the certificate to a specific software version |
 
-The Identity Certificate requires a URI SAN. The `ans://` scheme is syntactically valid per RFC 3986 §3.1 and permitted in URI SANs per RFC 5280 §4.2.1.6. CA/B Forum Baseline Requirements prohibit `uniformResourceIdentifier` SANs in publicly trusted server certificates (BR §7.1.2.7.12). A Public CA cannot issue this certificate. Only a Private CA, operating under its own issuance policy, can. Identity Certificates MUST NOT be brought-your-own (BYOC): a rogue CA could otherwise issue an Identity Certificate for `ans://v1.0.0.payments.example.com`, and the TL would seal it as if the RA had validated it.
+The Identity Certificate requires a URI SAN. The `ans://` scheme is syntactically valid per RFC 3986 §3.1 and permitted in URI SANs per RFC 5280 §4.2.1.6. CA/B Forum Baseline Requirements prohibit `uniformResourceIdentifier` SANs in publicly trusted server certificates (BR §7.1.2.7.12). A Public CA cannot issue this certificate. Only a Private CA, operating under its own issuance policy, can.
+Identity Certificates MUST NOT be brought-your-own (BYOC): a rogue CA could otherwise issue an Identity Certificate for `ans://v1.0.0.payments.example.com`, and the TL would seal it as if the RA had validated it.
 
 ## 4. mTLS with Identity Certificates
 
@@ -96,7 +98,8 @@ Steps 3 and 4 of the handshake sequence above require the party being authentica
 
 DANE (`_443._tcp` TLSA) remains an optional additional pinning check across all scenarios.
 
-The combination a callee presents may change during the registration's life via `IDENTITY_CERT_UPDATED` (defined in [ANS-1](ans-1-registration.md#66-identity_cert_updated)). A versioned callee that removes its Identity Certificate stays a versioned registration but presents only a Server Certificate during the next handshake; callers that previously verified the Identity Certificate fall back to badge or TL verification, and the caller does not need to re-discover the agent.
+The combination a callee presents may change during the registration's life via `IDENTITY_CERT_UPDATED` (defined in [ANS-1](ans-1-registration.md#66-identity_cert_updated)). A versioned callee that removes its Identity Certificate stays a versioned registration but presents only a Server Certificate during the next handshake; callers that previously verified the Identity Certificate fall back to
+badge or TL verification, and the caller does not need to re-discover the agent.
 
 ## 5. Private-key Confirmation Challenge (PriCC)
 
@@ -135,7 +138,8 @@ A conformant ANS-2 implementation:
 
 ### 8.1 Identity Certificate forgery
 
-A rogue CA cannot impersonate the RA's Private CA without compromising the Private CA's signing key. BYOC Identity Certificates are prohibited (per §3): BYOC would let the AHP bring an Identity Certificate the RA had not validated key possession for, so the RA would seal whatever was submitted and a versioned registration would no longer prove that the actor controlling the version controls the binding.
+A rogue CA cannot impersonate the RA's Private CA without compromising the Private CA's signing key. BYOC Identity Certificates are prohibited (per §3): BYOC would let the AHP bring an Identity Certificate the RA had not validated key possession for, so the RA would seal whatever was submitted and a versioned registration would no longer prove that the actor controlling the version controls the
+binding.
 
 ### 8.2 PriCC token replay
 
@@ -143,7 +147,8 @@ The PriCC token is single-use within the registration's lifetime. A token submit
 
 ### 8.3 Cryptographic consent
 
-A versioned registration's Identity Certificate private key signs transaction payloads when the agent commits to an action. The signature produces a non-repudiable record tying the specific version to the specific transaction. A registration without an ANSName has no Identity Certificate and therefore cannot produce this signature; a counterparty requiring cryptographic consent MUST require a versioned counterparty.
+A versioned registration's Identity Certificate private key signs transaction payloads when the agent commits to an action. The signature produces a non-repudiable record tying the specific version to the specific transaction. A registration without an ANSName has no Identity Certificate and therefore cannot produce this signature; a counterparty requiring cryptographic consent MUST require a
+versioned counterparty.
 
 ## 9. References
 

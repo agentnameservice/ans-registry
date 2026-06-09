@@ -37,20 +37,21 @@ ANS-5 does **not**:
 
 ## 3. The `VerificationWorker` interface
 
-The `VerificationWorker` interface is the protocol contract for ANS-5: each worker accepts an ACTIVE `Registration` and an `IdentityClaim`, runs the per-check semantics named in the verification-checks section, and emits a `VerificationRecord` whose `checks` object's optional fields (`identityCertMatch`, `principalBinding`, `onChainBinding`, `witnessAttestation`, `rdapStatus`) are present only when the registration produces the corresponding evidence.
+The `VerificationWorker` interface is the protocol contract for ANS-5: each worker accepts an ACTIVE `Registration` and an `IdentityClaim`, runs the per-check semantics named in the verification-checks section, and emits a `VerificationRecord` whose `checks` object's optional fields (`identityCertMatch`, `principalBinding`, `onChainBinding`, `witnessAttestation`, `rdapStatus`) are present only
+when the registration produces the corresponding evidence.
 
 ## 4. Verification checks
 
 The AIM verifies each ACTIVE registration independently. A third party must detect misissuance, drift, or compromise without insider access to the registry; the verification checks below implement this through independent trust channels (PKI, DNS/DNSSEC, TL, witness systems, DNS provider RDAP).
 
 | Check | What the AIM does | Pass condition | Required when |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **TL presence** | Query the ANS-4 TL for the registration's most recent sealed event | Inclusion proof verifies against the TL's Signed Tree Head | Always |
 | **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist and validate | When the anchor profile emits DNS records (ANS-3) |
 | **Server Certificate match** | TLS handshake to the operational endpoint, extract certificate fingerprint | Fingerprint matches the value sealed in the TL | When the anchor profile ties to TLS (FQDN; `did:web` resolved domain) |
 | **Identity Certificate match** | TLS handshake; extract Identity Cert fingerprint; compare with TL value | Fingerprint matches | Only when ANS-2 versioned registration |
 | **Trust Card hash match** | Fetch the Trust Card from the path in the SVCB row's `wk` SvcParam (consolidated style) or the URL in the `_ans` record (legacy style), or fall back to `/.well-known/ans/trust-card.json`; hash the JCS-canonical bytes | Hash matches the `capabilitiesHash` sealed at registration | Only when Trust Card is hosted AND `trustCardContent` was submitted at registration |
-| **Schema integrity** | Fetch each `metadataUrl.url` referenced in the Trust Card, hash | Hash matches the `metadataUrl.hash` recorded in the Trust Card | Only when the Trust Card declares per-endpoint metadata hashes |
+| **Schema integrity** | Fetch each endpoint's `metaDataUrl`, hash the document | Hash matches the protocol-keyed entry in the TL `attestations.metadataHashes` map (e.g. `metadataHashes["A2A"]`) | Only when per-endpoint `metaDataHash` values were submitted at registration |
 | **Principal binding (ENS_ENSIP25)** | Resolve ENS name; verify `agent-registration[<registry>][<tokenId>]` text record; verify ERC-8004 registration file lists the ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
 | **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID document exists with a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
 | **Principal binding (LEI)** | Verify vLEI credential signature against the issuing entity's registered key (Option A) or against the LOU's custom field signature (Option B) per [ANS-0 §5.3](ans-0-identity-anchor.md#53-lei-status-active) | Signature valid and LEI ACTIVE in GLEIF database | Only when `principalBinding.type` is `LEI` |
@@ -70,14 +71,15 @@ AHPs rotate ECH keys via `PATCH /v1/agents/{agentId}/ech` without creating a TL 
 
 ### 4.2 Domain lifecycle monitoring
 
-The AIM MAY monitor RDAP status and NS record changes for registered agents' domains. Status transitions to `pendingDelete`, `redemptionPeriod`, or `serverHold` indicate the domain is at risk. NS record changes indicate a potential provider migration. Both produce findings for the RA. RDAP detail varies by registrar and authorization level (RFC 9083); the AIM uses whatever level is publicly available.
+The AIM MAY monitor RDAP status and NS record changes for registered agents' domains. Status transitions to `pendingDelete`, `redemptionPeriod`, or `serverHold` indicate the domain is at risk. NS record changes indicate a potential provider migration. Both produce findings for the RA. RDAP detail varies by registrar and authorization level (RFC 9083); the AIM uses whatever level is publicly
+available.
 
 ## 5. Verification procedure (verifier-facing)
 
 A verifier checks an agent through independent steps, each using a different trust channel. The cryptographic verification path is anchor-agnostic; the per-step checks reduce to anchor-specific calls inside ANS-0 resolution.
 
 | Step | Check | Trust channel | What it proves |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | PKI certificate validation | CA system | Standard TLS. Cannot detect a compromised CA |
 | 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_443._tcp.{agentHost}`. A compromised CA alone cannot forge this record |
 | 3 | TL inclusion proof verification | TL (signed by KMS-rooted key) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof |
@@ -86,7 +88,8 @@ A verifier checks an agent through independent steps, each using a different tru
 
 **TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
 
-**DNSSEC prerequisite for step 2.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation. Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The RA SHOULD verify DNSSEC status before provisioning TLSA records.
+**DNSSEC prerequisite for step 2.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation. Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The RA SHOULD verify
+DNSSEC status before provisioning TLSA records.
 
 **TL verification strategies.** Trust On First Use (TOFU) caches the fingerprint locally on first contact. TL-Backed Verification queries the TL directly and works in ephemeral environments (containers, serverless). A client performing step 3 MAY use either; new implementations SHOULD use TL-Backed Verification.
 
@@ -95,7 +98,7 @@ A verifier checks an agent through independent steps, each using a different tru
 The AIM is external to the RA. A malicious monitor could try to disable valid agents by flooding the RA with false failure reports. Four principles guard against this:
 
 | Principle | Rule |
-|---|---|
+| --- | --- |
 | **Monitors report, the RA acts** | External monitors publish findings. They cannot command state changes. The RA compares each finding against what the TL records before acting |
 | **Reports are public and signed** | Monitors publish findings to cryptographically signed feeds, building a verifiable reputation |
 | **Quorum before action** | The RA MUST NOT act on a single report from one monitor. Corroboration from multiple independent monitors is required |
@@ -124,7 +127,8 @@ A conformant ANS-5 implementation:
 7. Marks records as `degraded` when the underlying ANS-0 claim was retrieved via the soft-stale fallback.
 
 
-**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); RDAP availability per RFC 9083 (the operator MAY opt out, and unavailability records as a missing check rather than a failure); WHOIS-based monitoring as a deployment-specific extension; AIM verification cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
+**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); RDAP availability per RFC 9083 (the operator MAY opt out, and unavailability records as a missing check rather than a failure); WHOIS-based monitoring as a deployment-specific extension; AIM verification cadence is
+operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
 
 ## 10. Security considerations
 
@@ -134,7 +138,8 @@ When a verifier accepts a soft-stale ANS-0 claim, the resulting verification rec
 
 ### 10.3 Evidence-pointer integrity
 
-The evidence bundle the AIM links to is itself subject to tampering. A finding that survives RA re-verification does not require the operator to re-fetch the evidence bundle, because the RA's independent re-check is the binding step. Verifiers consuming `INTEGRITY_WARNING` events and seeking to inspect evidence SHOULD verify the evidence bundle's signature against the AIM's published key before relying on its contents.
+The evidence bundle the AIM links to is itself subject to tampering. A finding that survives RA re-verification does not require the operator to re-fetch the evidence bundle, because the RA's independent re-check is the binding step. Verifiers consuming `INTEGRITY_WARNING` events and seeking to inspect evidence SHOULD verify the evidence bundle's signature against the AIM's published key before
+relying on its contents.
 
 ## Appendix A: Worked examples
 

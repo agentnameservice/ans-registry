@@ -42,7 +42,7 @@ ANS-4 does **not** specify:
 ## 3. Cryptographic standards
 
 | Requirement | Standard | Rule |
-|---|---|---|
+| --- | --- | --- |
 | Canonicalization | [JCS (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) | All JSON inner-event payloads MUST be canonicalized before signing or hashing. Without deterministic serialization, two implementations hashing the same logical object produce different results |
 | Signature format | [JWS Detached (RFC 7515 Appendix F)](https://www.rfc-editor.org/rfc/rfc7515) | Payload is not embedded. Signatures are stored in separate fields from the data they sign |
 | Co-located signatures | JWS Detached | When a signature resides in the same JSON object as its data, the signature fields MUST be excluded from the signed payload. The exclusion scope MUST be explicit |
@@ -52,7 +52,7 @@ ANS-4 does **not** specify:
 Every signature MUST include the following protected headers:
 
 | Header | Value |
-|---|---|
+| --- | --- |
 | `alg` | Signing algorithm |
 | `kid` | Key identifier |
 | `typ` | Type indicator (e.g., `JWT`) |
@@ -76,7 +76,7 @@ The `TransparencyLog` interface is the protocol contract for ANS-4: append, batc
 A conforming TL MUST expose the following REST API surface (HTTPS, JSON unless noted; binary endpoints serve `application/cbor` or COSE):
 
 | Endpoint | Purpose |
-|---|---|
+| --- | --- |
 | `GET /v1/agents/{agentId}` | Sealed event, TL signature, and inclusion proof for one agent (HTML or JSON) |
 | `GET /v1/agents/{agentId}/audit` | Paginated history of all lifecycle events for one agent, each with its own proof |
 | `GET /v1/log/checkpoint` | Latest signed checkpoint: log size, root hash, and TL signature |
@@ -144,7 +144,7 @@ The TL's state roots are anchored to external consensus systems through witness 
 ANS-4 admits four witness profiles in v0.1.0. The profile identifier carried in `WitnessAttestation.witnessProfile` is the suffixed form below (e.g., `4.A-hedera`).
 
 | Profile | Backend | Status |
-|---|---|---|
+| --- | --- | --- |
 | 4.A | Hedera Consensus Service (HCS-27 Merkle profile) | Active (reference deployment) |
 | 4.B | ENS / ENSIP-25 (Ethereum Name Service anchoring) | Reserved (ENS partnership in design) |
 | 4.C | OpenTimestamps (Bitcoin-anchored timestamps) | Active |
@@ -160,9 +160,11 @@ Profile identifier `4.A-hedera`. Anchors the TL's state roots to the [Hedera Con
 
 **Cadence.** One attestation per TL batch (5-second window in the reference deployment). Operators MAY configure a coarser cadence when HCS topic costs dominate; the cadence MUST be documented through `GET /v1/witnesses`.
 
-**Verification.** Parse `externalProof` as a Hedera `TransactionRecord`. Query the HCS mirror node for the message at the recovered topic ID and sequence number; confirm the message body matches `logCheckpoint` byte-for-byte. Validate `logCheckpoint`'s signature against the TL's public key. Validate the HCS topic ID matches the topic the TL operator publishes through the signed `GET /v1/witnesses` endpoint. Implementations MUST configure at least two HCS mirror nodes to avoid single-mirror dependency.
+**Verification.** Parse `externalProof` as a Hedera `TransactionRecord`. Query the HCS mirror node for the message at the recovered topic ID and sequence number; confirm the message body matches `logCheckpoint` byte-for-byte. Validate `logCheckpoint`'s signature against the TL's public key. Validate the HCS topic ID matches the topic the TL operator publishes through the signed `GET /v1/witnesses`
+endpoint. Implementations MUST configure at least two HCS mirror nodes to avoid single-mirror dependency.
 
-**Security.** Topic substitution is the primary attack; defense is the signed `GET /v1/witnesses` distribution that ties the topic ID to the TL's identity. A compromise of Hedera's consensus would invalidate every attestation against an HCS topic; ANS-4's general defense is parallel witnesses. HCS topic write-rate limits may force coarser cadence at very high event volumes; verifiers SHOULD accept witness gaps up to the operator's published cadence.
+**Security.** Topic substitution is the primary attack; defense is the signed `GET /v1/witnesses` distribution that ties the topic ID to the TL's identity. A compromise of Hedera's consensus would invalidate every attestation against an HCS topic; ANS-4's general defense is parallel witnesses. HCS topic write-rate limits may force coarser cadence at very high event volumes; verifiers SHOULD accept
+witness gaps up to the operator's published cadence.
 
 ### 7.B ENS / ENSIP-25 (Status: Reserved)
 
@@ -170,7 +172,8 @@ Profile identifier `4.B-ens`. Reserved for an ENS-anchored witness per [ENSIP-25
 
 ### 7.C OpenTimestamps (Status: Active)
 
-Profile identifier `4.C-opentimestamps`. Anchors the TL's state roots to the Bitcoin blockchain through the [OpenTimestamps protocol](https://opentimestamps.org/). The TL submits checkpoints to an OpenTimestamps calendar service, which aggregates and commits them to Bitcoin. The Bitcoin block confirming the OpenTimestamps commitment provides a backend that no party can rewrite without controlling Bitcoin's consensus.
+Profile identifier `4.C-opentimestamps`. Anchors the TL's state roots to the Bitcoin blockchain through the [OpenTimestamps protocol](https://opentimestamps.org/). The TL submits checkpoints to an OpenTimestamps calendar service, which aggregates and commits them to Bitcoin. The Bitcoin block confirming the OpenTimestamps commitment provides a backend that no party can rewrite without controlling
+Bitcoin's consensus.
 
 **Attestation shape.** `logCheckpoint` carries the TL state. `externalProof` is an OpenTimestamps proof file (`.ots` format) covering the SHA-256 hash of `logCheckpoint`; the proof carries the calendar-service signatures plus the Bitcoin Merkle path. `attestedAt` is the Bitcoin block timestamp of the confirming block.
 
@@ -178,9 +181,11 @@ Profile identifier `4.C-opentimestamps`. Anchors the TL's state roots to the Bit
 
 **Confirmation depth.** A Bitcoin block carrying an OpenTimestamps commitment is provisional until enough subsequent blocks confirm it. The reference deployment treats commitments as final after 6 confirmations (~1 hour). The depth MUST be documented through `GET /v1/witnesses`; verifiers handling high-stakes flows MAY require deeper confirmations.
 
-**Verification.** Parse `externalProof` as an OpenTimestamps proof file. Walk the proof's calendar signatures and Merkle path to recover the Bitcoin block hash. Query a Bitcoin node (or configured mirror set) for the block; confirm the OpenTimestamps commitment is in the block's Merkle tree. Validate `logCheckpoint`'s signature against the TL's public key. Validate the SHA-256 hash of `logCheckpoint` matches the leaf the proof commits to. Validate the Bitcoin block has at least the documented confirmation depth.
+**Verification.** Parse `externalProof` as an OpenTimestamps proof file. Walk the proof's calendar signatures and Merkle path to recover the Bitcoin block hash. Query a Bitcoin node (or configured mirror set) for the block; confirm the OpenTimestamps commitment is in the block's Merkle tree. Validate `logCheckpoint`'s signature against the TL's public key. Validate the SHA-256 hash of
+`logCheckpoint` matches the leaf the proof commits to. Validate the Bitcoin block has at least the documented confirmation depth.
 
-**Security.** A calendar that lies cannot forge a Bitcoin block (the verifier-side Merkle check catches it); a calendar that drops submissions silently is a denial-of-service against the witness, not a forgery. Defense: configure multiple calendars in parallel and treat any one calendar's commitment as sufficient. A Bitcoin reorganization that rolls back the block invalidates the attestation until it lands again; the documented confirmation depth bounds the risk. Bitcoin-confirmation lag (~1 hour at default depth) means 4.C is not available immediately after a checkpoint; high-stakes flows requiring fresh attestations within minutes SHOULD also configure 4.A.
+**Security.** A calendar that lies cannot forge a Bitcoin block (the verifier-side Merkle check catches it); a calendar that drops submissions silently is a denial-of-service against the witness, not a forgery. Defense: configure multiple calendars in parallel and treat any one calendar's commitment as sufficient. A Bitcoin reorganization that rolls back the block invalidates the attestation until
+it lands again; the documented confirmation depth bounds the risk. Bitcoin-confirmation lag (~1 hour at default depth) means 4.C is not available immediately after a checkpoint; high-stakes flows requiring fresh attestations within minutes SHOULD also configure 4.A.
 
 ### 7.D RFC 6962 / Trillian (Status: Reserved)
 
@@ -237,13 +242,15 @@ A conformant ANS-4 implementation:
 8. Honors JCS canonicalization, JWS Detached signatures, and the protected-header set defined in the cryptographic-standards section above.
 
 
-**Optional surface.** Which witness profile to deploy is operator choice within the multi-operator-deployment constraint; SCITT alternative profiles (`draft-ietf-scitt-architecture` admits implementation choices the spec leaves open); TL operator policy (rotation cadence, checkpoint frequency, batching window). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator chose witness profile 4.A over 4.C (or vice versa), and MUST NOT reject a receipt because the operator's checkpoint cadence differs from another deployment's.
+**Optional surface.** Which witness profile to deploy is operator choice within the multi-operator-deployment constraint; SCITT alternative profiles (`draft-ietf-scitt-architecture` admits implementation choices the spec leaves open); TL operator policy (rotation cadence, checkpoint frequency, batching window). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator
+chose witness profile 4.A over 4.C (or vice versa), and MUST NOT reject a receipt because the operator's checkpoint cadence differs from another deployment's.
 
 ## 10. Security considerations
 
 ### 10.1 RA / TL collusion
 
-When the RA and TL are operated by the same entity, that entity could in principle forge events with no independent check, because the keys that sign producer signatures and TL checkpoints are under the same operator's control. Witness profiles are the primary mitigation: a witness's external attestation against the TL state cannot be forged without compromising the witness's backend (Hedera, OpenTimestamps, etc.) too. A private audit trail inside the registry's own infrastructure cannot be checked by third parties; a multi-operator log with witness-based monitoring can.
+When the RA and TL are operated by the same entity, that entity could in principle forge events with no independent check, because the keys that sign producer signatures and TL checkpoints are under the same operator's control. Witness profiles are the primary mitigation: a witness's external attestation against the TL state cannot be forged without compromising the witness's backend (Hedera,
+OpenTimestamps, etc.) too. A private audit trail inside the registry's own infrastructure cannot be checked by third parties; a multi-operator log with witness-based monitoring can.
 
 A federated deployment runs the RA and TL under different operators, eliminating collusion as a single-entity risk.
 

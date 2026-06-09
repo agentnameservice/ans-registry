@@ -3,7 +3,7 @@
 This file is a pointer. The normative ANS specification is layered across six documents under [`spec/`](spec/):
 
 | Layer | File | Topic |
-|---|---|---|
+| --- | --- | --- |
 | ANS-0 | [`spec/ans-0-identity-anchor.md`](spec/ans-0-identity-anchor.md) | Identity anchor, `IdentityClaim`, `AnchorResolver`, FQDN/DID/LEI profiles |
 | ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set, Trust Card |
 | ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | ANSName URI form, Identity Certificate URI SAN binding, PriCC, Stable Aliases, mTLS |
