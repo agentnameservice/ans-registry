@@ -18,18 +18,26 @@ pki/
 
 ## Certificate Hierarchy
 
-ANS uses a two-level CA hierarchy. Each environment has a
-single root CA and per-region sub-CAs that issue leaf
-certificates directly.
+ANS uses two independent CA hierarchies. **Hierarchy 1** (AWS
+Private CA) issues v1 identity certs; **Hierarchy 2** (GoDaddy
+Private CA) issues v2 identity certs. Both are present in the
+prod bundle and must be trusted to verify identity certs from
+either API version.
 
 ```text
-Root CA (self-signed, per-environment)
-  CN = gd-domain-parking
-  O  = GoDaddy, OU = Engineering, C = US
-  │
-  ├── Sub-CA (us-east-1)
-  ├── Sub-CA (us-west-2)
-  └── Sub-CA (ap-south-1)   ← prod only
+Hierarchy 1 — AWS Private CA (v1 identity certs)
+  Root CA (self-signed, per-environment)
+    CN = gd-domain-parking
+    O  = GoDaddy, OU = Engineering, C = US
+    │
+    ├── Sub-CA (us-east-1)
+    ├── Sub-CA (us-west-2)
+    └── Sub-CA (ap-south-1)   ← prod only
+
+Hierarchy 2 — GoDaddy Private CA (v2 identity certs)
+  Root CA (self-signed, global)
+    CN = GoDaddy Private Commercial Root CA - PR1
+    O  = GoDaddy.com, C = US
 ```
 
 ## Environments
@@ -46,10 +54,12 @@ validity, extensions, etc.) using the commands in the
 ## Bundle Format
 
 Each `ca-bundle.pem` contains all CA certificates for its
-environment as concatenated PEM blocks. Region comments
-(e.g. `# us-east-1`) are included between certificates for
-human readability. Certificates are ordered by region; the
-root CA (when present) appears first.
+environment as concatenated PEM blocks. Comments are included
+between certificates for human readability: region labels
+(e.g. `# us-east-1`) for regional sub-CAs, and descriptive
+labels (e.g. `# godaddy-private-commercial-root`) for
+non-regional roots. In the prod bundle, certificates from both
+CA hierarchies are present; load the full bundle to trust both.
 
 ## Verifying Certificates
 
@@ -104,8 +114,12 @@ openssl x509 -in pki/prod/ca-bundle.pem -noout -text
 
 ## Rotation Policy
 
-- Root CAs have a **10-year** validity window (prod) to
-  minimize rotation overhead.
+- Hierarchy 1 root CAs have a **10-year** validity window
+  (prod) to minimize rotation overhead.
+- Hierarchy 2 root CA (`GoDaddy Private Commercial Root CA -
+  PR1`) has a **20-year** validity window (2026–2046),
+  consistent with GoDaddy commercial CA lifecycle. No
+  regional sub-CAs exist in this hierarchy.
 - Sub-CAs have **5-year** (prod) or **2-year** (OTE)
   validity windows.
 - New certificates will be committed to this repo **before
