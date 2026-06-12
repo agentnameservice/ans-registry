@@ -75,13 +75,14 @@ For FQDN-anchored registrations, the agent's operational endpoint and its identi
 Non-FQDN anchors break the coincidence. A `did:web`-anchored agent typically still serves traffic at an FQDN, but its identity is the DID URI rather than the hostname:
 
 | Field | FQDN registration | `did:web` registration | LEI registration |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `AgentHost` | `invoicing.acme.com` | `sdk-did-agent.plang.example.com` | operator's chosen service endpoint |
 | `IdentityClaim.resolvedId` | `invoicing.acme.com` | `did:web:sdk-did-agent.plang.example.com` | `549300EXAMPLE00LEI17` |
 
 For LEI registrations the divergence is starker still. LEIs do not carry an FQDN; the operator chooses the endpoint and binds it to the LEI through a cross-anchor link in ANS-1 (see the LEI subsection below).
 
-ANS-1 stores both fields on a registration (`AgentHost` for operational addressing, `IdentityClaim.resolvedId` for identity verification). Higher specs (ANS-3 DNS publication, ANS-5 verification) name explicitly which field a given operation consumes. An implementer who collapses the two for the FQDN case alone produces a working RA; an implementer who collapses them generally cannot accept non-FQDN anchors.
+ANS-1 stores both fields on a registration (`AgentHost` for operational addressing, `IdentityClaim.resolvedId` for identity verification). Higher specs (ANS-3 DNS publication, ANS-5 verification) name explicitly which field a given operation consumes. An implementer who collapses the two for the FQDN case alone produces a working RA; an implementer who collapses them generally cannot accept
+non-FQDN anchors.
 
 ## 4. The `AnchorResolver` interface
 
@@ -96,11 +97,14 @@ interface AnchorResolver {
 ```
 
 - **`resolve(input)`** is for anchors that own their key fetch end-to-end. The DID profile (0.B) reads the DID document over HTTPS or chain-RPC and extracts the active verification method. The LEI profile (0.C) reads the GLEIF Level 1/Level 2 record and extracts the entity's vLEI attestation key. Both call paths are self-contained.
-- **`resolveWithKey(input, key, metadataUrlHint)`** is for the FQDN profile (0.A). The verification key for an FQDN anchor lives in the agent's certificate chain that ANS-1 has already validated (or the operator has presented as a Bring-Your-Own Cert). A resolver that re-fetched the certificate would duplicate ANS-1's work and risk observing a different certificate than the service signed. The FQDN resolver instead consumes the key ANS-1 supplies and verifies that key against DNS state (DNSSEC chain when present, SAN match in any case). The `metadataUrlHint` parameter is an optional suggestion from the caller about where to find anchor-specific metadata; the resolver MAY ignore it and use its own resolution path.
+- **`resolveWithKey(input, key, metadataUrlHint)`** is for the FQDN profile (0.A). The verification key for an FQDN anchor lives in the agent's certificate chain that ANS-1 has already validated (or the operator has presented as a Bring-Your-Own Cert). A resolver that re-fetched the certificate would duplicate ANS-1's work and risk observing a different certificate than the service signed. The
+  FQDN resolver instead consumes the key ANS-1 supplies and verifies that key against DNS state (DNSSEC chain when present, SAN match in any case). The `metadataUrlHint` parameter is an optional suggestion from the caller about where to find anchor-specific metadata; the resolver MAY ignore it and use its own resolution path.
 
-A profile MAY implement only one entry point. The FQDN profile MUST implement `resolveWithKey` and MAY return `FQDN_RESOLVE_NOT_IMPLEMENTED` from `resolve`. The DID and LEI profiles MUST implement `resolve` and MAY return `<TYPE>_RESOLVE_WITH_KEY_NOT_APPLICABLE` from `resolveWithKey`. A multi-profile facade dispatches based on the lexical-form rules below and routes to whichever entry point the matched profile implements.
+A profile MAY implement only one entry point. The FQDN profile MUST implement `resolveWithKey` and MAY return `FQDN_RESOLVE_NOT_IMPLEMENTED` from `resolve`. The DID and LEI profiles MUST implement `resolve` and MAY return `<TYPE>_RESOLVE_WITH_KEY_NOT_APPLICABLE` from `resolveWithKey`. A multi-profile facade dispatches based on the lexical-form rules below and routes to whichever entry point the
+matched profile implements.
 
-The two-entry-point shape is normative for v0.1.0. A future ANS-0 amendment that moves the FQDN profile to own DNS resolution end-to-end (so the verification key arrives through the resolver itself rather than through ANS-1's cert chain) MAY collapse `resolveWithKey` into a deprecated alias for `resolve`. Until that amendment lands, both entry points are required and implementations MUST NOT assume either is universal.
+The two-entry-point shape is normative for v0.1.0. A future ANS-0 amendment that moves the FQDN profile to own DNS resolution end-to-end (so the verification key arrives through the resolver itself rather than through ANS-1's cert chain) MAY collapse `resolveWithKey` into a deprecated alias for `resolve`. Until that amendment lands, both entry points are required and implementations MUST NOT
+assume either is universal.
 
 `supportedProfiles` enables configuration-driven composition: an RA configured to accept FQDN registrations only configures an `AnchorResolver` whose `supportedProfiles()` returns `["0.A-fqdn"]`. An RA accepting all three anchor types registers a multi-profile resolver. The set is mechanically auditable.
 
@@ -114,7 +118,8 @@ The facade recognizes anchor inputs by lexical form. The dispatch order is fixed
 2. Inputs that are 20 ASCII alphanumeric characters AND match the ISO 17442 mod-97 check-digit rule dispatch to the LEI profile (0.C).
 3. Inputs that match RFC 1123 hostname syntax AND **contain at least one dot** dispatch to the FQDN profile (0.A).
 
-The dot requirement on rule 3 is the tie-breaker: a single-label hostname (`myhost`) is not a valid FQDN input. A 20-character ASCII string that is also a syntactically-valid single label (e.g., `12345678901234567abc`) might match both the LEI rule and the FQDN rule without the dot requirement. The dot requirement ensures that LEI matching takes precedence and that single-label hostnames are rejected as `INVALID_ANCHOR_FORMAT` rather than silently misclassified. This preserves multi-vendor interoperability: implementers who write a regex-based LEI detector and run it before FQDN checks cannot silently misclassify hostnames.
+The dot requirement on rule 3 is the tie-breaker: a single-label hostname (`myhost`) is not a valid FQDN input. A 20-character ASCII string that is also a syntactically-valid single label (e.g., `12345678901234567abc`) might match both the LEI rule and the FQDN rule without the dot requirement. The dot requirement ensures that LEI matching takes precedence and that single-label hostnames are
+rejected as `INVALID_ANCHOR_FORMAT` rather than silently misclassified. This preserves multi-vendor interoperability: implementers who write a regex-based LEI detector and run it before FQDN checks cannot silently misclassify hostnames.
 
 Inputs that match more than one shape after the rules above are handled by profile authors coordinating through an ANS-0 amendment; today no such overlap exists. Inputs that match no shape are rejected with `INVALID_ANCHOR_FORMAT`.
 
@@ -137,7 +142,8 @@ Three anchor types are normative: FQDN, DID, LEI. Each section below specifies t
 
 Resolves a fully-qualified domain name through DNS plus TLS-PKI. Uses `resolveWithKey(input, jwk, metadataURL)`; ANS-1 supplies the JWK from the validated certificate chain.
 
-**Resolution.** Validate FQDN syntax per RFC 1123 (at least one dot). Lowercase, strip any trailing dot. Validate the certificate chain through the system trust store (or a configured private CA). Validate the certificate's SAN includes the FQDN; for versioned registrations, validate the URI SAN encodes the matching ANSName. If the zone is DNSSEC-signed, validate the chain and capture the earliest RRSIG validity end as `expiresAt`.
+**Resolution.** Validate FQDN syntax per RFC 1123 (at least one dot). Lowercase, strip any trailing dot. Validate the certificate chain through the system trust store (or a configured private CA). Validate the certificate's SAN includes the FQDN; for versioned registrations, validate the URI SAN encodes the matching ANSName. If the zone is DNSSEC-signed, validate the chain and capture the earliest
+RRSIG validity end as `expiresAt`.
 
 **Domain-control proof for ANS-1.** Standard ACME (RFC 8555, DNS-01 or HTTP-01). The RA validates the ACME response, then validates the registration's signed payload against the certificate's key. Domain control plus key control; both required.
 
@@ -151,11 +157,14 @@ Resolves a [W3C DID Core 1.0](https://www.w3.org/TR/did-core/) URI through the m
 
 **Verification-method selection.** Prefer methods referenced by `assertionMethod`; fall back to `authentication`. On ties, select by the most recent `created` or `updated` timestamp (missing timestamps treated as oldest); on remaining ties, by lexicographic order of the verification method id (NFC-normalized, UTF-8 byte sort).
 
-**`did:web` resolution.** Issue HTTPS GET to `https://<domain>/.well-known/did.json` (or `https://<domain>/<path>/did.json` for path-component DIDs). Follow up to 5 redirects, all on the same registrable domain (public-suffix-plus-one); cross-registrable-domain redirects fail closed with `DID_REDIRECT_DOMAIN_MISMATCH`. Validate response status, content-type (`application/did+json` or `application/json`), and that the document `id` equals the input DID URI.
+**`did:web` resolution.** Issue HTTPS GET to `https://<domain>/.well-known/did.json` (or `https://<domain>/<path>/did.json` for path-component DIDs). Follow up to 5 redirects, all on the same registrable domain (public-suffix-plus-one); cross-registrable-domain redirects fail closed with `DID_REDIRECT_DOMAIN_MISMATCH`. Validate response status, content-type (`application/did+json` or
+`application/json`), and that the document `id` equals the input DID URI.
 
-**`did:web` domain-control proof for ANS-1.** RA generates a 32-byte challenge token `T`. Operator publishes `T` at `https://<domain>/.well-known/ans-did-web-challenge.txt`. RA fetches, validates response status, content-type starts with `text/plain`, body equals `T`, and the TLS chain matches the chain seen during DID document resolution. RA then verifies the registration's signed payload against the verification-method-selected key.
+**`did:web` domain-control proof for ANS-1.** RA generates a 32-byte challenge token `T`. Operator publishes `T` at `https://<domain>/.well-known/ans-did-web-challenge.txt`. RA fetches, validates response status, content-type starts with `text/plain`, body equals `T`, and the TLS chain matches the chain seen during DID document resolution. RA then verifies the registration's signed payload against
+the verification-method-selected key.
 
-**`did:plc` / `did:key` / `did:ethr` / `did:ion`.** `did:plc` resolves through the PLC directory (verifiers SHOULD configure a mirror to avoid single-operator dependency); `did:key` is offline (multibase-decode the suffix, validate the multicodec key-type prefix); `did:ethr` reads on-chain state through Ethereum JSON-RPC and SHOULD require 12 block confirmations before treating a transfer event as final; `did:ion` reads from a Sidetree-on-Bitcoin endpoint.
+**`did:plc` / `did:key` / `did:ethr` / `did:ion`.** `did:plc` resolves through the PLC directory (verifiers SHOULD configure a mirror to avoid single-operator dependency); `did:key` is offline (multibase-decode the suffix, validate the multicodec key-type prefix); `did:ethr` reads on-chain state through Ethereum JSON-RPC and SHOULD require 12 block confirmations before treating a transfer event as
+final; `did:ion` reads from a Sidetree-on-Bitcoin endpoint.
 
 **Freshness budgets.** `did:web` 24 hours; `did:plc` 6 hours; `did:key` always fresh; `did:ethr` 1 hour; `did:ion` 12 hours.
 
@@ -165,13 +174,16 @@ Resolves a [W3C DID Core 1.0](https://www.w3.org/TR/did-core/) URI through the m
 
 Resolves an [ISO 17442](https://www.iso.org/standard/78829.html) Legal Entity Identifier through the [GLEIF](https://www.gleif.org/) Level 1 / Level 2 API. Uses `resolve(input)`. LEI binds an agent to the legal entity that operates it; FQDN proves technical control, DID proves cryptographic control, LEI proves organizational identity. Regulated deployments typically pair LEI with FQDN or DID.
 
-**Resolution.** Validate the 20-character LEI (4 LOU prefix + 2 reserved `00` + 12 entity-specific + 2 ISO 17442 mod-97 check digits) before any network call; reject with `LEI_BAD_FORMAT` on check-digit failure. HTTPS GET to `https://api.gleif.org/api/v1/lei-records/{LEI}` with `Accept: application/vnd.api+json`. Validate TLS through the system trust store (reject below TLS 1.2). Validate response status (200; 404 maps to `LEI_UNKNOWN`), JSON shape (`data.type == "lei-records"`, `data.id == <LEI>`), and entity status (`attributes.entity.status == "ACTIVE"`; `INACTIVE` / `LAPSED` / `RETIRED` / `MERGED` reject with `LEI_INACTIVE`). Verify the LOU's response signature (`GLEIF-Record-Signature` header) through the GLEIF root certificate.
+**Resolution.** Validate the 20-character LEI (4 LOU prefix + 2 reserved `00` + 12 entity-specific + 2 ISO 17442 mod-97 check digits) before any network call; reject with `LEI_BAD_FORMAT` on check-digit failure. HTTPS GET to `https://api.gleif.org/api/v1/lei-records/{LEI}` with `Accept: application/vnd.api+json`. Validate TLS through the system trust store (reject below TLS 1.2). Validate response
+status (200; 404 maps to `LEI_UNKNOWN`), JSON shape (`data.type == "lei-records"`, `data.id == <LEI>`), and entity status (`attributes.entity.status == "ACTIVE"`; `INACTIVE` / `LAPSED` / `RETIRED` / `MERGED` reject with `LEI_INACTIVE`). Verify the LOU's response signature (`GLEIF-Record-Signature` header) through the GLEIF root certificate.
 
 **GLEIF root certificate pinning.** The GLEIF root MUST be pinned in the resolver implementation; trust-store fallback is not acceptable. The root rotates every ~5 years; track GLEIF's published rotation schedule and update during the overlap window.
 
-**Entity's ANS attestation key.** Two transports admitted; the spec is transport-agnostic. **Option A (preferred):** GLEIF vLEI self-attestation of type `ans:public-key:v1` carrying the entity's public key in JWK form, signed by the entity's vLEI signing key. **Option B (transition):** out-of-band registration with the entity's LOU under a custom Level 2 field (`ansAttestationKey`); LOU returns the field on the standard API response. Implementations MUST support Option A; SHOULD support Option B for transition.
+**Entity's ANS attestation key.** Two transports admitted; the spec is transport-agnostic. **Option A (preferred):** GLEIF vLEI self-attestation of type `ans:public-key:v1` carrying the entity's public key in JWK form, signed by the entity's vLEI signing key. **Option B (transition):** out-of-band registration with the entity's LOU under a custom Level 2 field (`ansAttestationKey`); LOU returns
+the field on the standard API response. Implementations MUST support Option A; SHOULD support Option B for transition.
 
-**Cross-anchor binding for ANS-1.** LEI anchors do not bind a service endpoint. ANS-1 requires a cross-anchor binding to at least one anchor that does (FQDN or DID). The operator first registers under the FQDN or DID anchor, then registers the LEI as a cross-reference signed by both the FQDN/DID-controlled key and the LEI-controlled key. The RA verifies both signatures before recording the link as an EquivalenceLink event (defined in the cross-anchor identity equivalence section below) in the TL. Without the cross-anchor binding, an LEI registration is purely organizational identity with no operational endpoint claim.
+**Cross-anchor binding for ANS-1.** LEI anchors do not bind a service endpoint. ANS-1 requires a cross-anchor binding to at least one anchor that does (FQDN or DID). The operator first registers under the FQDN or DID anchor, then registers the LEI as a cross-reference signed by both the FQDN/DID-controlled key and the LEI-controlled key. The RA verifies both signatures before recording the link as
+an EquivalenceLink event (defined in the cross-anchor identity equivalence section below) in the TL. Without the cross-anchor binding, an LEI registration is purely organizational identity with no operational endpoint claim.
 
 **Freshness budget.** 7 days. Verifiers in regulated verticals operating under same-day reporting requirements SHOULD shorten to 24 hours.
 
@@ -188,7 +200,7 @@ A new anchor type is added by amending this specification to extend the `AnchorT
 Each anchor profile specifies a **freshness budget**: the maximum age a cached claim can have before it MUST be re-resolved. Defaults:
 
 | Profile | Freshness budget | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | 0.A FQDN | 1 hour | Matches typical DNS TTLs; profile MAY shorten to honor an observed TTL below 1 hour. |
 | 0.B DID (`did:web`) | 24 hours | Matches typical HTTPS cache expectations for DID document fetches. |
 | 0.B DID (other methods) | per-method (see the DID subsection above) | Method-specific resolution costs and confirmation latencies vary. |
@@ -206,7 +218,8 @@ Implementations MAY cache `publicKey` in process memory between calls within the
 
 ### 6.3 Absent-claim treatment
 
-An implementation that loads a registration without an attached `IdentityClaim` MUST treat the registration as **FQDN-implicit**: the resolved identifier is the registration's `agentHost`, the anchor type is FQDN, and the freshness budget for FQDN applies. New registrations MUST attach a typed `IdentityClaim`; the FQDN-implicit treatment lets registrations that predate typed anchor support continue to load.
+An implementation that loads a registration without an attached `IdentityClaim` MUST treat the registration as **FQDN-implicit**: the resolved identifier is the registration's `agentHost`, the anchor type is FQDN, and the freshness budget for FQDN applies. New registrations MUST attach a typed `IdentityClaim`; the FQDN-implicit treatment lets registrations that predate typed anchor support
+continue to load.
 
 Storage shape (column nullability, migration mechanics, backfill schedule) is implementation guidance and is not specified here.
 
@@ -244,21 +257,25 @@ Conformant implementations advertise the profiles they support through `supporte
 
 ### 9.1 Resolution-path attacks
 
-The anchor resolution path is part of ANS's trust boundary. An attacker who compromises the resolution path (a DNS hijack, a poisoned DID document, a forged GLEIF response) compromises every higher-spec defense built on the resolution result. Profile documents MUST specify the integrity controls applied to the resolution path: DNSSEC for FQDN, signature verification for DID document fetches, certificate chain validation pinned to the GLEIF root for LEI responses.
+The anchor resolution path is part of ANS's trust boundary. An attacker who compromises the resolution path (a DNS hijack, a poisoned DID document, a forged GLEIF response) compromises every higher-spec defense built on the resolution result. Profile documents MUST specify the integrity controls applied to the resolution path: DNSSEC for FQDN, signature verification for DID document fetches,
+certificate chain validation pinned to the GLEIF root for LEI responses.
 
 ### 9.2 Key rotation
 
-`IdentityClaim` carries the **active** public key, not the full key history. A verifier that has cached a claim with key K1 and resolves the anchor again to find key K2 has observed a rotation. ANS-0 does not specify whether the rotation is legitimate; that determination requires the rotation event to appear in the ANS-4 Transparency Log signed by K1. Verifiers SHOULD check the TL for a corresponding rotation event before accepting K2 as authoritative.
+`IdentityClaim` carries the **active** public key, not the full key history. A verifier that has cached a claim with key K1 and resolves the anchor again to find key K2 has observed a rotation. ANS-0 does not specify whether the rotation is legitimate; that determination requires the rotation event to appear in the ANS-4 Transparency Log signed by K1. Verifiers SHOULD check the TL for a
+corresponding rotation event before accepting K2 as authoritative.
 
 A key rotation that does NOT appear in the TL is a candidate compromise. ANS-5 surfaces this as a verification finding.
 
 ### 9.3 Anchor squatting
 
-The resolution interface gives no protection against anchor squatting (an attacker registering `acme-payments.example.com` to fool users into mistaking it for `payments.example.com`). Anchor squatting is a discovery-layer concern (addressed by the Trust Index, in the `ti-*` layer set); the threat model maps it to Group A. ANS-0 specifies how to verify the anchor proves what it claims to prove; whether what the anchor claims to be is what the user intended is outside scope.
+The resolution interface gives no protection against anchor squatting (an attacker registering `acme-payments.example.com` to fool users into mistaking it for `payments.example.com`). Anchor squatting is a discovery-layer concern (addressed by the Trust Index, in the `ti-*` layer set); the threat model maps it to Group A. ANS-0 specifies how to verify the anchor proves what it claims to prove;
+whether what the anchor claims to be is what the user intended is outside scope.
 
 ### 9.4 Cross-anchor inconsistency
 
-When an agent registers under multiple anchors (cross-anchor identity equivalence), an attacker who compromises one anchor may attempt to drive divergent state across the others (revoke the FQDN registration but leave the LEI registration claiming the agent is healthy). ANS-5's continuous verification detects the divergence. ANS-0 itself does no cross-anchor consistency checking; the consistency check is a higher-spec responsibility.
+When an agent registers under multiple anchors (cross-anchor identity equivalence), an attacker who compromises one anchor may attempt to drive divergent state across the others (revoke the FQDN registration but leave the LEI registration claiming the agent is healthy). ANS-5's continuous verification detects the divergence. ANS-0 itself does no cross-anchor consistency checking; the consistency
+check is a higher-spec responsibility.
 
 ### 9.5 Time discipline
 

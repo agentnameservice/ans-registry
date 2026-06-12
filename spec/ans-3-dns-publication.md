@@ -41,7 +41,7 @@ The RA generates record content for child labels under the agent's `agentHost`. 
 Operators that also publish an SVCB record at the agent FQDN (per the consolidated SVCB style in §6.1) redirect address resolution for SVCB-aware clients via TargetName per RFC 9460 §3; non-SVCB-aware clients continue to follow the A, AAAA, or CNAME. ANS reads the child-label records and, in consolidated style, the apex SVCB row at `{agentHost}`.
 
 | Record | Label | Type | Purpose | Scope |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Discovery (consolidated, default) | `{agentHost}` | SVCB | One row per protocol carrying alpn / port / wk / `card-sha256` SvcParams (§6.1) | One per protocol; coexists with cross-draft SvcParams via RFC 9460 §8 |
 | Discovery (legacy fallback) | `_ans.{agentHost}` | TXT | Which protocol the agent speaks and where to find the metadata (§6.2). Used by AHPs whose DNS provider does not support SVCB in service mode | One per `{version, protocol}` pair for versioned registrations; one per protocol for base-only |
 | Badge | `_ans-badge.{agentHost}` | TXT | TL badge URL for verification | One per version for versioned registrations; one for the registration for base-only |
@@ -71,7 +71,7 @@ When the Trust Card carries a stapled SCITT receipt, the discoverer verifies loc
 ### 4.1 Emission table by anchor type
 
 | Anchor profile | Emits | Does not emit |
-|---|---|---|
+| --- | --- | --- |
 | 0.A FQDN | All records in the record-set table above | - |
 | 0.B `did:web` (path-component-bearing or root) | Records under the resolved FQDN of the DID's `<domain>` component | None. The DID's resolved domain has the same emission rules as a direct FQDN registration |
 | 0.B `did:plc` | None | All records. The DID method does not bind to an FQDN |
@@ -93,7 +93,7 @@ DNS-side prerequisites for verification are: DNSSEC signature validity, record p
 Before transitioning a registration from `PENDING_DNS` to `ACTIVE`, the RA runs a conformance check to verify the registrant has provisioned the announced records. The table below enumerates the checks and their required outcomes.
 
 | Record type | Validation procedure | Success criterion | Failure handling |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Discovery (consolidated SVCB at `{agentHost}` per §6.1, or legacy `_ans.{agentHost}` TXT per §6.2) | RA performs DNS lookup for the announced discovery record at the style's label | Record resolves to the announced content | Registration stays in `PENDING_DNS`; the RA retries on schedule and the registrant reconciles by publishing the announced record |
 | Badge TXT | RA performs DNS lookup for `_ans-badge.{agentHost}` | Record resolves to announced URL | Badge missing is non-fatal; activation proceeds without `_ans-badge` (the badge URL derives from `agentId`) |
 | Server DANE TLSA (DNSSEC-signed zones only) | RA performs DNS lookup for `_443._tcp.{agentHost}` TLSA records and validates the DNSSEC chain | At least one TLSA record present and DNSSEC validates to `fully_validated` | DANE validation failure blocks activation; registrant must reconcile TLSA records and retry. The check is skipped in unsigned zones; the registration activates without it. |
@@ -108,7 +108,7 @@ Before transitioning a registration from `PENDING_DNS` to `ACTIVE`, the RA runs 
 ## 5. DNS management roles
 
 | Actor | Initial registration tasks | Ongoing lifecycle tasks | Deregistration tasks |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates. Provisions `_ans-identity._tls` independently of the RA (per §8.1) | Autonomous DNS updates, monitors renewals, submits config changes. Updates `_ans-identity._tls` on Identity Certificate rotation | Submits deregistration request, revokes RA access |
 | **RA** | Generates ACME challenge, verifies record, generates permanent record content (excluding `_ans-identity._tls`) | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE version is deregistered |
 | **DNS provider** | Hosts authorization endpoint, processes AHP's API requests to provision ANS records | Processes AHP's modification requests | Processes deletion requests from the AHP |
@@ -141,18 +141,19 @@ A multi-protocol agent emits one SVCB row per protocol, each carrying the same `
 **SvcParams.**
 
 | SvcParam | Value | Required |
-|---|---|---|
+| --- | --- | --- |
 | `alpn` | ALPN hint (`h2`, `h3`) | Yes |
 | `port` | Service port | Conditional (when not 443 for HTTPS-bearing protocols) |
 | `wk` | Absolute path to the agent's Trust Card body, served over HTTPS at `agentHost`. ANS publishes the full URI form (e.g., `/.well-known/ans/trust-card.json`) per [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615), matching the IANA-registered A2A well-known URI `/.well-known/agent-card.json` | Yes |
 | `card-sha256` | Base64url-encoded SHA-256 digest of the Trust Card body served at `wk`. Covers the same digest bytes the RA seals as `attestations.metadataHashes.capabilitiesHash` in the `AGENT_REGISTERED` TL event; the TL stores hex-lowercase, this SvcParam stores base64url. Verifiers comparing the two MUST decode both to raw bytes before equality check | Yes when the registration submitted Trust Card content |
 | `protocol` | Protocol token (`a2a`, `mcp`, `http`) | Yes when the agent speaks more than one protocol |
 
-Per-protocol metadata files (the A2A AgentCard at `/.well-known/agent-card.json`, an MCP server's published card) are NOT the document at `wk` and are NOT covered by `card-sha256`. They are referenced from the Trust Card body's `endpoints[].metadataUrl` field, and their integrity is sealed only in the TL under `attestations.metadataHashes` keyed by the uppercase protocol token.
+Per-protocol metadata files (the A2A AgentCard at `/.well-known/agent-card.json`, an MCP server's published card) are NOT the document at `wk` and are NOT covered by `card-sha256`. They are referenced from the Trust Card body's `endpoints[].metaDataUrl` field, and their integrity is sealed only in the TL under `attestations.metadataHashes` keyed by the uppercase protocol token.
 
 **CNAME interaction.** A CNAME at `agentHost` blocks the SVCB record per RFC 1034 §3.6.2. Operators that need both a CNAME and consolidated SVCB MUST use CNAME flattening at the DNS provider. When the RA detects a CNAME, it skips emission of the SVCB row and emits the legacy family alone.
 
-**Cross-channel hash consistency.** When both styles are emitted (`dnsRecordStyles: ["ANS_SVCB", "ANS_TXT"]`), the `_ans` record's `url` host and the SVCB target SHOULD point to the same service. If the SVCB row carries `card-sha256`, its decoded digest bytes MUST equal the bytes the RA sealed as `attestations.metadataHashes.capabilitiesHash` in the TL for the same version. A mismatch is an integrity finding ([ANS-5 §4](ans-5-integrity-monitoring.md#4-verification-checks)), not a registration failure.
+**Cross-channel hash consistency.** When both styles are emitted (`dnsRecordStyles: ["ANS_SVCB", "ANS_TXT"]`), the `_ans` record's `url` host and the SVCB target SHOULD point to the same service. If the SVCB row carries `card-sha256`, its decoded digest bytes MUST equal the bytes the RA sealed as `attestations.metadataHashes.capabilitiesHash` in the TL for the same version. A mismatch is an
+integrity finding ([ANS-5 §4](ans-5-integrity-monitoring.md#4-verification-checks)), not a registration failure.
 
 **Coexistence with other drafts.** A discovery client reading consolidated rows SHOULD ignore SvcParams it does not recognize (per RFC 9460 §8) rather than fail closed.
 
@@ -163,7 +164,7 @@ The original `_ans` TXT family. When `p` is set, one record per protocol endpoin
 **Discovery record syntax:** `_ans.{agentHost} IN TXT "v=ans1; version=v1.0.0; p=a2a; url=https://agent.example.com/.well-known/agent-card.json"`.
 
 | Field | Required | Values |
-|---|---|---|
+| --- | --- | --- |
 | `v` | Yes | Always `ans1` |
 | `version` | Yes when versioned (ANS-2); omitted for base-only | Semver prefixed with `v`. Implementations strip the `v` before comparison |
 | `p` | No | `a2a`, `mcp`, `http`. When omitted, the record applies to any protocol |
@@ -178,7 +179,8 @@ The original `_ans` TXT family. When `p` is set, one record per protocol endpoin
 
 **Version coexistence.** Each ACTIVE version gets its own discovery record. A given FQDN's registration is either versioned or base-only at any time; versioned and unversioned records MUST NOT coexist for the same `agentHost`.
 
-**Resolution sequence.** Query all `_ans` TXT records for the FQDN. Filter by `p={target_protocol}`; if no match, select records with no `p` field. If matching records carry `version=`, select the highest semver (or the exact match if the client needs a specific version); if all omit `version=`, select the single base-only record. `mode=direct`: connect to the FQDN. `url` present: fetch. Neither: fall back to `/.well-known/agent-card.json`.
+**Resolution sequence.** Query all `_ans` TXT records for the FQDN. Filter by `p={target_protocol}`; if no match, select records with no `p` field. If matching records carry `version=`, select the highest semver (or the exact match if the client needs a specific version); if all omit `version=`, select the single base-only record. `mode=direct`: connect to the FQDN. `url` present: fetch. Neither:
+fall back to `/.well-known/agent-card.json`.
 
 **Example records.**
 
@@ -206,7 +208,8 @@ ANS-3 defines two operational modes for DNS verification.
 
 **Lookup-mode.** The verifier queries DNS directly for records and validates DNSSEC where the zone is signed. The RA runs activation validations against live DNS. Registrants provision records before the registration completes (typically through an AHP-side DNS-management step). Lookup-mode is the production-conformant path.
 
-**Noop-bypass.** The verifier accepts DNS records as provided by the RA in the registration event itself, without querying DNS independently. Noop-bypass exists for local testing and single-RA internal use cases where DNS is unavailable or not yet operational. A deployment running noop-bypass is development-only and non-conformant for production; an operator MUST NOT claim ANS-3 conformance while serving external verifiers from a noop-bypass deployment.
+**Noop-bypass.** The verifier accepts DNS records as provided by the RA in the registration event itself, without querying DNS independently. Noop-bypass exists for local testing and single-RA internal use cases where DNS is unavailable or not yet operational. A deployment running noop-bypass is development-only and non-conformant for production; an operator MUST NOT claim ANS-3 conformance while
+serving external verifiers from a noop-bypass deployment.
 
 Implementations MUST document which mode each deployment runs and MUST default to lookup-mode for any deployment exposed to external verifiers.
 
@@ -214,7 +217,8 @@ Implementations MUST document which mode each deployment runs and MUST default t
 
 ### 8.1 RA-DNS privilege separation
 
-The RA's DNS permissions MUST exclude TLSA write access. A compromised RA that could write both `_443._tcp.{agentHost}` (Server DANE) and `_ans-identity._tls.{agentHost}` (Identity DANE) TLSA records plus issue a fraudulent Server Certificate could compromise DANE's defense-in-depth in a single action. The RA generates the expected Server TLSA content from the issued Server Certificate; the AHP publishes both Server TLSA and Identity TLSA to DNS. The split keeps both DANE records under AHP authority while the certificate-issuance authority stays with the RA, and preserves DANE as an independent verification channel.
+The RA's DNS permissions MUST exclude TLSA write access. A compromised RA that could write both `_443._tcp.{agentHost}` (Server DANE) and `_ans-identity._tls.{agentHost}` (Identity DANE) TLSA records plus issue a fraudulent Server Certificate could compromise DANE's defense-in-depth in a single action. The RA generates the expected Server TLSA content from the issued Server Certificate; the AHP
+publishes both Server TLSA and Identity TLSA to DNS. The split keeps both DANE records under AHP authority while the certificate-issuance authority stays with the RA, and preserves DANE as an independent verification channel.
 
 A compromise of either party alone is detectable through a mismatch in the verification record (mismatched fingerprints, DNSSEC signature failures, or divergent TL evidence). Compromise of both parties simultaneously requires detection by external scoring services and is out of scope for ANS.
 
@@ -244,13 +248,14 @@ A conformant ANS-3 implementation:
 2. Honors the anchor-conditional emission table above.
 3. Defaults to publishing the consolidated SVCB record (§6.1). In DNSSEC-signed zones, additionally publishes one TLSA at `_443._tcp.{agentHost}` (§6.1 TLSA pairing). AHPs whose DNS provider does not support SVCB in service mode publish the `_ans` TXT family (§6.2). All three paths are conformant; SVCB is the default.
 4. Refuses to emit records for anchor types whose emission table cell says "None."
-5. Specifies Identity Certificate TLSA record content (`_ans-identity._tls`) only when the registration is versioned (`versionSelector` present); the AHP writes the record per §8.1 (the RA MUST NOT write TLSA records).
+5. Specifies Identity Certificate TLSA record content (`_ans-identity._tls`) only when the registration is versioned (`version` present); the AHP writes the record per §8.1 (the RA MUST NOT write TLSA records).
 6. Honors the per-version TTL parameter from operator policy.
 7. Operates in lookup-mode for any deployment exposed to external verifiers; declares noop-bypass mode explicitly when used.
 8. Publishes records in public DNS, queryable by any third party.
 
 
-**Optional surface.** Record-style choice (Legacy, Consolidated, or both); DNS verification mode (lookup vs noop-bypass, with noop-bypass non-conformant for external-facing deployments); the TLSA-write duty split (per §8.1, the RA MUST NOT write `_ans-identity._tls`; the AHP MUST); the per-anchor-type emission table that lists "None" for non-FQDN anchors. A conforming verifier MUST NOT downgrade integrity scoring solely because an operator chose Legacy over Consolidated (or vice versa), and MUST NOT reject a registration because its `claim.anchorType` cell reads "None."
+**Optional surface.** Record-style choice (Legacy, Consolidated, or both); DNS verification mode (lookup vs noop-bypass, with noop-bypass non-conformant for external-facing deployments); the TLSA-write duty split (per §8.1, the RA MUST NOT write `_ans-identity._tls`; the AHP MUST); the per-anchor-type emission table that lists "None" for non-FQDN anchors. A conforming verifier MUST NOT downgrade
+integrity scoring solely because an operator chose Legacy over Consolidated (or vice versa), and MUST NOT reject a registration because its `claim.anchorType` cell reads "None."
 
 ## 11. References
 
@@ -267,7 +272,7 @@ A conformant ANS-3 implementation:
 
 A zone-file snippet showing a versioned ANS registration at `ai-agent.acmecorp.com` running two ACTIVE versions (`v2.1.0` stable and `v2.2.0` beta). Record content matches §6 normative syntax. Per-record ownership is annotated.
 
-```
+```text
 ; ========== ACME Corp ANS Agent Zone Snippet ==========
 ; Zone: acmecorp.com
 ; Agent FQDN: ai-agent.acmecorp.com

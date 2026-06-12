@@ -12,7 +12,7 @@ ANS-1 defines how an anchor proven through ANS-0 binds to operational metadata (
 
 - The `RegistrationService` code-interface contract: register, verify-acme, verify-dns, deprecate, revoke.
 - The registration aggregate's data shape and identifier set.
-- The lifecycle state machine (PENDING → PENDING_DNS → ACTIVE → DEPRECATED → REVOKED, plus EXPIRED).
+- The lifecycle state machine (PENDING_VALIDATION → PENDING_CERTS → PENDING_DNS → ACTIVE → DEPRECATED → REVOKED, plus EXPIRED and FAILED).
 - The event set the RA emits to the Transparency Log (ANS-4) and event stream consumers.
 - The cross-anchor `EquivalenceLink` event shape.
 - Base-only registration handling, including the special-case rules around verification and uniqueness.
@@ -28,40 +28,42 @@ ANS-1 does **not** specify the anchor proof itself (ANS-0), the ANSName form or 
 - **Registration**: an aggregate the RA owns, identified by `agentId`, carrying one `IdentityClaim` plus operational metadata, status, and lifecycle history.
 - **AHP (Agent Hosting Platform)**: the operator that hosts the agent's code and manages its DNS and certificates. Submits the registration request.
 - **Lifecycle event**: a `RegistrationEvent` the RA emits when a registration changes state (`AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED`).
-- **Base-only registration**: a registration with no `versionSelector` and no Identity CSR. The agent's identity is the ANS-0 anchor alone; there is no ANSName.
-- **Versioned registration**: a registration with a `versionSelector` and an Identity CSR. The ANSName form (ANS-2) names the version; an Identity Certificate binds it.
+- **Base-only registration**: a registration with no `version` and no Identity CSR. The agent's identity is the ANS-0 anchor alone; there is no ANSName.
+- **Versioned registration**: a registration with a `version` and an Identity CSR. The ANSName form (ANS-2) names the version; an Identity Certificate binds it.
 - **`EquivalenceLink`**: a TL event recording that two registrations share an operator and refer to the same agent through different anchor types (defined in the event-set section).
 - **Capability token**: a JWT issued by an ANS-registered agent to an ANS-registered verifier, carrying claims that bind the token's use to specific audiences and constrain its lifetime.
 
 ## 3. The `RegistrationService` interface
 
-The `RegistrationService` interface is the protocol contract for ANS-1; conformant implementations expose `register`, `verifyACME`, `getRegistration`, and the lifecycle event surface. ANS-1 carries the `LifecycleStatus` enum (`PENDING`, `PENDING_DNS`, `ACTIVE`, `DEPRECATED`, `REVOKED`, `EXPIRED`) and the registration fields `description`, `serverCsr`, `serverCertificatePEM`, and `echConfigList` on `RegisterInput`.
+The `RegistrationService` interface is the protocol contract for ANS-1; conformant implementations expose `register`, `verifyACME`, `getRegistration`, and the lifecycle event surface. ANS-1 carries the `LifecycleStatus` enum (`PENDING_VALIDATION`, `PENDING_DNS`, `ACTIVE`, `DEPRECATED`, `REVOKED`, `EXPIRED`; the RA also surfaces `PENDING_CERTS` and `FAILED`) and the registration fields
+`agentDescription`, `serverCsrPEM`, `serverCertificatePEM`, and `echConfigList` on `RegisterInput`.
 
 `RegistrationService` reads identity through `IdentityClaim` only (ANS-0). The `agentHost` field is stored alongside the claim because ANS-0 separates operational endpoint from identity anchor; ANS-3 (DNS publication) consumes `agentHost`, while ANS-5 (verification) consumes both `agentHost` and `claim.resolvedId`.
 
 ## 4. Registration sequence
 
-Registration has two stages: the RA accepts the request and sets the registration to `PENDING` (reserving the ANSName when one was submitted), then activates the agent once all validations pass.
+Registration has two stages: the RA accepts the request and sets the registration to `PENDING_VALIDATION` (reserving the ANSName when one was submitted), then activates the agent once all validations pass.
 
 ### 4.1 Stage 1 — pending registration
 
 The AHP submits a registration request. The payload structure mirrors `RegisterInput` defined above plus a few fields the RA derives or fills in:
 
 | Group | Field | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Anchor** | `claim` (an `IdentityClaim` from an ANS-0 resolver) | Yes | Carries `anchorType`, `resolvedId`, `publicKey`, optional `metadataUrl`, `issuedAt`, `expiresAt` |
 | **Identity** | `agentHost` | Yes | Operational FQDN; equals `claim.resolvedId` for FQDN anchors |
-| | `versionSelector` | Conditional | Semantic version (e.g., `1.0.0`). Required when the registrant is declaring a versioned identifier; absent for base-only registrations |
-| | `displayName` | Yes | Human-readable name (max 64 chars) |
-| | `description` | No | Brief capability description (max 150 chars) |
+| | `version` | Conditional | Semantic version (e.g., `1.0.0`). Required when the registrant is declaring a versioned identifier; absent for base-only registrations |
+| | `agentDisplayName` | Yes | Human-readable name (max 64 chars) |
+| | `agentDescription` | No | Brief capability description (max 150 chars) |
 | **Endpoints** | per-endpoint `protocol` | Yes | `A2A`, `MCP`, `HTTP-API`, or `PAYMENT` (minimum 1 endpoint) |
 | | per-endpoint `agentUrl` | Yes | The endpoint URL (authority portion MUST be `agentHost` per RFC 3986 §3) |
-| | per-endpoint `metadataUrl` | No | Protocol metadata location |
+| | per-endpoint `metaDataUrl` | No | Protocol metadata location |
+| | per-endpoint `metaDataHash` | No | `SHA256:`-prefixed SHA-256 of the document at `metaDataUrl`, computed by the AHP. The RA seals it into the TL `attestations.metadataHashes` map keyed by the uppercase protocol token |
 | | per-endpoint `documentationUrl` | No | Developer documentation |
 | | per-endpoint `functions` | No | Function declarations: `id`, `name`, optional `tags` |
 | | per-endpoint `transports` | No | `STREAMABLE-HTTP`, `SSE`, `JSON-RPC`, `GRPC`, `REST`, `HTTP` |
-| **Certificates** | `identityCsr` | Conditional | CSR for Identity Certificate. Required when `versionSelector` is submitted; absent otherwise. A payload with `versionSelector` and no `identityCsr` (or the reverse) is rejected |
-| | `serverCsr` | No | CSR for RA-issued Server Certificate |
+| **Certificates** | `identityCsrPEM` | Conditional | CSR for Identity Certificate. Required when `version` is submitted; absent otherwise. A payload with `version` and no `identityCsrPEM` (or the reverse) is rejected |
+| | `serverCsrPEM` | No | CSR for RA-issued Server Certificate |
 | | `serverCertificatePEM` | No | BYOC Server Certificate (alternative to CSR) |
 | **Trust Card** | `trustCardContent` | No | Full Trust Card JSON. Hashed and sealed into the TL at activation, enabling content integrity verification |
 | **Privacy** | `echConfigList` | No | Base64-encoded ECHConfigList (RFC 9849) |
@@ -75,29 +77,30 @@ Pending-stage validations:
 1. The `claim` MUST be a fresh `IdentityClaim` from a configured `AnchorResolver` whose `supportedProfiles()` returns `claim.anchorType`.
 2. `agentHost` MUST be a syntactically valid FQDN (RFC 1123). For FQDN anchors, `agentHost` MUST equal `claim.resolvedId` (with the ANS-0 dot tie-breaker rule having already applied at the dispatcher).
 3. Each endpoint's `agentUrl` MUST use `agentHost` as its scheme + authority portion (RFC 3986 §3). The constraint keeps endpoint URLs reachable through the same TLS certificate that anchors the agent's identity.
-4. Conditional cert rule: `versionSelector` and `identityCsr` are jointly present or jointly absent. A payload with one and not the other is rejected with `ANS1_VERSIONED_CSR_MISMATCH`.
-5. **Base-only uniqueness predicate.** The `(agentHost, claim.anchorType)` pair MUST NOT collide with any existing ACTIVE base-only registration. Each pair admits at most one base-only registration; an FQDN already carrying an FQDN-anchored row MAY accept a DID-anchored or LEI-anchored base-only row under the same `agentHost`, because the anchor type differs. A registration whose pair already exists is rejected with `BASE_ONLY_PAIR_TAKEN`.
+4. Conditional cert rule: `version` and `identityCsrPEM` are jointly present or jointly absent. A payload with one and not the other is rejected with `ANS1_VERSIONED_CSR_MISMATCH`.
+5. **Base-only uniqueness predicate.** The `(agentHost, claim.anchorType)` pair MUST NOT collide with any existing ACTIVE base-only registration. Each pair admits at most one base-only registration; an FQDN already carrying an FQDN-anchored row MAY accept a DID-anchored or LEI-anchored base-only row under the same `agentHost`, because the anchor type differs. A registration whose pair already
+   exists is rejected with `BASE_ONLY_PAIR_TAKEN`.
 6. Endpoint set MUST contain at least one endpoint with valid `protocol` and `agentUrl`.
-7. `displayName` and `description` length limits apply (64 and 150 chars respectively).
+7. `agentDisplayName` and `agentDescription` length limits apply (64 and 150 chars respectively).
 
-If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName (only when `versionSelector` is present) per [ANS-2 §2](ans-2-versioned-naming.md), and sets the registration to `PENDING`.
+If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName (only when `version` is present) per [ANS-2 §2](ans-2-versioned-naming.md), and sets the registration to `PENDING_VALIDATION`.
 
 ### 4.2 Stage 2 — activation
 
 Activation requires four validations (all MUST pass):
 
 | Validation | Method |
-|---|---|
+| --- | --- |
 | Anchor proof | The anchor type's domain-control-equivalent proof per the relevant ANS-0 subsection. For FQDN: ACME DNS-01 (RFC 8555 §8.4) or HTTP-01 (RFC 8555 §8.3). For `did:web`: the `.well-known/ans-did-web-challenge.txt` flow per [ANS-0 DID](ans-0-identity-anchor.md#52-did-status-active). For LEI: the entity-control proof plus cross-anchor binding per [ANS-0 LEI](ans-0-identity-anchor.md#53-lei-status-active) |
-| Schema integrity | Fetch each endpoint's `metadataUrl`, hash, compare against the value the AHP submitted (when one was submitted) |
+| Schema integrity | Fetch each endpoint's `metaDataUrl`, hash, compare against the value the AHP submitted (when one was submitted) |
 | DNSSEC presence | Query for DNSKEY at the agent's zone. Advisory: warn if absent; do not block. The RA records the result as a `dnssecStatus` field in the TL event payload, with one of three values: `fully_validated`, `not_signed`, or `signed_broken` |
 | `(host, anchor_type)` uniqueness | Re-check at activation that the uniqueness predicate from the registration-sequence section still holds (a concurrent registration may have taken the slot during the pending window) |
 
 The activation sequence is irreversible once step (d) completes:
 
 | Step | Action |
-|---|---|
-| (a) Certificate issuance | RA obtains the Server Certificate from a Public CA (if CSR) or validates the BYOC certificate. **Conditional on `versionSelector` being present**, the RA also obtains the Identity Certificate from the Private CA per [ANS-2 §3](ans-2-versioned-naming.md). For base-only registrations, the Identity Certificate branch does not run |
+| --- | --- |
+| (a) Certificate issuance | RA obtains the Server Certificate from a Public CA (if CSR) or validates the BYOC certificate. **Conditional on `version` being present**, the RA also obtains the Identity Certificate from the Private CA per [ANS-2 §3](ans-2-versioned-naming.md). For base-only registrations, the Identity Certificate branch does not run |
 | (b) DNS record generation | RA generates record set content per [ANS-3 §3](ans-3-dns-publication.md) |
 | (c) Event payload | RA hashes Trust Card content (if submitted) and assembles the event payload |
 | (d) Log sealing | RA submits signed event to ANS-4 TL. Point of no return |
@@ -108,16 +111,17 @@ DNS provisioning happens after step (e) and is the AHP's responsibility; it fall
 
 ### 4.3 The `verifyACME` rule for base-only registrations
 
-The `verifyACME(agentId)` operation runs the ACME challenge validation step and gates the activation sequence. For a versioned registration it also gates Identity Certificate issuance (step a). For a **base-only registration**, the operation MUST skip the Identity Certificate path entirely; `verifyACME` succeeds when the ACME challenge validates and the Server Certificate (or BYOC cert) is in place, with no requirement for a pending Identity CSR.
+The `verifyACME(agentId)` operation runs the ACME challenge validation step and gates the activation sequence. For a versioned registration it also gates Identity Certificate issuance (step a). For a **base-only registration**, the operation MUST skip the Identity Certificate path entirely; `verifyACME` succeeds when the ACME challenge validates and the Server Certificate (or BYOC cert) is in
+place, with no requirement for a pending Identity CSR.
 
 Conformant ANS-1 implementations MUST gate identity-cert issuance on the presence of an Identity CSR, not unconditionally on lifecycle entry. An implementation that requires a pending Identity CSR for every `verifyACME` call rejects all base-only DID and LEI registrations and is non-conformant.
 
 ### 4.4 The state machine
 
-```
-                    ┌──────────────┐
-                    │   PENDING    │
-                    └──────┬───────┘
+```text
+                ┌────────────────────┐
+                │ PENDING_VALIDATION │
+                └──────────┬─────────┘
                            │ anchor proven, certs ready
                            ▼
                     ┌──────────────┐
@@ -137,30 +141,32 @@ Conformant ANS-1 implementations MUST gate identity-cert issuance on the presenc
                     └──────────────┘         └──────────────┘
 ```
 
-`REVOKED` and `EXPIRED` are terminal. `PENDING` and `PENDING_DNS` MAY be cancelled, removing partial artifacts without a TL event because the log-sealing step has not yet occurred. Revocation is idempotent.
+`REVOKED` and `EXPIRED` are terminal. The pending states (`PENDING_VALIDATION`, `PENDING_CERTS`, `PENDING_DNS`) MAY be cancelled, removing partial artifacts without a TL event because the log-sealing step has not yet occurred. Revocation is idempotent.
 
 Only transitions to `ACTIVE`, `DEPRECATED`, `REVOKED`, `RENEWED`, and `EXPIRED` produce TL events. Transitions before activation are RA-internal.
 
 ## 5. Identifiers
 
 | Identifier | Format | Assigned by | Mutable | Scope | Purpose |
-|---|---|---|---|---|---|
-| **`agentId`** | UUID v4 | RA at registration | No | Issuing RA | Registration record's unique key; used in API paths (`/agents/{agentId}`) |
+| --- | --- | --- | --- | --- | --- |
+| **`agentId`** | UUID | RA at registration | No | Issuing RA | RA registration-instance key; used in the RA API paths (`/v1/agents/{agentId}`) |
+| **`ansId`** | UUID v7 | ANS, at registration | No | Global | Identifier of the ANS entry, carried in the sealed TL event payload (ANS-4). Distinct from the RA's `agentId` **by design** |
 | **`agentHost`** | RFC 1035 FQDN | AHP submits | No | Global | Operational endpoint where the agent terminates TLS |
 | **`claim.resolvedId`** | Anchor-type specific (FQDN, DID URI, or LEI) | ANS-0 resolver | No | Global | Identity anchor; coincides with `agentHost` for FQDN anchors |
-| **`ANSName`** | `ans://v{ver}.{host}` | Derived from `versionSelector` + `agentHost` | No | Global | Versioned identifier; absent for base-only registrations (see [ANS-2 §2](ans-2-versioned-naming.md)) |
-| **`ownerId`** (legacy: `ProviderID`) | RA-defined | RA from authentication system | No | Issuing RA | Names the entity that controls the anchor, not the entity that authored the software |
+| **`ANSName`** | `ans://v{ver}.{host}` | Derived from `version` + `agentHost` | No | Global | Versioned identifier; absent for base-only registrations (see [ANS-2 §2](ans-2-versioned-naming.md)) |
+| **`providerId`** (legacy: `ProviderID`) | RA-defined | RA from authentication system | No | Issuing RA | Names the entity that controls the anchor, not the entity that authored the software |
 | **`supersededBy`** | `agentId` reference | RA when a new version registers | No | Issuing RA | Previous version's registration record |
 
-`ownerId` constraints: stable (the same entity always receives the same `ownerId` from a given RA, regardless of credential), scoped to the issuing RA. In a federated ecosystem, consumers scope `ownerId` by the issuing RA's identifier to avoid collisions.
+`providerId` constraints: stable (the same entity always receives the same `providerId` from a given RA, regardless of credential), scoped to the issuing RA. In a federated ecosystem, consumers scope `providerId` by the issuing RA's identifier to avoid collisions.
 
-`ownerId` does not span RAs. `agentHost` does. An agent moves between RAs by updating DNS records, not by changing its name. For cross-RA correlation, the optional `lei` field on the registration (carried as a cross-anchor link per [ANS-0 §5.3](ans-0-identity-anchor.md#53-lei-status-active)) gives a globally-unique organizational identifier.
+`providerId` does not span RAs. `agentHost` does. An agent moves between RAs by updating DNS records, not by changing its name. For cross-RA correlation, the optional `lei` field on the registration (carried as a cross-anchor link per [ANS-0 §5.3](ans-0-identity-anchor.md#53-lei-status-active)) gives a globally-unique organizational identifier.
 
 When the agent has an ERC-8004 registration, the on-chain `agentId` (ERC-721 tokenId, scoped to the registered chain) provides an additional cross-RA correlation identifier. The Trust Card's `registrations` array supports multiple entries across chains and registries; ANS-1 stores the array as opaque metadata and ANS-5 verifies cross-references post-activation.
 
 ### 5.1 Hosted-platform delegation
 
-When a platform registers an agent on behalf of a tenant, `ownerId` and the optional `lei` field identify the platform and the tenant respectively. These are identity assertions, not delegation proofs. The tenant closes this gap by issuing a W3C Verifiable Credential (`ANS_DELEGATION` claim type) authorizing the platform to register on its behalf; the platform includes the VC in the Trust Card's `verifiableClaims` array.
+When a platform registers an agent on behalf of a tenant, `providerId` and the optional `lei` field identify the platform and the tenant respectively. These are identity assertions, not delegation proofs. The tenant closes this gap by issuing a W3C Verifiable Credential (`ANS_DELEGATION` claim type) authorizing the platform to register on its behalf; the platform includes the VC in the Trust
+Card's `verifiableClaims` array.
 
 ## 6. Event set
 
@@ -168,9 +174,10 @@ The RA emits the following events to the ANS-4 Transparency Log. Each event carr
 
 ### 6.1 `AGENT_REGISTERED`
 
-Emitted at activation. Payload includes the agent record (`agentId`, `agentHost`, `ansName` if versioned, `claim` summary, `ownerId`, optional `lei`), attestations (Identity Cert fingerprint when versioned, Server Cert fingerprint, DNS records provisioned, `domainValidation` method, `dnssecStatus`), `expiresAt`, `issuedAt`, `raId`, `timestamp`.
+Emitted at activation. Payload follows the **V2 TL response format**: `ansId` (the TL entry id, UUIDv7), `ansName` if versioned, a nested `agent` object (`host`, `name`, `version`, `providerId`), `attestations` (`identityCerts[]` when versioned and `serverCerts[]` — each entry `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` objects; `domainValidation` method;
+`dnssecStatus`), `expiresAt`, `issuedAt`, `raId`, `timestamp`. The `claim` summary and optional `lei` are forward-looking ANS additions carried alongside the V2 fields.
 
-A worked example payload appears in [Appendix A.1](#a1-agent_registered-event).
+A worked example payload appears in the [ANS-1 worked examples](examples/ans-1-examples.md).
 
 ### 6.2 `AGENT_RENEWED`
 
@@ -224,11 +231,11 @@ The wire shape:
 ```json
 {
   "eventType": "IDENTITY_CERT_UPDATED",
-  "agentId": "f3c2d4e5-...-1234",
+  "ansId": "f3c2d4e5-...-1234",
   "previousState": "absent",
   "newState": "present",
   "previousIdentityCertFingerprint": null,
-  "newIdentityCertFingerprint": "sha256:...",
+  "newIdentityCertFingerprint": "SHA256:...",
   "raId": "id-A",
   "timestamp": "2026-05-17T18:00:00Z"
 }
@@ -251,14 +258,14 @@ The `absent` to `absent` transition is not a valid event; the RA rejects the ope
 ## 7. Lifecycle operations
 
 | Operation | Trigger | AHP submits | RA processes | RA seals | DNS effect |
-|---|---|---|---|---|---|
-| **Version bump** (versioned only) | Code or config change | new `versionSelector` + fresh `identityCsr` | Re-validates anchor proof, issues new Identity Certificate | `AGENT_REGISTERED` | New per-version records added (`_ans`, `_ans-badge`); shared records unchanged. AHP updates `_ans-identity._tls` for the new Identity Certificate |
-| **Renewal** | Cert approaching expiration, code unchanged | new CSR, same `versionSelector` (or none for base-only) | Re-runs anchor proof, issues fresh certificate | `AGENT_RENEWED` | None |
+| --- | --- | --- | --- | --- | --- |
+| **Version bump** (versioned only) | Code or config change | new `version` + fresh `identityCsrPEM` | Re-validates anchor proof, issues new Identity Certificate | `AGENT_REGISTERED` | New per-version records added (`_ans`, `_ans-badge`); shared records unchanged. AHP updates `_ans-identity._tls` for the new Identity Certificate |
+| **Renewal** | Cert approaching expiration, code unchanged | new CSR, same `version` (or none for base-only) | Re-runs anchor proof, issues fresh certificate | `AGENT_RENEWED` | None |
 | **Revocation** | Agent shutdown or version retirement | RFC 5280 reason code | Revokes certificates at issuing CA(s) | `AGENT_REVOKED` | Per-version records removed immediately; shared records removed when last ACTIVE version is gone |
 | **Equivalence link** | Operator binds two registrations as one agent | Co-signed link payload (defined in the event-set section) | Verifies both anchor signatures, records the link | `EQUIVALENCE_LINK` | None |
 | **Integrity warning** | AIM finding confirmed by RA re-verification | (AIM-initiated) | Re-verifies against TL sealed records | `INTEGRITY_WARNING` | None. Agent stays `ACTIVE` |
 | **Integrity resolved** | Discrepancy clears | (AIM-initiated) | Confirms live state matches TL | `INTEGRITY_RESOLVED` | None |
-| **Identity-cert toggle** | Operator adds, removes, or rolls the Identity Certificate without changing the registration's version | new `identityCsr` plus PriCC (add or roll), or removal request (remove) | Validates anchor proof; issues or revokes the Identity Certificate at the Private CA | `IDENTITY_CERT_UPDATED` | AHP updates `_ans-identity._tls` to publish the new fingerprint, or removes the record on a remove |
+| **Identity-cert toggle** | Operator adds, removes, or rolls the Identity Certificate without changing the registration's version | new `identityCsrPEM` plus PriCC (add or roll), or removal request (remove) | Validates anchor proof; issues or revokes the Identity Certificate at the Private CA | `IDENTITY_CERT_UPDATED` | AHP updates `_ans-identity._tls` to publish the new fingerprint, or removes the record on a remove |
 
 ### 7.1 Version coexistence (versioned registrations only)
 
@@ -275,7 +282,8 @@ A base-only registration has no ANSName, no Identity Certificate, and no version
 
 ### 7.3 Migration: base-only to versioned
 
-A base-only registration that later wants version discipline submits a new registration with a `versionSelector` and `identityCsr`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records, so the "MUST NOT mix versioned and unversioned" constraint in [ANS-3 §6.2](ans-3-dns-publication.md#62-legacy-_ans-txt-family-status-active) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
+A base-only registration that later wants version discipline submits a new registration with a `version` and `identityCsrPEM`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records, so the "MUST NOT mix versioned and unversioned" constraint in [ANS-3
+§6.2](ans-3-dns-publication.md#62-legacy-_ans-txt-family-status-active) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
 
 After the swap, the AHP submits `AGENT_REVOKED` for the base-only registration. The TL records both the new versioned registration and the base-only revocation, in order.
 
@@ -285,7 +293,8 @@ The reverse direction (versioned to base-only) is not a protocol operation. A re
 
 A registration's expiry tracks the earlier of its Server Certificate expiry and its Identity Certificate expiry, but only while the Identity Certificate is present. A registration in the `present` state expires on whichever certificate lapses first; the same registration after `IDENTITY_CERT_UPDATED` to `absent` tracks Server Certificate expiry alone.
 
-This makes Identity-cert toggling an operational option rather than a forced re-registration. An operator who lets the Identity Certificate lapse without renewing it triggers `IDENTITY_CERT_UPDATED` with `newState: absent`. The registration continues on the Server Certificate's expiry and remains discoverable; counterparties who require a versioned identity see the toggle and adjust per their own policy.
+This makes Identity-cert toggling an operational option rather than a forced re-registration. An operator who lets the Identity Certificate lapse without renewing it triggers `IDENTITY_CERT_UPDATED` with `newState: absent`. The registration continues on the Server Certificate's expiry and remains discoverable; counterparties who require a versioned identity see the toggle and adjust per their own
+policy.
 
 ### 7.5 Private-CA compromise
 
@@ -308,14 +317,16 @@ Each skill appears in the parent's Trust Card catalog as an entry with:
 - a location URL pointing at an immutable, content-addressed artifact (a raw blob or archive at a specific commit SHA, an object-storage URL whose path includes the content hash, or a path under the parent's FQDN serving a single immutable file);
 - an integrity commitment over the canonical byte stream retrieved from that location URL.
 
-Each skill's commitment lives as its own ANS-4 TL entry indexed by `parent_ansname + skill_id` (or `parent_fqdn + skill_id` for base-only parents). The receipt's hash covers the canonical byte stream retrieved from the location URL at commitment time. The parent's Trust Card carries the catalog (the list of skill IDs with their location URLs) but not per-skill receipts. Adding or removing a skill is a Trust Card change and bumps the parent's integrity commitment; updating an existing skill is a skill-level TL event that does not modify the parent's Trust Card hash.
+Each skill's commitment lives as its own ANS-4 TL entry indexed by `parent_ansname + skill_id` (or `parent_fqdn + skill_id` for base-only parents). The receipt's hash covers the canonical byte stream retrieved from the location URL at commitment time. The parent's Trust Card carries the catalog (the list of skill IDs with their location URLs) but not per-skill receipts. Adding or removing a skill
+is a Trust Card change and bumps the parent's integrity commitment; updating an existing skill is a skill-level TL event that does not modify the parent's Trust Card hash.
 
 A browsable page (a GitHub `tree/...` URL, a directory index) is not an acceptable location URL; different retrievers see different renderings, and different verifiers would hash different bytes for the same skill.
 
 Two sub-profiles:
 
 - **Skill (internal).** Same principal as the parent. Per-skill integrity commitment required. Principal binding inherits from the parent.
-- **Skill (external).** The skill crosses a trust boundary. Per-skill integrity commitment required. Per-skill principal binding required (NOT inherited). Authorization is carried by a W3C Verifiable Credential of claim type `ANS_SKILL_DELEGATION` from the parent's principal to the skill, verified per W3C VC Data Model 2.0. Implementations MUST NOT infer external-skill authorization from the parent binding alone.
+- **Skill (external).** The skill crosses a trust boundary. Per-skill integrity commitment required. Per-skill principal binding required (NOT inherited). Authorization is carried by a W3C Verifiable Credential of claim type `ANS_SKILL_DELEGATION` from the parent's principal to the skill, verified per W3C VC Data Model 2.0. Implementations MUST NOT infer external-skill authorization from the
+  parent binding alone.
 
 ## 9. Capability token discipline
 
@@ -330,7 +341,8 @@ Every capability token an ANS-registered agent issues MUST carry:
 - An `exp` (expiration) claim. A token SHOULD be issued with `exp - iat` no longer than the freshness ceiling declared for its usage class in the Trust Card's token-discipline policy (transactional or discovery).
 - A `jti` (JWT ID) claim suitable for one-time-use enforcement at the verifier.
 
-For capabilities the Trust Card marks `high_value: true`, the caller MUST additionally attach a Demonstration of Proof-of-Possession (DPoP) proof per RFC 9449 (September 2023): a JWT signed over the current HTTP method, URL, and timestamp. The DPoP proof JWT's header carries the full public key in `jwk`; the capability token binds that key by its SHA-256 JWK thumbprint (RFC 7638) in the `cnf.jkt` claim. The verifier recomputes the thumbprint from the DPoP header's `jwk` and compares against `cnf.jkt`.
+For capabilities the Trust Card marks `high_value: true`, the caller MUST additionally attach a Demonstration of Proof-of-Possession (DPoP) proof per RFC 9449 (September 2023): a JWT signed over the current HTTP method, URL, and timestamp. The DPoP proof JWT's header carries the full public key in `jwk`; the capability token binds that key by its SHA-256 JWK thumbprint (RFC 7638) in the `cnf.jkt`
+claim. The verifier recomputes the thumbprint from the DPoP header's `jwk` and compares against `cnf.jkt`.
 
 ### 9.2 Verifier MUST-checks
 
@@ -357,7 +369,8 @@ Operators declare their freshness ceilings and acceptable signing algorithms in 
 }
 ```
 
-A verifier MUST reject tokens whose signature algorithm is absent from the declared list. The freshness ceiling applies at verification time through the `now() - iat` check above, so tokens issued with long `exp` values remain usable only within the ceiling's window. The integrity commitment's hash covers this policy alongside the rest of the Trust Card; a change to the policy bumps the integrity commitment.
+A verifier MUST reject tokens whose signature algorithm is absent from the declared list. The freshness ceiling applies at verification time through the `now() - iat` check above, so tokens issued with long `exp` values remain usable only within the ceiling's window. The integrity commitment's hash covers this policy alongside the rest of the Trust Card; a change to the policy bumps the integrity
+commitment.
 
 
 
@@ -366,7 +379,7 @@ A verifier MUST reject tokens whose signature algorithm is absent from the decla
 ## 10. RA key management
 
 | Principle | Rule |
-|---|---|
+| --- | --- |
 | Agent keys | The RA never generates, handles, or accesses an agent's private keys. The AHP owns its key lifecycle |
 | RA producer keys | Each RA instance MUST register at least one active public key with the ANS-4 TL before submitting events. Rotation uses an overlap window: new keys are registered with future `validFrom` dates; both old and new remain active during the transition. Producer private keys never leave the RA instance. Historical signatures remain valid after key expiration but not after revocation |
 | External-service credentials | Separate credentials per external service integration (DNS provider, public CA account, private CA, KMS), rotated on schedule |
@@ -402,7 +415,7 @@ When a domain transfers ownership, the FQDN persists but the operator does not. 
 
 - **Anchor proof re-validation.** The RA re-runs the ANS-0 anchor proof at each renewal and version bump. When the original operator no longer controls the anchor (DNS, DID document, LEI registration), the proof fails and the RA revokes the registration.
 - **RDAP monitoring.** ANS-5 monitors the registrant entity in the registrar's RDAP response (FQDN anchors). A change in the registrant entity handle or a fresh `last changed` timestamp signals a transfer.
-- **`ownerId` mismatch.** The RA assigns `ownerId` from its authentication system at registration. When a new operator registers under an `agentHost` that already has an ACTIVE registration under a different `ownerId`, the RA detects the conflict and MUST revoke the prior registration.
+- **`providerId` mismatch.** The RA assigns `providerId` from its authentication system at registration. When a new operator registers under an `agentHost` that already has an ACTIVE registration under a different `providerId`, the RA detects the conflict and MUST revoke the prior registration.
 
 Upon detection of a control change via any of these mechanisms, the RA MUST emit `AGENT_REVOKED` to the TL. Between a transfer and detection, stale reputation remains attached to `agentHost`. Downstream consumers evaluate staleness from the sealed event timestamps.
 
@@ -413,16 +426,17 @@ Some payload fields (`onChainId`, `ensName`, `ansUrn`) are advisory metadata at 
 ### 12.3 Failure modes
 
 | Scenario | Consequence | RA response |
-|---|---|---|
+| --- | --- | --- |
 | AHP unavailable for extended period | Identity Certificate expires (versioned) or Server Certificate expires (base-only); mTLS or TLS fails | RA detects expired status and emits `EXPIRED`. Cannot auto-renew (AHP controls its private keys) |
 | Anchor expires (FQDN domain expires; LEI lapses to inactive; DID document removed) | Endpoint unreachable; subsequent re-validation fails | RA treats the anchor-proof failure as a security event and MUST emit `AGENT_REVOKED` |
-| TL unavailable | New registrations queue; in-flight registrations retain `PENDING` status | RA MUST NOT activate without a sealed event (step (d) is the point of no return) |
+| TL unavailable | New registrations queue; in-flight registrations retain `PENDING_VALIDATION` status | RA MUST NOT activate without a sealed event (step (d) is the point of no return) |
 
 ## Appendix A: Trust Card and metadata (normative)
 
 ### A.1 Scope and unique content
 
-The Trust Card is the JSON document an AHP hosts at `/.well-known/ans/trust-card.json`. The AHP submits the same bytes as `trustCardContent` at registration. The RA hashes the JCS-canonical bytes (RFC 8785) and seals `SHA-256(JCS(trustCardContent))` into the `AGENT_REGISTERED` event under `attestations.metadataHashes.capabilitiesHash`. The same digest, base64url-encoded, populates the SVCB `card-sha256` SvcParam at `agentHost` (per [ANS-3 consolidated SVCB](ans-3-dns-publication.md#61-consolidated-svcb-status-active-default)). A verifier holding any one of those three values can confirm the other two without trusting the channel that delivered each one.
+The Trust Card is the JSON document an AHP hosts at `/.well-known/ans/trust-card.json`. The AHP submits the same bytes as `trustCardContent` at registration. The RA hashes the JCS-canonical bytes (RFC 8785) and seals `SHA-256(JCS(trustCardContent))` into the `AGENT_REGISTERED` event under `attestations.metadataHashes.capabilitiesHash`. The same digest, base64url-encoded, populates the SVCB
+`card-sha256` SvcParam at `agentHost` (per [ANS-3 consolidated SVCB](ans-3-dns-publication.md#61-consolidated-svcb-status-active-default)). A verifier holding any one of those three values can confirm the other two without trusting the channel that delivered each one.
 
 The Trust Card carries content that no protocol-native metadata file holds:
 
@@ -435,14 +449,14 @@ The Trust Card carries content that no protocol-native metadata file holds:
 
 ### A.2 Document landscape and hash topology
 
-| Document | Path | Hash field path in `AGENT_REGISTERED` (hex-lowercase) | DNS SvcParam (base64url) | Carries |
-|---|---|---|---|---|
+| Document | Path | Hash field path in `AGENT_REGISTERED` (`SHA256:`-prefixed hex) | DNS SvcParam (base64url) | Carries |
+| --- | --- | --- | --- | --- |
 | Trust Card body | `/.well-known/ans/trust-card.json` | `attestations.metadataHashes.capabilitiesHash` | `card-sha256` at `wk` on the 3.B SVCB row at `agentHost` | ANSName + anchor binding, endpoints, skill catalog, verifiable claims, token discipline, optional principal binding, optional SCITT staple |
-| A2A AgentCard | `/.well-known/agent-card.json` | `attestations.metadataHashes.A2A` | Not directly in DNS; referenced from the Trust Card body's `endpoints[].metadataUrl`. Hash sealed only in TL | A2A endpoint metadata (skills, modalities, transports) |
-| MCP ServerCard | per-server published path | `attestations.metadataHashes.MCP` | Not directly in DNS; referenced from the Trust Card body's `endpoints[].metadataUrl`. Hash sealed only in TL | MCP endpoint metadata (tools, prompts, resources) |
+| A2A AgentCard | `/.well-known/agent-card.json` | `attestations.metadataHashes.A2A` | Not directly in DNS; referenced from the Trust Card body's `endpoints[].metaDataUrl`. Hash sealed only in TL | A2A endpoint metadata (skills, modalities, transports) |
+| MCP ServerCard | per-server published path | `attestations.metadataHashes.MCP` | Not directly in DNS; referenced from the Trust Card body's `endpoints[].metaDataUrl`. Hash sealed only in TL | MCP endpoint metadata (tools, prompts, resources) |
 | DNS-AID capability descriptor | operator-defined `cap` SvcParam target | (DNS-AID does not seal a TL) | `cap-sha256` on a DNS-AID SVCB row | Per-service capability descriptor under the DNS-AID layout, distinct from the agent card |
 
-The TL stores each digest as hex-lowercase; the SVCB SvcParam stores the same digest bytes as base64url per RFC 9460. A verifier comparing the two MUST decode both to raw bytes (or re-encode to a common form) before equality check.
+The TL stores each digest `SHA256:`-prefixed (uppercase `SHA256:` + lowercase hex, per the V2 TL `metadataHashes` schema); the SVCB SvcParam stores the same digest bytes as base64url per RFC 9460. A verifier comparing the two MUST strip the `SHA256:` prefix and decode both to raw bytes (or re-encode to a common form) before equality check.
 
 ANS does not publish DNS-AID's `cap-sha256` SvcParam. Capability content lives in the Trust Card body's `verifiableClaims` and `endpoints[].functions` fields, which `card-sha256` already covers.
 
@@ -451,13 +465,13 @@ ANS does not publish DNS-AID's `cap-sha256` SvcParam. Capability content lives i
 Top-level fields:
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `ansName` | string (`ans://v{ver}.{host}`) | Versioned only | Versioned identifier per [ANS-2 §2](ans-2-versioned-naming.md). Absent for base-only registrations |
 | `agentHost` | string (RFC 1123 FQDN) | Yes | Operational endpoint where the agent terminates TLS |
 | `anchorType` | enum (`fqdn`, `did`, `lei`) | Yes | Anchor profile per [ANS-0](ans-0-identity-anchor.md) |
 | `anchorResolvedId` | string | Yes | Anchor-resolved identifier (FQDN, DID URI, or LEI string) |
-| `agentDisplayName` | string (≤64 chars) | No | Human-readable name. Mirrors the `displayName` field on the registration request |
-| `agentDescription` | string (≤150 chars) | No | Brief capability description. Mirrors `description` on the registration request |
+| `agentDisplayName` | string (≤64 chars) | No | Human-readable name. Same `agentDisplayName` field as the registration request |
+| `agentDescription` | string (≤150 chars) | No | Brief capability description. Same `agentDescription` field as the registration request |
 | `version` | string (semver, no `v` prefix) | No | Same as the version segment of `ansName`, hoisted for direct access |
 | `releaseChannel` | string | No | Release-track label (`stable`, `beta`, `alpha`, …). Free-form; consumers MAY use it as a discovery signal |
 | `endpoints` | array of endpoint objects | Yes | One entry per protocol the agent speaks. See per-endpoint table below |
@@ -471,10 +485,11 @@ Top-level fields:
 Each endpoint object:
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `protocol` | enum (`A2A`, `MCP`, `HTTP-API`, `PAYMENT`) | Yes | Protocol token |
 | `agentUrl` | URI | Yes | Endpoint URL where the protocol terminates |
-| `metadataUrl` | URI | No | Path to the protocol-native metadata file (e.g. `/.well-known/agent-card.json` for A2A) |
+| `metaDataUrl` | URI | No | Path to the protocol-native metadata file (e.g. `/.well-known/agent-card.json` for A2A) |
+| `metaDataHash` | `SHA256:`-prefixed string | No | SHA-256 of the document at `metaDataUrl`; sealed into the TL `attestations.metadataHashes` map under the uppercase protocol key |
 | `documentationUrl` | URI | No | Developer documentation |
 | `transports` | array of strings | No | Transport tokens (`STREAMABLE-HTTP`, `SSE`, `JSON-RPC`, `GRPC`, `REST`, `HTTP`) |
 | `functions` | array of function objects | No | Function declarations: `id`, `name`, optional `tags` |
@@ -483,13 +498,15 @@ Each `verifiableClaims` entry MUST be a W3C Verifiable Credential 2.0 with proof
 
 ### A.4 Canonicalization and hashing
 
-The RA computes the Trust Card's content digest as `SHA-256(JCS(trustCardContent))` per [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785), with the `transparencyReceipt` member removed from the JSON object before canonicalization (the member MUST be absent, not set to `null`; JCS canonicalizes a `null` member to bytes that change the digest). The result is hex-encoded lowercase on the registration aggregate and in `attestations.metadataHashes.capabilitiesHash`. The same digest re-encoded as base64url populates the SVCB `card-sha256` SvcParam at `agentHost`.
+The RA computes the Trust Card's content digest as `SHA-256(JCS(trustCardContent))` per [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785), with the `transparencyReceipt` member removed from the JSON object before canonicalization (the member MUST be absent, not set to `null`; JCS canonicalizes a `null` member to bytes that change the digest). The result is stored `SHA256:`-prefixed (uppercase
+`SHA256:` + lowercase hex, per the V2 TL `metadataHashes` schema) in `attestations.metadataHashes.capabilitiesHash`. The same digest re-encoded as base64url populates the SVCB `card-sha256` SvcParam at `agentHost`.
 
-At registration the AHP submits a body without `transparencyReceipt`, since no SCITT receipt has been issued yet; after the RA seals the `AGENT_REGISTERED` or `AGENT_RENEWED` event, the AHP MAY add the issued receipt to the served body without changing `capabilitiesHash`. A verifier comparing a live-fetched body to the TL-sealed hash MUST remove the `transparencyReceipt` member entirely before applying JCS and recomputing the digest.
+At registration the AHP submits a body without `transparencyReceipt`, since no SCITT receipt has been issued yet; after the RA seals the `AGENT_REGISTERED` or `AGENT_RENEWED` event, the AHP MAY add the issued receipt to the served body without changing `capabilitiesHash`. A verifier comparing a live-fetched body to the TL-sealed hash MUST remove the `transparencyReceipt` member entirely before
+applying JCS and recomputing the digest.
 
 Three values record the same SHA-256 digest over the JCS-canonical Trust Card bytes, each in a different encoding:
 
-1. TL receipt's `attestations.metadataHashes.capabilitiesHash` (hex-lowercase): what the RA sealed.
+1. TL receipt's `attestations.metadataHashes.capabilitiesHash` (`SHA256:`-prefixed hex): what the RA sealed.
 2. DNS `card-sha256` SvcParam (base64url): what the operator published.
 3. `SHA-256(JCS(live-fetched-body))` (verifier's choice of encoding): what the agent serves now.
 
@@ -501,7 +518,8 @@ A registration that submits no `trustCardContent` produces no `capabilitiesHash`
 
 ### A.5 Stapled SCITT receipt
 
-A Trust Card MAY embed the most recent SCITT receipt for the agent in the `transparencyReceipt` field as base64-encoded bytes. The receipt is added to the served body AFTER the RA seals the relevant `AGENT_REGISTERED` or `AGENT_RENEWED` event; an AHP MUST NOT include `transparencyReceipt` in the `trustCardContent` it submits at registration. A staple lets a verifier confirm TL inclusion offline; the SDK's `verify-trust-card` CLI extracts the staple, fetches the live receipt from the TL for the same agent, and confirms byte equality.
+A Trust Card MAY embed the most recent SCITT receipt for the agent in the `transparencyReceipt` field as base64-encoded bytes. The receipt is added to the served body AFTER the RA seals the relevant `AGENT_REGISTERED` or `AGENT_RENEWED` event; an AHP MUST NOT include `transparencyReceipt` in the `trustCardContent` it submits at registration. A staple lets a verifier confirm TL inclusion offline;
+the SDK's `verify-trust-card` CLI extracts the staple, fetches the live receipt from the TL for the same agent, and confirms byte equality.
 
 Operators that staple SHOULD republish the Trust Card on every `AGENT_RENEWED` event so the staple stays current.
 

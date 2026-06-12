@@ -2,7 +2,7 @@
 
 Non-normative worked examples for ans-5-integrity-monitoring. Implementers MAY use these as fixtures or schema cross-checks.
 
-### A.1 AIM finding payload
+## A.1 AIM finding payload
 
 The AIM publishes a signed finding when it observes a confirmed mismatch. The payload schema is independent of the RA / TL event format and uses `snake_case`:
 
