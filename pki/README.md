@@ -32,7 +32,7 @@ Hierarchy 1 — AWS Private CA (v1 identity certs)
     │
     ├── Sub-CA (us-east-1)
     ├── Sub-CA (us-west-2)
-    └── Sub-CA (ap-south-1)   ← prod only
+    └── Sub-CA (ap-south-1)
 
 Hierarchy 2 — GoDaddy Private CA (v2 identity certs)
   Root CA (self-signed, global)
@@ -44,8 +44,9 @@ Hierarchy 2 — GoDaddy Private CA (v2 identity certs)
 
 - **`prod/`** — Production CA chain. Includes the root CA
   and per-region sub-CAs.
-- **`ote/`** — OTE (test) CA chain. Includes per-region
-  sub-CAs only. Separate CA hierarchy from prod.
+- **`ote/`** — OTE (test) CA chain. Same CA hierarchy as
+  prod; the OTE RA issues identity certificates under the
+  prod PKI.
 
 Inspect individual certificates for details (subject,
 validity, extensions, etc.) using the commands in the
@@ -120,8 +121,7 @@ openssl x509 -in pki/prod/ca-bundle.pem -noout -text
   PR1`) has a **20-year** validity window (2026–2046),
   consistent with GoDaddy commercial CA lifecycle. No
   regional sub-CAs exist in this hierarchy.
-- Sub-CAs have **5-year** (prod) or **2-year** (OTE)
-  validity windows.
+- Sub-CAs have a **5-year** validity window.
 - New certificates will be committed to this repo **before
   expiry** of the outgoing cert, with both old and new
   present in the bundle during the transition period.
@@ -136,9 +136,9 @@ openssl x509 -in pki/prod/ca-bundle.pem -noout -text
 - **Do not pin individual certificate serial numbers.**
   Regional sub-CAs may be reissued independently. Pin the
   root CA fingerprint or load the full bundle.
-- **OTE and prod are separate trust domains.** Never load
-  `ote/` bundles in production configurations. The
-  environments use completely independent CA hierarchies.
+- **OTE and prod share the same CA hierarchy.** Never load
+  `ote/` bundles in production configurations; always use
+  the bundle designated for your target environment.
 - **Verify bundle integrity after download.** Use the
   fingerprint commands in the
   [Verifying Certificates](#verifying-certificates) section
