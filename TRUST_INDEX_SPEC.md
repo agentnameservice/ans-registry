@@ -573,7 +573,7 @@ Certificate type is the primary grade driver, but not the only path. Organizatio
 
 Each alternative path MUST include at least one third-party attestation. Self-asserted claims alone (a domain owner claiming a logo without VMC backing) do not raise the grade. The TI MUST verify each attestation in the combination independently.
 
-### 5.3 Principal binding (DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25)
+### 5.3 Principal binding (DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25, ENS_ENSIP26)
 
 An agent's `principalBinding` links it to the real-world entity that controls it.
 The binding is OPTIONAL for Basic-grade agents, SHOULD be present for Verified, and MUST be present for Premium.
@@ -586,14 +586,16 @@ The binding type determines how difficult it is for a bad actor to shed negative
 | `BIOMETRIC_HASH` | Physical person | Hard (requires a new person) |
 | `ENS_ENSIP25` (native `.eth`) | Ethereum account (via ENS name with ENSIP-25 bidirectional agent-registration record) | Medium (registering a `.eth` name costs ETH and is permanently on-chain; creating many is expensive but requires no legal entity) |
 | `ENS_ENSIP25` (ENSIP-17 DNS) | Ethereum account (via DNSSEC-resolved DNS domain with ENSIP-25 bidirectional agent-registration record) | Easy (domain registration fee, often under $15, plus free DNSSEC enablement; same barrier as `DID_WEB`) |
+| `ENS_ENSIP26` | Ethereum account (via ENS name with an ENSIP-26 `agent-endpoint[ans]` record naming the agent's ANSName) | Medium (registering a `.eth` name costs ETH and is permanently on-chain; creating many is expensive but requires no legal entity) |
 
 A conforming TI MUST verify the principal binding against the declared type:
 - `DID_WEB`: Resolve `did:web:{domain}` by fetching `/.well-known/did.json`. Verify the DID Document exists and contains a valid verification method.
 - `LEI`: Verify the vLEI credential signature against the issuing accredited organization. Confirm the LEI is active in the GLEIF database.
 - `BIOMETRIC_HASH`: Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or ZK proof.
 - `ENS_ENSIP25`: Resolve the ENS name claimed by the agent. Verify the `agent-registration[<registry>][<tokenId>]` text record exists (ENSIP-25). Then verify the reverse: the ERC-8004 registration file lists the ENS name as a service endpoint. Both directions must agree.
+- `ENS_ENSIP26`: Resolve the ENS name claimed by the agent. Verify it carries an ENSIP-26 `agent-endpoint[ans]` record whose value equals the agent's ANSName. The agent's claim of the ENS name and the ENS name's record must agree; a record naming a different ANSName (for example a prior version after a bump) is treated as stale and confers no principal-binding credit until re-attested. Neither the operator at the FQDN nor the controller of the ENS name can establish the binding alone.
 
-Basic-grade agents MAY use any binding type. Verified-grade agents SHOULD use `LEI`, `DID_WEB`, or `ENS_ENSIP25`. Premium-grade agents MUST use `LEI` or `BIOMETRIC_HASH`. Higher stakes require stickier identity.
+Basic-grade agents MAY use any binding type. Verified-grade agents SHOULD use `LEI`, `DID_WEB`, `ENS_ENSIP25`, or `ENS_ENSIP26`. Premium-grade agents MUST use `LEI` or `BIOMETRIC_HASH`. Higher stakes require stickier identity.
 
 ### 5.4 PriCC chains
 
@@ -951,7 +953,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "type": "object",
           "required": ["type", "identifier"],
           "properties": {
-            "type": { "enum": ["DID_WEB", "LEI", "BIOMETRIC_HASH", "ENS_ENSIP25"] },
+            "type": { "enum": ["DID_WEB", "LEI", "BIOMETRIC_HASH", "ENS_ENSIP25", "ENS_ENSIP26"] },
             "identifier": { "type": "string" },
             "proof": { "type": "string" },
             "priccChain": {
