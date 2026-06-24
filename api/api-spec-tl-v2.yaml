@@ -1,0 +1,1401 @@
+openapi: 3.0.3
+info:
+  title: ANS Transparency Log API
+  version: "2.0.0"
+  description: |
+    OpenAPI contract for the ANS Transparency Log (`ans-tl`). Paths
+    match the reference TL's swagger byte-for-byte — `/v1/agents/*`,
+    `/v1/log/*`, `/v1/internal/*`, C2SP tlog-tiles at root
+    (`/checkpoint`, `/root-keys`, `/tile/*`), and
+    `/internal/v1/producer-keys/*` for admin CRUD.
+
+    Behavioral parity with the reference TL:
+
+      - Event envelope is the V2 shape — nested `{payload:{logId,
+        producer:{event, keyId, signature}}, schemaVersion:"V2",
+        signature, status}`. V2 evolves the reference V1 with
+        unified `identityCerts[]` / `serverCerts[]` arrays, typed
+        `dnsRecordsProvisioned[]` records, and `SHA256:`-prefixed
+        fingerprints. V0 + V1 schemas are served for historical
+        verifier backwards compatibility (never emitted).
+      - Receipts are SCITT COSE_Sign1 (RFC 8152 tag 18) with VDS 1
+        (RFC 9162_SHA256) and the VDP inclusion proof in the
+        unprotected header (label 396). See
+        `internal/tl/receipt/constants.go` for the concrete labels.
+      - `/root-keys` emits the sumdb-note verification format
+        byte-for-byte compatible with the reference.
+      - `/internal/v1/producer-keys` admin routes match the reference
+        swagger.yaml snake_case DTOs; the only ans-only extension is
+        `GET /internal/v1/producer-keys/{key_id}` (reference doesn't
+        expose single-record lookup).
+
+servers:
+  - url: http://localhost:18081
+    description: local dev (quickstart)
+
+# ────────────────────────────────────────────────────────────────
+# Tags group routes in generated docs by audience.
+# ────────────────────────────────────────────────────────────────
+tags:
+  - name: Transparency Log
+    description: Producer ingest + verifier reads.
+  - name: Tlog Tiles
+    description: Merkle tree + checkpoint static files (RFC 6962-inspired layout).
+  - name: Admin
+    description: Producer-key CRUD. Gated by the `RequireAdmin` middleware.
+  - name: Health
+    description: Liveness + readiness.
+
+# Global security requirement. Most routes require it; the
+# verifier GETs under /v1/agents/ + /v1/log/ + the root-level
+# tlog-tiles paths (/checkpoint, /root-keys, /tile/*) are
+# anonymous when cfg.auth.public-read is true. The actual
+# middleware behaviour is described in CLAUDE.md §Auth.
+security:
+  - bearerAuth: []
+
+paths:
+  # ──────────────────────────────────────────────────────────────
+  # Transparency Log — ingest
+  # ──────────────────────────────────────────────────────────────
+  /v1/internal/agents/event:
+    post:
+      tags: [Transparency Log]
+      summary: Append a signed event to the log
+      description: |
+        Accepts a JCS-canonicalized producer-event body signed with a
+        detached JWS (`X-Signature` header). Successful appends return
+        the Tessera-assigned leaf index and hash; duplicate submissions
+        (same SHA-256(inner event JCS)) return 200 with the original
+        leaf so outbox retries are idempotent.
+      operationId: appendEvent
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: |
+            Detached JWS compact serialization over the raw request
+            body. Header shape:
+            `{alg:ES256, kid:<producer-keyId>, typ:JWT, timestamp:<unix-seconds>, raid:<raId>}`.
+            The `raid` value must match the `raId` in the body.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: JCS-canonicalized inner producer event (≤ 256 KiB).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerEvent'
+      responses:
+        '200':
+          description: |
+            Event logged. On a duplicate submission (identical
+            inner-event JCS hash) the response carries
+            `duplicate: true` + the pre-existing leaf so retries are
+            idempotent. Matches the reference TL's status-code and
+            body shape.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendResponse'
+        '413':
+          description: Request body exceeds 256 KiB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: |
+            Body fails validation. Codes include
+            `NO_PRODUCER_SIGNATURE`, `INVALID_SIGNATURE_HEADER`,
+            `NOT_FOUND_PRODUCER_KEY`, `INVALID_PRODUCER_KEY`,
+            `MISMATCH_SIGNATURE`, `RAID_MISMATCH`, `INVALID_EVENT`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  # ──────────────────────────────────────────────────────────────
+  # Transparency Log — verifier reads (public under public-read)
+  # ──────────────────────────────────────────────────────────────
+  /v1/agents/{agentId}:
+    get:
+      tags: [Transparency Log]
+      summary: Current badge for an agent
+      description: |
+        Returns the reference-shaped TransparencyLog envelope for the
+        agent's most recent event — including the full inclusion
+        proof so clients can verify without a separate tile walk.
+      operationId: getBadge
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Badge retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyLog'
+        '404':
+          description: No events for this agent.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/agents/{agentId}/audit:
+    get:
+      tags: [Transparency Log]
+      summary: Paginated audit history for an agent
+      operationId: getAudit
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: Audit records, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyLogAudit'
+
+  /v1/agents/{agentId}/receipt:
+    get:
+      tags: [Transparency Log]
+      summary: SCITT COSE_Sign1 receipt for the agent's latest event
+      description: |
+        Returns the CBOR-encoded COSE_Sign1 receipt (RFC 8152 tag 18)
+        containing an RFC 9162 inclusion proof in the VDP header
+        (label 396). The `kid` in the protected header is a 4-byte
+        SHA-256 prefix of the signing SPKI-DER — cross-reference it
+        with `/root-keys` to identify the verifier key.
+        Response body is binary CBOR; do not attempt to parse as JSON.
+      operationId: getReceipt
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Receipt CBOR bytes.
+          content:
+            application/scitt-receipt+cose:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No events for this agent.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: |
+            The leaf has been appended but no signed checkpoint yet
+            covers it. Retry after the `Retry-After` delay.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/agents/{agentId}/status-token:
+    get:
+      tags: [Transparency Log]
+      summary: Signed status token for offline state verification
+      description: |
+        Returns a short-lived COSE_Sign1 status token (CBOR tag 18)
+        asserting the agent's current lifecycle state plus enough
+        identity data (cert fingerprints, metadata hashes) that
+        verifiers can check a connection without hitting the badge
+        endpoint. AHPs fetch this every ~30 minutes and staple it
+        alongside the receipt in the Agent Card — analogous to OCSP
+        stapling in TLS.
+
+        Content-Type: `application/ans-status-token+cbor`.
+        Do not attempt to parse as JSON.
+      operationId: getStatusToken
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Binary CBOR status token.
+          content:
+            application/ans-status-token+cbor:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No events for this agent.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '410':
+          description: |
+            Agent is in a terminal state (EXPIRED or REVOKED). Status
+            tokens are not issued for terminal-state agents; stop
+            polling and fall back to the badge for final status.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: |
+            Status tokens are not enabled on this deployment. Clients
+            should disable status-token polling for this TL.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  # ──────────────────────────────────────────────────────────────
+  # Log static artefacts + verifier keys (public under public-read)
+  # ──────────────────────────────────────────────────────────────
+  /v1/internal/identities/event:
+    post:
+      tags: [Transparency Log]
+      summary: Append a signed identity event to the log
+      description: |
+        OPTIONAL capability (ANS-0 §12.2): this route and the
+        `/v1/identities/*` reads exist only for an RA that implements
+        Verified Identities. A TL serving an RA without it exposes none
+        of them and is still conformant.
+
+        The identity-family ingest lane. Identical wire contract to
+        `/v1/internal/agents/event` — JCS-canonicalized inner event
+        body + detached-JWS `X-Signature`, same producer-key trust
+        store, same dedup — with the identity payload schema (keyed
+        by `identityId`, closed `IDENTITY_*` eventType enum). The
+        closed enums are the cross-lane guard: an `AGENT_*` body on
+        this route (or an `IDENTITY_*` body on an agent route) fails
+        validation with 422 `INVALID_EVENT`.
+      operationId: appendIdentityEvent
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: |
+            Detached JWS compact serialization over the raw request
+            body — same discipline as the agent lanes.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: JCS-canonicalized inner identity event (≤ 256 KiB).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityProducerEvent'
+      responses:
+        '200':
+          description: Event logged (or duplicate echoed — idempotent retries).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendResponse'
+        '413':
+          description: Request body exceeds 256 KiB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: |
+            Body fails validation — same codes as the agent lanes,
+            including `INVALID_EVENT` for cross-lane posts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/identities/{identityId}:
+    get:
+      tags: [Transparency Log]
+      summary: Identity badge
+      description: |
+        The latest sealed identity event + inclusion proof + computed
+        `{status, keys[], keysLogId}`: the latest entry may be a
+        link/unlink/revocation carrying no key material, so the badge
+        quotes the CURRENT proven key set verbatim from the latest
+        sealed proof event, with `keysLogId` pointing at that seal
+        (omitted when REVOKED — the keys are no longer attested).
+
+        Third-party verification is byte-recompute, not
+        parse-and-inspect: verify the sealed `signedProof` JWS
+        against the key inside the sealed `verificationMethod`; take
+        the nonce from the decoded payload; reconstruct the
+        IdentityProofInput from the sealed event plus that nonce;
+        JCS-serialize; and require the JWS payload segment to equal
+        those bytes verbatim. Verifiers MUST reject a JWS bearing
+        unrecognized `crit` headers (RFC 7515 §4.1.11). All offline,
+        without trusting the RA.
+      operationId: getIdentityBadge
+      parameters:
+        - $ref: '#/components/parameters/IdentityIdPath'
+      responses:
+        '200':
+          description: Identity badge retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyLog'
+        '404':
+          description: No events for this identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/identities/{identityId}/audit:
+    get:
+      tags: [Transparency Log]
+      summary: Paginated audit history for an identity
+      description: |
+        The identity's full event chain — IDENTITY_VERIFIED, links,
+        rotations, revocation — in the exact same audit envelope as
+        the agent audit. This unbroken chain is the continuity
+        thread: when an agent's domain is lost, the identity stream
+        survives and links to the successor.
+      operationId: getIdentityAudit
+      parameters:
+        - $ref: '#/components/parameters/IdentityIdPath'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: Audit records, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyLogAudit'
+
+  /v1/identities/{identityId}/receipt:
+    get:
+      tags: [Transparency Log]
+      summary: SCITT receipt for the identity's latest event
+      description: |
+        COSE_Sign1 receipt (CBOR tag 18) for the identity's latest
+        sealed leaf — same machinery, media type, and 503 retry
+        semantics as the agent receipt.
+      operationId: getIdentityReceipt
+      parameters:
+        - $ref: '#/components/parameters/IdentityIdPath'
+      responses:
+        '200':
+          description: Binary COSE_Sign1 receipt.
+          content:
+            application/scitt-receipt+cose:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No events for this identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: |
+            Leaf committed but no signed checkpoint covers it yet;
+            retry after the `Retry-After` delay.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/identities/{identityId}/agents:
+    get:
+      tags: [Transparency Log]
+      summary: Agents currently linked to the identity (reverse join)
+      description: |
+        Computed at query time from the link events' agent index
+        under the visibility predicate: every agent whose latest
+        link/unlink fact naming it is LINKED and whose own computed
+        status is live, decorated with that status. Paginated — the
+        reverse join is the genuinely unbounded read (an identity
+        links to unlimited agents).
+      operationId: getIdentityAgents
+      parameters:
+        - $ref: '#/components/parameters/IdentityIdPath'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: Currently-linked agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents, total]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LinkedAgentView'
+                  total:
+                    type: integer
+                    description: Full visible-link count across all pages
+        '404':
+          description: No events for this identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/agents/{agentId}/identities:
+    get:
+      tags: [Transparency Log]
+      summary: Identities currently linked to the agent (computed)
+      description: |
+        The same entries as the agent badge's `identities[]` field,
+        served alone and paginated — the overflow target for the
+        badge's embedded safety cap. Computed at read time under the
+        visibility predicate (link LINKED ∧ agent live; a REVOKED
+        identity stays visible with no keys) — never stored on, or
+        sealed into, the agent.
+      operationId: getAgentIdentities
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: Currently-linked identities.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identities, total]
+                properties:
+                  identities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LinkedIdentityView'
+                  total:
+                    type: integer
+                    description: Full visible-link count across all pages
+
+  /v1/agents/{agentId}/identities/history:
+    get:
+      tags: [Transparency Log]
+      summary: Link/unlink events that ever named this agent
+      description: |
+        Past and present associations, in the STANDARD audit envelope
+        (each record a TransparencyLog) — no bespoke format. Filtered
+        through the link events' agent index; the records themselves
+        live on the identity streams. The agent's own `/audit` stays
+        purely AGENT_*. This endpoint is a droppable convenience: the
+        same view derives from the identity audits or the raw entry
+        tiles.
+      operationId: getAgentIdentityHistory
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: Link events naming this agent, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyLogAudit'
+
+  # ──────────────────────────────────────────────────────────────
+  # Log static artefacts + verifier keys (public under public-read)
+  # ──────────────────────────────────────────────────────────────
+
+  /root-keys:
+    get:
+      tags: [Tlog Tiles]
+      summary: Active TL verification keys
+      description: |
+        Returns the active verifier keys for the log in the
+        sumdb-note verification format — one key per line:
+
+            <origin>+<keyhash-hex>+<base64(0x02 || SPKI-DER)>\n
+
+        Where `keyhash-hex` is the first 4 bytes of SHA-256(SPKI-DER)
+        as a zero-padded 8-char hex string. This matches the `kid`
+        field in each receipt's COSE protected header, enabling
+        O(1) kid-to-key lookup during verification.
+      operationId: getRootKeys
+      responses:
+        '200':
+          description: Verification-key lines, newline-separated.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /checkpoint:
+    get:
+      tags: [Tlog Tiles]
+      summary: Latest signed checkpoint (sumdb note format)
+      description: |
+        Signed checkpoint note produced by Tessera using the
+        ed25519 signer in `note.pub`. Format matches
+        `golang.org/x/mod/sumdb/note` — clients verify with the
+        key advertised at `/root-keys` (or pulled from the
+        `note.pub` file the operator publishes). Matches C2SP
+        tlog-tiles spec exactly.
+      operationId: getCheckpoint
+      responses:
+        '200':
+          description: Checkpoint note bytes.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/log/checkpoint:
+    get:
+      tags: [Tlog Tiles]
+      summary: Latest checkpoint (JSON projection)
+      description: |
+        JSON-encoded view of the same checkpoint served at
+        `/checkpoint` as raw note text. Exposes size, height, root
+        hash (base64), origin, format, body text, and signatures —
+        one entry per signer. Reference swagger §310.
+      operationId: getCheckpointJSON
+      responses:
+        '200':
+          description: Parsed checkpoint metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointResponse'
+
+  /v1/log/checkpoint/history:
+    get:
+      tags: [Tlog Tiles]
+      summary: Paginated checkpoint history
+      description: |
+        Returns checkpoints stored by the TL with optional
+        tree-size and time filters. Reference default is 10 per
+        page, DESC by tree_size; maximum 100 per page. Matches
+        reference swagger §342 byte-for-byte.
+      operationId: getCheckpointHistory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+        - name: fromSize
+          in: query
+          required: false
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: toSize
+          in: query
+          required: false
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [ASC, DESC], default: DESC }
+      responses:
+        '200':
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointHistoryResponse'
+        '422':
+          description: Invalid query parameters.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/log/schema/{version}:
+    get:
+      tags: [Tlog Tiles]
+      summary: TL event JSON schema for a given version
+      description: |
+        Returns the JSON schema for the requested TL event version.
+        V0 and V1 bodies are the production schemas fetched from
+        `transparency.ans.godaddy.com/v1/log/schema/{V0,V1}`,
+        served here for historical-verifier backwards compatibility.
+        V2 is the shape *this* server emits on the wire (evolution
+        of V1 with unified cert arrays + typed DNS records). Matches
+        reference swagger §424.
+      operationId: getSchemaByVersion
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [V0, V1, V2]
+      responses:
+        '200':
+          description: Embedded JSON schema document.
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Unknown schema version.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /tile/{level}/{index}:
+    get:
+      tags: [Tlog Tiles]
+      summary: Complete Merkle tile (256 hashes)
+      description: |
+        C2SP tlog-tiles complete tile — 256 node hashes concatenated
+        as raw bytes (no framing). Served directly from Tessera's
+        POSIX layout.
+      operationId: getCompleteTile
+      parameters:
+        - name: level
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Raw tile bytes (binary).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Tile not found.
+
+  /tile/{level}/{index}.p/{width}:
+    get:
+      tags: [Tlog Tiles]
+      summary: Partial Merkle tile (1-255 hashes)
+      description: |
+        A partial tile at the growing frontier of the tree. `width`
+        is 1-255 and counts the number of hashes actually present.
+      operationId: getPartialTile
+      parameters:
+        - name: level
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: width
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 255 }
+      responses:
+        '200':
+          description: Raw tile bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: Tile not found.
+
+  /tile/entries/{index}:
+    get:
+      tags: [Tlog Tiles]
+      summary: Complete entry tile (256 leaves)
+      operationId: getCompleteEntryTile
+      parameters:
+        - name: index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Raw entry-tile bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: Entry tile not found.
+
+  /tile/entries/{index}.p/{width}:
+    get:
+      tags: [Tlog Tiles]
+      summary: Partial entry tile (1-255 leaves)
+      operationId: getPartialEntryTile
+      parameters:
+        - name: index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: width
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 255 }
+      responses:
+        '200':
+          description: Raw entry-tile bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: Entry tile not found.
+
+  # ──────────────────────────────────────────────────────────────
+  # Admin: producer-key CRUD (byte-for-byte reference swagger parity)
+  # ──────────────────────────────────────────────────────────────
+  /internal/v1/producer-keys:
+    post:
+      tags: [Admin]
+      summary: Register a new producer key
+      operationId: createProducerKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerKeyRequest'
+      responses:
+        '200':
+          description: Key registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProducerKeyResponse'
+        '401': { description: Unauthorized }
+        '403': { description: Admin privileges required }
+        '409':
+          description: Producer key with this key_id already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: |
+            Validation failed. Codes: `INVALID_DATE_RANGE`,
+            `INVALID_PUBLIC_KEY_PEM`, `BAD_JSON`, `BAD_BODY`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /internal/v1/producer-keys/ra/{ra_id}:
+    get:
+      tags: [Admin]
+      summary: List producer keys by RA
+      operationId: listProducerKeysByRaId
+      parameters:
+        - name: ra_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Keys for the RA (includes revoked rows for audit).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProducerKeysListResponse'
+        '401': { description: Unauthorized }
+        '403': { description: Admin privileges required }
+        '404':
+          description: No producer keys found for this RA ID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /internal/v1/producer-keys/{key_id}:
+    get:
+      tags: [Admin]
+      summary: Fetch a single producer key by ID (ans-only extension)
+      description: |
+        Not in the reference swagger. Added as a convenience for admin
+        CLIs that already hold a key_id (e.g., after a successful
+        create) and want to read it back without listing-by-ra.
+      operationId: getProducerKey
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Key record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProducerKeyResponse'
+        '401': { description: Unauthorized }
+        '403': { description: Admin privileges required }
+        '404':
+          description: No such key_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Admin]
+      summary: Revoke a producer key
+      operationId: deleteProducerKey
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Key revoked.
+        '401': { description: Unauthorized }
+        '403': { description: Admin privileges required }
+        '404':
+          description: Key not found or already revoked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  # ──────────────────────────────────────────────────────────────
+  # Health
+  # ──────────────────────────────────────────────────────────────
+  /v2/admin/health:
+    get:
+      tags: [Health]
+      summary: Liveness
+      operationId: health
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /v2/admin/ready:
+    get:
+      tags: [Health]
+      summary: Readiness
+      operationId: ready
+      responses:
+        '200':
+          description: Service is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+
+# ────────────────────────────────────────────────────────────────
+# Reusable components
+# ────────────────────────────────────────────────────────────────
+components:
+  # Security schemes. Same shape as the RA spec — static API key
+  # and OIDC tokens both travel as `Authorization: Bearer <token>`,
+  # so one HTTP-bearer definition covers both. Swagger UI's
+  # "Authorize" button reads this. Quickstart default token is
+  # `tl-internal-key` (from config/tl-local.yaml).
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Static API key or OIDC bearer token. Admin routes
+        (`/internal/v1/producer-keys/*`) also require the caller to
+        be an admin — static keys are always admin in the
+        quickstart; OIDC tokens inherit admin-ness from the
+        configured admin-groups list. Verifier GETs are anonymous
+        when `cfg.auth.public-read: true`.
+
+  parameters:
+    AgentIdPath:
+      name: agentId
+      in: path
+      required: true
+      description: Immutable agent UUID.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # ── Ingest ─────────────────────────────────────────────────
+    ProducerEvent:
+      type: object
+      description: |
+        The canonical inner-event shape an RA POSTs. Must be
+        JCS-canonicalized when signed; the server validates the
+        signature over the raw request body and re-canonicalizes.
+      required: [ansId, ansName, eventType, timestamp, raId, agent]
+      properties:
+        ansId:      { type: string, format: uuid }
+        ansName:    { type: string, example: "ans://v1.0.0.agent.example.com" }
+        eventType:
+          type: string
+          enum: [AGENT_REGISTRATION, DOMAIN_VALIDATION, AGENT_ACTIVE, AGENT_REVOCATION]
+        raId:       { type: string, example: "ans-ra-local" }
+        issuedAt:   { type: string, format: date-time }
+        timestamp:  { type: string, format: date-time }
+        agent:
+          type: object
+          required: [host, name, version]
+          properties:
+            host:    { type: string }
+            name:    { type: string }
+            version: { type: string }
+        attestations:
+          type: object
+          description: Event-type specific attestation payload.
+
+    AppendResponse:
+      type: object
+      description: |
+        `logId`, `message`, and `success` match the reference TL's
+        AgentEventResponse byte-for-byte. `leafIndex`, `leafHashHex`,
+        `duplicate`, and `treeSize` are ans-specific additions that
+        expose the Merkle-tree position to callers who want to fetch a
+        receipt without a second round-trip.
+      required: [leafIndex, leafHashHex, duplicate, treeSize]
+      properties:
+        logId:       { type: string, format: uuid, description: "UUIDv7 assigned on first append; echoed on duplicate retry." }
+        message:     { type: string, description: "Human-readable status message." }
+        success:     { type: boolean, description: "Always true for 200 responses." }
+        leafIndex:   { type: integer, format: int64 }
+        leafHashHex: { type: string, description: "RFC 6962 leaf hash (hex)" }
+        duplicate:   { type: boolean }
+        treeSize:    { type: integer, format: int64 }
+
+    # ── Badge + audit ─────────────────────────────────────────
+    TransparencyLog:
+      type: object
+      description: |
+        Reference-shaped envelope carrying one event + its inclusion
+        proof. The `payload` field matches the signed-envelope
+        payload shape (`logId` + `producer`).
+      required: [payload, schemaVersion, signature, status, merkleProof]
+      properties:
+        merkleProof:
+          $ref: '#/components/schemas/MerkleProof'
+        payload:
+          type: object
+          required: [logId, producer]
+          properties:
+            logId: { type: string, format: uuid }
+            producer:
+              type: object
+              required: [event, keyId, signature]
+              properties:
+                event:     { $ref: '#/components/schemas/ProducerEvent' }
+                keyId:     { type: string }
+                signature: { type: string, description: "Detached JWS" }
+        schemaVersion: { type: string, enum: [V2] }
+        signature:     { type: string, description: "TL attestation (detached JWS)" }
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, DEPRECATED, EXPIRED, WARNING, VERIFIED]
+        identities:
+          type: array
+          description: |
+            Agent badges only — the COMPUTED read-time join of the
+            agent's currently-linked verified identities, under the
+            visibility predicate (link LINKED AND agent live). A
+            REVOKED identity stays visible with identityStatus
+            REVOKED and no keys[] — a verifier must see the who was
+            revoked. Covered by the TL's response signature, never by
+            any seal; identity rotation/revocation is visible here
+            immediately with zero agent-stream writes. Embeds at most
+            a small safety cap of entries; identitiesTotal carries
+            the full count and /v1/agents/{agentId}/identities is the
+            paginated overflow target.
+          items:
+            $ref: '#/components/schemas/LinkedIdentityView'
+        identitiesTotal:
+          type: integer
+          description: |
+            Agent badges only — the full count of visible links when
+            identities[] is present (the embedded array is capped).
+        identitiesUnavailable:
+          type: boolean
+          description: |
+            Agent badges only — set when the identities join could
+            not be computed. Join failure is explicit, never silent:
+            an absent or empty identities[] always means "no visible
+            links", never "the join failed".
+        keys:
+          type: array
+          description: |
+            Identity badges only — the CURRENT proven key set quoted
+            VERBATIM from the latest sealed proof event
+            (IDENTITY_VERIFIED / IDENTITY_UPDATED): the latest stream
+            entry may be a link/unlink/revocation carrying no key
+            material, so the badge answers "what are the attested
+            keys" directly. Verification methods only — the
+            signedProof evidence lives in the seal at keysLogId, one
+            hop away. Omitted when the identity is REVOKED.
+          items:
+            type: object
+            description: A sealed verification method, member-for-member verbatim
+        keysLogId:
+          type: string
+          description: |
+            Identity badges only — the sealed proof event keys[] is
+            quoted from. Omitted when the identity is REVOKED.
+
+    TransparencyLogAudit:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransparencyLog'
+
+    MerkleProof:
+      type: object
+      required: [leafIndex, treeSize, leafHash, rootHash, path]
+      properties:
+        leafIndex:   { type: integer, format: int64 }
+        treeSize:    { type: integer, format: int64 }
+        leafHash:    { type: string, description: "hex" }
+        rootHash:    { type: string, description: "standard base64" }
+        path:
+          type: array
+          items:
+            type: string
+            description: "standard base64 of each sibling hash in order"
+        treeVersion: { type: integer }
+
+    # ── Admin: producer keys ───────────────────────────────────
+    ProducerKeyRequest:
+      type: object
+      required: [key_id, public_key_pem, algorithm, ra_id, valid_from, expires_at]
+      properties:
+        key_id:         { type: string }
+        public_key_pem: { type: string, description: "PEM-wrapped SPKI" }
+        algorithm:      { type: string, enum: [ES256] }
+        ra_id:          { type: string }
+        valid_from:     { type: string, format: date-time }
+        expires_at:     { type: string, format: date-time }
+        metadata:
+          $ref: '#/components/schemas/ProducerKeyMetadata'
+
+    ProducerKeyResponse:
+      type: object
+      required: [key_id, status, fingerprint, created_at]
+      properties:
+        key_id:         { type: string }
+        key_id_opaque:  { type: string, nullable: true }
+        ra_id_opaque:   { type: string, nullable: true }
+        status:         { type: string, enum: [active, revoked] }
+        fingerprint:    { type: string, example: "SHA256:<hex>" }
+        created_at:     { type: string, format: date-time }
+        # Fields repeated on the full record (returned by GET-by-id
+        # + present on list items — matches reference §1481).
+        public_key_pem: { type: string }
+        algorithm:      { type: string }
+        ra_id:          { type: string }
+        valid_from:     { type: string, format: date-time }
+        expires_at:     { type: string, format: date-time }
+        revoked_at:     { type: string, format: date-time, nullable: true }
+        metadata:
+          $ref: '#/components/schemas/ProducerKeyMetadata'
+
+    ProducerKeyMetadata:
+      type: object
+      description: Free-form JSON; reference uses environment/region/rotation_of.
+      additionalProperties: true
+      properties:
+        environment: { type: string, enum: [production, stage, development, testing] }
+        region:      { type: string }
+        rotation_of: { type: string, nullable: true }
+
+    ProducerKeysListResponse:
+      type: object
+      required: [keys, total_count]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProducerKeyResponse'
+        total_count:
+          type: integer
+          format: int64
+
+    # ── Checkpoint JSON shapes ────────────────────────────────
+    CheckpointResponse:
+      type: object
+      required: [logSize, rootHash, originName, checkpointFormat, checkpointText, createdAt, signatures]
+      properties:
+        logSize:          { type: integer, format: int64 }
+        treeHeight:       { type: integer }
+        rootHash:         { type: string, description: "standard base64" }
+        originName:       { type: string }
+        checkpointFormat: { type: string, example: "c2sp-tlog/v1" }
+        checkpointText:
+          type: string
+          description: |
+            Note body (origin header + size + root hash + blank line
+            terminator) without signature lines; verifiers re-hash
+            this to check signatures.
+        publicKeyPem:
+          type: string
+          description: |
+            PEM-encoded SPKI of the primary (sumdb-note) signer. Lets
+            verifiers check the primary signature line without a
+            second fetch against `/root-keys`.
+        createdAt:
+          type: string
+          format: date-time
+          description: |
+            Wall-clock time at which the TL persisted the checkpoint
+            row. ans-specific field; reference clients ignore it.
+        signatures:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckpointSignature'
+
+    CheckpointSignature:
+      type: object
+      description: |
+        One signature line on a checkpoint. Matches the reference TL's
+        CheckpointSignature wire shape byte-for-byte:
+        `signatureType` is lowercase (`c2sp` | `jws`), `keyHash` is
+        the `0x`-prefixed 8-char hex of the 4-byte keyhash (matching
+        `/root-keys`), `kmsKeyId` carries the opaque key identifier
+        on JWS entries. `jwsHeader`, `jwsPayload`, `jwsSignature`,
+        `timestamp`, and `kmsKeyId` are only populated for `jws`
+        entries. `valid` is the read-time verification result.
+      required: [signerName, signatureType, algorithm, rawSignature]
+      properties:
+        algorithm:     { type: string, example: ES256 }
+        jwsHeader:     { description: "Decoded JWS protected header (jws entries only)" }
+        jwsPayload:    { description: "Decoded JWS payload (jws entries only)" }
+        jwsSignature:  { type: string, description: "Full compact JWS `header.payload.signature` (jws entries only)" }
+        keyHash:       { type: string, description: "`0x`-prefixed 8-char hex keyhash; matches the `/root-keys` entry" }
+        kmsKeyId:      { type: string, description: "Opaque key identifier on jws entries (same value the JWS `kid` header carries)" }
+        rawSignature:  { type: string, description: "base64-encoded raw signature bytes (`<keyhash:4> || <sig>`)" }
+        signatureType: { type: string, enum: [c2sp, jws] }
+        signerName:    { type: string }
+        timestamp:     { type: string, format: date-time, description: "Timestamp claim from the JWS (jws entries only)" }
+        valid:         { type: boolean, description: "Signature verified against the TL signing key at read time." }
+
+    CheckpointHistoryResponse:
+      type: object
+      required: [checkpoints, pagination]
+      properties:
+        checkpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckpointResponse'
+        pagination:
+          type: object
+          required: [total]
+          properties:
+            total:      { type: integer, format: int64 }
+            nextOffset: { type: integer, nullable: true }
+
+    # ── Errors ────────────────────────────────────────────────
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      properties:
+        type:   { type: string, example: "about:blank" }
+        title:  { type: string }
+        status: { type: integer }
+        code:   { type: string, pattern: "^[A-Z_][A-Z0-9_]*$" }
+        detail: { type: string }
+
+    IdentityProducerEvent:
+      type: object
+      description: |
+        The canonical inner identity event the RA POSTs to the
+        identity ingest lane. Sealed shapes are append-only-forever;
+        the five eventType tokens and these fields are the contract.
+        JCS-canonicalized when signed, same as the agent lanes.
+
+        Per-type required fields: proofs (IDENTITY_VERIFIED /
+        IDENTITY_UPDATED) carry non-empty `keys[]`, `verifiedAt`, and
+        `providerId`; IDENTITY_REVOKED carries `revokedAt`; the link
+        events carry non-empty `ansIds[]` (the whole batch in ONE
+        event) and are the only types allowed to name agents.
+      required: [identityId, kind, value, eventType, timestamp]
+      properties:
+        identityId: { type: string, description: "UUIDv7 — the identity stream key" }
+        kind:
+          type: string
+          enum: ['did:web', 'did:key', 'lei']
+        value:      { type: string, example: "did:web:identity.acme-corp.com" }
+        providerId: { type: string, description: "The owning principal — the WHO's owner" }
+        proofMethod:
+          type: string
+          enum: [did-web-sig, did-key-sig, lei-vlei-acdc]
+        eventType:
+          type: string
+          enum: [IDENTITY_VERIFIED, IDENTITY_UPDATED, IDENTITY_REVOKED, IDENTITY_LINKED, IDENTITY_UNLINKED]
+        keys:
+          type: array
+          description: |
+            The proven key set — sealed self-verifyingly: each entry
+            quotes the DID document's verification method VERBATIM
+            alongside the registrant's signed proof.
+          items:
+            $ref: '#/components/schemas/ProvenKey'
+        ansIds:
+          type: array
+          description: Linked agents' ids (IDENTITY_LINKED / IDENTITY_UNLINKED only)
+          items: { type: string }
+        previousValue: { type: string, description: "Pre-rotation identifier (IDENTITY_UPDATED)" }
+        verifiedAt:    { type: string, format: date-time }
+        revokedAt:     { type: string, format: date-time }
+        raId:          { type: string, example: "ans-ra-local" }
+        timestamp:     { type: string, format: date-time }
+
+    ProvenKey:
+      type: object
+      description: |
+        One key the registrant proved possession of, sealed
+        self-verifyingly: any third party reads the key material out
+        of `verificationMethod`, verifies `signedProof` against it,
+        then confirms the payload decodes to an IdentityProofInput
+        binding this identityId + identifier + purpose — offline,
+        without trusting the RA.
+
+        `verificationMethod` is quoted EXACTLY as the DID document
+        served it — `id`, `type`, `controller`, and the key material
+        in whichever representation the document used
+        (`publicKeyJwk`, or `publicKeyMultibase` for Multikey
+        documents) — member-for-member, values untouched. Nothing
+        derived, re-encoded, or normalized enters a seal; the event
+        envelope is JCS-canonicalized for signing like every event,
+        and JCS preserves member values exactly, so the quoted
+        material survives intact. Thumbprints are compute-at-read
+        conveniences (anyone can derive RFC 7638 from the sealed
+        source) and are never part of the sealed contract.
+
+        The postponed `lei` kind is the one deliberate exception:
+        it will seal the subject AID + a key thumbprint only — there
+        is no document to quote, the ACDC is PII, and KERI's KEL is
+        already the authoritative key history. Seal verbatim what
+        has no other tamper-evident home; commit minimally where one
+        exists.
+      required: [verificationMethod, signedProof]
+      properties:
+        verificationMethod:
+          type: object
+          description: The DID document's verification-method object, verbatim
+          example:
+            id: did:web:identity.acme-corp.com#key-1
+            type: JsonWebKey2020
+            controller: did:web:identity.acme-corp.com
+            publicKeyJwk: { kty: OKP, crv: Ed25519, x: "0-e2i2_..." }
+        signedProof:
+          type: string
+          description: The compact JWS over the served IdentityProofInput
+
+    LinkedIdentityView:
+      type: object
+      description: |
+        One computed identities[] entry on the agent badge, under the
+        visibility predicate: the entry appears while the link is
+        LINKED and the agent is live; identityStatus reports the
+        identity's current stream state (a REVOKED identity stays
+        visible — the attestation rule withholds only its keys).
+      required: [identityId, kind, value, identityStatus]
+      properties:
+        identityId:     { type: string }
+        kind:           { type: string, enum: ['did:web', 'did:key', 'lei'] }
+        value:          { type: string }
+        identityStatus:
+          type: string
+          enum: [VERIFIED, REVOKED]
+          description: Reflects the identity stream NOW
+        keys:
+          type: array
+          description: |
+            The CURRENT proven key set quoted VERBATIM from the
+            latest sealed proof event — verification methods only,
+            member-for-member as sealed, so a verifier checks
+            operator signatures from the badge alone (no audit
+            walk). The signedProof evidence lives in the seal at
+            keysLogId. Omitted when identityStatus is REVOKED: the
+            keys are no longer attested.
+          items:
+            type: object
+            description: A sealed verification method, verbatim
+        keysLogId:
+          type: string
+          description: The sealed proof event keys[] is quoted from — fetch for signedProofs / offline evidence. Omitted when REVOKED.
+        linkedAt:  { type: string, format: date-time }
+        linkLogId:
+          type: string
+          description: The sealed IDENTITY_LINKED entry on the identity stream — fetch for link evidence
+
+    LinkedAgentView:
+      type: object
+      description: One reverse-join entry (identity → agents).
+      required: [ansId]
+      properties:
+        ansId:       { type: string }
+        linkedAt:    { type: string, format: date-time }
+        agentStatus:
+          type: string
+          enum: [ACTIVE, DEPRECATED, WARNING]
+          description: |
+            The linked agent's own computed badge status. The reverse
+            join applies the visibility predicate — only live agents
+            (ACTIVE / DEPRECATED / WARNING) appear; terminal agents'
+            links drop out of every "current" view (history stays in
+            the audit chain).
+
+    # ── Admin: producer keys ───────────────────────────────────

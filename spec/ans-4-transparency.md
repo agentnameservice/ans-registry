@@ -8,7 +8,11 @@ Audience: implementers building or operating an ANS Transparency Log (TL), AHPs 
 
 ## 1. Scope
 
-ANS-4 specifies how registration events flow into an append-only cryptographic log that produces verifiable receipts. ANS-4 is part of the ANS notary layer, which records what can be cryptographically verified without making judgments about trust. Trust scoring is out of scope for ANS and lives in a separate `ti-*` layer set.
+ANS-4 specifies how registration **and identity** events flow into an append-only cryptographic
+log that produces verifiable receipts. ANS-4 is part of the ANS notary layer, which records what
+can be cryptographically verified without making judgments about trust. Trust scoring is out of
+scope for ANS and lives in a separate `ti-*` layer set. There is one Merkle tree; agent and
+Verified-Identity events share it, read through per-object indexes (§5.4).
 
 ANS-4 specifies:
 
@@ -122,6 +126,44 @@ A failure at any step is a poisoning finding; the consumer SHOULD record the fin
 }
 ```
 
+### 5.4 Identity surface
+
+This surface is present only when the RA implements the **optional** Verified Identity capability
+([ANS-0 §12.2](ans-0-identity-anchor.md#122-optional-capability-verified-identities)). A TL
+serving an RA without it exposes none of the `/v1/identities/*` routes and seals no `IDENTITY_*`
+events, and is fully conformant.
+
+There is **one transparency log — a single Merkle tree.** Every event, agent or identity, is
+producer-signed and appended to that one tree in log order. A **"stream"** is a **read index**
+over that single log (by `agentId` or `identityId`), never a separate tree. The Verified-Identity
+object ([ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)) is sealed and read
+through this surface; ANS-0 defines the object and the visibility semantics, ANS-4 the routes.
+
+The identity **event family** is `IDENTITY_VERIFIED`, `IDENTITY_UPDATED`, `IDENTITY_REVOKED`,
+`IDENTITY_LINKED`, `IDENTITY_UNLINKED` ([ANS-0 §8.1](ans-0-identity-anchor.md#81-the-identity-event-family-and-ingest)).
+The sealed-payload field set and per-type required-field matrix are documented there; the
+machine-readable conformance schema is [`api/identity-event-schema-v2.json`](../api/identity-event-schema-v2.json),
+which a sealed identity log entry MUST validate against. Proof, rotation, and revocation events
+are indexed under `identityId`; link/unlink events are additionally indexed under each named
+`ansId` for the read-time join. The TL public read surface gains:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/identities/{identityId}` | Latest sealed event + proof + computed `{status, keys[], keysLogId}` for one identity |
+| `GET /v1/identities/{identityId}/audit` | Paginated history of the identity's event chain, each with its own proof |
+| `GET /v1/identities/{identityId}/receipt` | SCITT COSE receipt for the identity leaf |
+| `GET /v1/identities/{identityId}/agents` | Reverse join — currently-linked agents (paginated) |
+| `GET /v1/agents/{agentId}/identities` | The computed who-identities list for one agent (paginated) |
+| `GET /v1/agents/{agentId}/identities/history` | Link/unlink events naming this agent (audit envelope) |
+
+The agent badge (`GET /v1/agents/{agentId}`) additionally carries a computed `identities[]` array
+joining the agent's live who-identities, governed by the visibility predicate and read-side
+revocation terminality of [ANS-0 §8.2–§8.3](ans-0-identity-anchor.md#82-computed-reads-and-the-visibility-predicate):
+a link is visible when the link's latest event is `LINKED` **and** the agent is live; a `REVOKED`
+identity stays listed with `keys[]` omitted; when the join cannot be computed the array is omitted
+and `identitiesUnavailable: true` is set. These reads require no authentication (the verifier's
+offline-evidence hop); only the ingest lane (§6) requires the producer credential.
+
 ## 6. Producer authentication
 
 The TL MUST verify that each event came from an authorized RA instance before sealing it. Each RA instance registers a public key with the TL and signs every submitted event; the TL validates the signature before accepting the event.
@@ -136,6 +178,12 @@ Producer-key registration sequence:
 Rotation uses an overlap window: new keys are registered with future `validFrom` dates; both old and new remain active during the transition. Producer private keys never leave the RA instance. Historical signatures remain valid after key expiration; a key whose `validFrom` window has elapsed cannot sign new events but its prior signatures continue to verify.
 
 A revocation of a producer key invalidates the key's authority for new signatures; previously-sealed events remain verifiable through the TL's preserved key history.
+
+Agent and identity events ride the **same** producer lane (the same producer-key registry and
+signature check) through **separate** ingest routes: `POST /v1/internal/agents/event` for the
+agent event family and `POST /v1/internal/identities/event` for the identity event family. The TL
+rejects a cross-lane body — an `IDENTITY_*` payload on the agent route, or an `AGENT_*` payload on
+the identity route — with `422 INVALID_EVENT`, so the two object types never interleave at ingest.
 
 ## 7. Witness profiles
 
@@ -271,7 +319,15 @@ A compromised witness backend (Hedera consensus topic operator collusion, OpenTi
 
 ### 10.5 Sealed event types
 
-The TL records `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, and `INTEGRITY_RESOLVED` events. Event payload schemas for `INTEGRITY_WARNING` and `INTEGRITY_RESOLVED` are defined in ANS-5; ANS-4 specifies only that the TL accepts these event types, seals them with the same receipt format as other events, and preserves them.
+The TL records the agent event family — `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_REVOKED`,
+`EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED` — and the
+Verified-Identity event family — `IDENTITY_VERIFIED`, `IDENTITY_UPDATED`, `IDENTITY_REVOKED`,
+`IDENTITY_LINKED`, `IDENTITY_UNLINKED` (defined in
+[ANS-0 §8.1](ans-0-identity-anchor.md#81-the-identity-event-family-and-ingest)). Event payload
+schemas for `INTEGRITY_WARNING` and `INTEGRITY_RESOLVED` are defined in ANS-5; ANS-4 specifies
+only that the TL accepts these event types, seals them with the same receipt format as other
+events, and preserves them. All of them are appended to the one Merkle tree (§5.4); the
+per-object "streams" are read indexes, not separate logs.
 
 ## Appendix A: Worked examples
 

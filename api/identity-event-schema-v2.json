@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ANS sealed identity event (V2)",
+  "description": "Conformance schema for a sealed Verified-Identity Transparency-Log entry (the IDENTITY_* event family). Mirrors ANS-0 §8.1 and the producer payload the RA POSTs to POST /v1/internal/identities/event. Sealed shapes are append-only-forever: the five eventType tokens, the field set, and the per-type required-field matrix are the wire contract. The strict, conformance-critical constraints live on IdentityEvent (the producer-authored, JCS-canonicalized inner event); the envelope status is TL-assigned and intentionally permissive here. NOTE: the keys[]/ProvenKey shape below is the verbatim-verification-method seal used by the JWS-scheme kinds (did:web, did:key). The postponed `lei` kind will seal a thumbprint-only variant (subject AID + key thumbprint, no verificationMethod) — that is a future schema amendment, not covered by this revision.",
+  "type": "object",
+  "required": ["payload", "schemaVersion", "signature", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "payload": { "$ref": "#/definitions/Payload" },
+    "schemaVersion": {
+      "const": "V2",
+      "description": "Envelope version. Identity events are part of the V2 surface; the V1 lane never carries them."
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1,
+      "description": "TL attestation over the sealed entry (detached JWS)."
+    },
+    "status": {
+      "type": "string",
+      "description": "TL-assigned envelope status. Not constrained here; the authoritative, computed identity status is derived at read time (ANS-0 §8.2–§8.3)."
+    }
+  },
+  "definitions": {
+    "Payload": {
+      "type": "object",
+      "required": ["logId", "producer"],
+      "additionalProperties": false,
+      "properties": {
+        "logId": { "type": "string", "minLength": 1, "description": "TL-assigned log identifier." },
+        "producer": { "$ref": "#/definitions/Producer" }
+      }
+    },
+    "Producer": {
+      "type": "object",
+      "required": ["event", "keyId", "signature"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "$ref": "#/definitions/IdentityEvent" },
+        "keyId": { "type": "string", "minLength": 1, "description": "Producer key id in the TL producer-key registry." },
+        "signature": { "type": "string", "minLength": 1, "description": "RA producer attestation over the JCS-canonical inner event (detached JWS)." }
+      }
+    },
+    "IdentityEvent": {
+      "type": "object",
+      "description": "The producer-authored inner identity event. JCS-canonicalized and signed by the RA; keyed by identityId.",
+      "required": ["eventType", "identityId", "kind", "value", "timestamp"],
+      "properties": {
+        "eventType": {
+          "type": "string",
+          "enum": ["IDENTITY_VERIFIED", "IDENTITY_UPDATED", "IDENTITY_REVOKED", "IDENTITY_LINKED", "IDENTITY_UNLINKED"]
+        },
+        "identityId": { "type": "string", "minLength": 1, "description": "UUIDv7 — the identity stream key." },
+        "kind": { "type": "string", "enum": ["did:web", "did:key", "lei"] },
+        "value": { "type": "string", "minLength": 1, "description": "Canonical identifier, e.g. did:web:identity.acme-corp.com." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "RFC 3339." },
+        "proofMethod": { "type": "string", "enum": ["did-web-sig", "did-key-sig", "lei-vlei-acdc"] },
+        "providerId": { "type": "string", "description": "The owning principal — the who's owner." },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/ProvenKey" },
+          "description": "The proven key set; one entry per key the registrant proved possession of. Required (non-empty) on the proof events."
+        },
+        "previousValue": { "type": "string", "description": "Pre-rotation identifier value (IDENTITY_UPDATED)." },
+        "ansIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Linked agents' ids — the whole batch in one event (IDENTITY_LINKED / IDENTITY_UNLINKED only)."
+        },
+        "verifiedAt": { "type": "string", "format": "date-time" },
+        "revokedAt": { "type": "string", "format": "date-time" },
+        "raId": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "comment": "Proof events carry the proven key set, verifiedAt, and providerId.",
+          "if": { "properties": { "eventType": { "enum": ["IDENTITY_VERIFIED", "IDENTITY_UPDATED"] } } },
+          "then": { "required": ["keys", "verifiedAt", "providerId"] }
+        },
+        {
+          "comment": "Revocation carries revokedAt.",
+          "if": { "properties": { "eventType": { "const": "IDENTITY_REVOKED" } } },
+          "then": { "required": ["revokedAt"] }
+        },
+        {
+          "comment": "Link events carry a non-empty ansIds batch.",
+          "if": { "properties": { "eventType": { "enum": ["IDENTITY_LINKED", "IDENTITY_UNLINKED"] } } },
+          "then": { "required": ["ansIds"], "properties": { "ansIds": { "minItems": 1 } } }
+        },
+        {
+          "comment": "Non-link events never name agents: ansIds is absent or empty.",
+          "if": { "properties": { "eventType": { "enum": ["IDENTITY_VERIFIED", "IDENTITY_UPDATED", "IDENTITY_REVOKED"] } } },
+          "then": { "properties": { "ansIds": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "ProvenKey": {
+      "type": "object",
+      "description": "One key the registrant proved possession of, sealed self-verifyingly. The JWS-scheme (did:web, did:key) seal shape.",
+      "required": ["verificationMethod", "signedProof"],
+      "additionalProperties": false,
+      "properties": {
+        "verificationMethod": {
+          "type": "object",
+          "description": "The verification method quoted EXACTLY as the source published it (id, type, controller, and the key material in publicKeyJwk or publicKeyMultibase) — member-for-member, values untouched. Additional members are preserved verbatim.",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "type": { "type": "string" },
+            "controller": { "type": "string" },
+            "publicKeyJwk": { "type": "object" },
+            "publicKeyMultibase": { "type": "string" }
+          }
+        },
+        "signedProof": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The compact JWS the registrant submitted over the served IdentityProofInput (its payload segment equals the served signingInput verbatim)."
+        }
+      }
+    }
+  }
+}

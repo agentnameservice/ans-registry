@@ -82,7 +82,12 @@ When the Trust Card carries a stapled SCITT receipt, the discoverer verifies loc
 
 An ANS-3 implementation MUST consult `claim.anchorType` (and, for DID, the method-specific identifier) before generating records and MUST NOT emit records for anchors that do not bind to an FQDN.
 
-For LEI-only base-only registrations without cross-anchor binding (per [ANS-0 §5.3](ans-0-identity-anchor.md#53-lei-status-active)), the registration is metadata-only; no records emit. The TL still records the registration; discovery surfaces it as a known-organization listing rather than a discoverable agent.
+An operator identity that does not bind to an FQDN — e.g. an LEI who-identity (the
+[lei profile](identity-profiles/lei.md),
+[ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)) — emits no DNS records of
+its own; it is metadata-only at the DNS layer, and the agents it links carry their own FQDN
+records. The TL still records the identity; discovery surfaces it as a known-organization listing
+rather than a discoverable agent.
 
 ### 4.1.1 DNS-side prerequisites for cryptographic verification
 

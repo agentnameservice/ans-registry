@@ -19,7 +19,12 @@ ANS-5 specifies:
 - The transient-vs-mismatch distinction the AIM MUST observe.
 - The principal-binding verification procedures for DID_WEB, LEI, BIOMETRIC_HASH, and ENS_ENSIP25 binding types.
 
-ANS-5 is **anchor-agnostic and DNS-profile-agnostic by construction**. The same worker runs across FQDN, DID, and LEI registrations; against legacy `_ans` TXT, against Consolidated Approach SVCB, against agents with no DNS at all. ANS-5 reads identity through `IdentityClaim` only and consults the relevant ANS-3 profile through the `DNSEmitter.records()` contract for expected DNS state.
+ANS-5 is **profile-agnostic and DNS-profile-agnostic by construction**. The same worker runs
+across registrations regardless of anchor profile; against legacy `_ans` TXT, against
+Consolidated Approach SVCB, against agents with no DNS at all. It consults the relevant ANS-3
+profile through the `DNSEmitter.records()` contract for expected DNS state. **Verified
+Identities** (the *who*, [ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)) are
+monitored on their own per-identity cadence (§4.3), independently of the agents that link them.
 
 ANS-5 does **not**:
 
@@ -54,7 +59,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | **Schema integrity** | Fetch each endpoint's `metaDataUrl`, hash the document | Hash matches the protocol-keyed entry in the TL `attestations.metadataHashes` map (e.g. `metadataHashes["A2A"]`) | Only when per-endpoint `metaDataHash` values were submitted at registration |
 | **Principal binding (ENS_ENSIP25)** | Resolve ENS name; verify `agent-registration[<registry>][<tokenId>]` text record; verify ERC-8004 registration file lists the ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
 | **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID document exists with a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
-| **Principal binding (LEI)** | Verify vLEI credential signature against the issuing entity's registered key (Option A) or against the LOU's custom field signature (Option B) per [ANS-0 §5.3](ans-0-identity-anchor.md#53-lei-status-active) | Signature valid and LEI ACTIVE in GLEIF database | Only when `principalBinding.type` is `LEI` |
+| **Principal binding (LEI)** | Verify vLEI credential signature against the issuing entity's registered key (Option A) or against the LOU's custom field signature (Option B) per the [lei profile](identity-profiles/lei.md) | Signature valid and LEI ACTIVE in GLEIF database | Only when `principalBinding.type` is `LEI` |
 | **Principal binding (BIOMETRIC_HASH)** | Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or zero-knowledge proof | Credential verifies and matches the registered binding | Only when `principalBinding.type` is `BIOMETRIC_HASH` |
 | **VC signature** | Resolve issuer DID, retrieve public key, verify signature, check expiration | Signature valid and credential not expired | Only when `verifiableClaims` are present in the Trust Card |
 | **On-chain identity (ERC-8004)** | Verify agentId ownership on the Identity Registry, check Reputation Registry for active feedback | Owner address matches `principalBinding.identifier` | Only when `onChainId` references an ERC-8004 registration |
@@ -73,6 +78,31 @@ AHPs rotate ECH keys via `PATCH /v1/agents/{agentId}/ech` without creating a TL 
 
 The AIM MAY monitor RDAP status and NS record changes for registered agents' domains. Status transitions to `pendingDelete`, `redemptionPeriod`, or `serverHold` indicate the domain is at risk. NS record changes indicate a potential provider migration. Both produce findings for the RA. RDAP detail varies by registrar and authorization level (RFC 9083); the AIM uses whatever level is publicly
 available.
+
+### 4.3 Verified-identity monitoring
+
+This applies only where the RA implements the **optional** Verified Identity surface
+([ANS-0 §12.2](ans-0-identity-anchor.md#122-optional-capability-verified-identities)); a
+deployment without Verified Identities has nothing to monitor here.
+
+A Verified Identity (the *who*,
+[ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)) is monitored as a
+**first-class object on its own cadence**, not once per linked agent. Because one identity can
+link to many agents and rotation/revocation seal exactly one event regardless of fan-out
+([ANS-0 §8.2](ans-0-identity-anchor.md#82-computed-reads-and-the-visibility-predicate)), the AIM
+**probes each identity once** and the result projects to every linked agent's view. For a fleet
+of N agents sharing one operator identity this is one probe, not N — the same fan-out saving the
+seal side enjoys.
+
+The per-identity check is **sealed-vs-live key drift**: the AIM re-resolves the identifier
+through its [identity profile](identity-profiles/)'s key source (re-fetch the `did:web` document,
+re-resolve the LEI's KEL key state, etc.) and compares the live authoritative key set against the
+`keys[]` the latest sealed `IDENTITY_VERIFIED`/`IDENTITY_UPDATED` event recorded. A sealed key no
+longer published, an unreachable document, or a key rotation that abandons the proven key is a
+finding. `did:key` cannot drift (the key is the identifier) so its only monitored transition is
+revocation.
+
+As everywhere in ANS-5, a drift finding is a **report, not a revocation**: the RA decides. Read-side revocation terminality ([ANS-0 §8.3](ans-0-identity-anchor.md#83-read-side-revocation-terminality)) is independent of monitoring — a revoked identity stays revoked on the public surface regardless of what a later probe sees.
 
 ## 5. Verification procedure (verifier-facing)
 
@@ -147,7 +177,7 @@ Non-normative worked example (AIM finding payload) lives at [`examples/ans-5-exa
 
 ## 13. References
 
-- ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). `IdentityClaim`, anchor resolution, soft-stale caching.
+- ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). The proof-of-control gate, the Verified Identity object and its monitoring, the [identity profiles](identity-profiles/).
 - ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Registration aggregate, `INTEGRITY_WARNING` event payload schema field consumers, Trust Card structure.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md). Expected DNS records.
 - ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md). TL receipts, witness attestations, INTEGRITY_WARNING/RESOLVED envelope.
