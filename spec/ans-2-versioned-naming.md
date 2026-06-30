@@ -9,7 +9,7 @@ Audience: implementers adding semantic-version routing and Private-key Confirmat
 ## 1. Scope
 
 ANS-2 is **optional** at registration time and through the registration's life. A conforming Core deployment skips it entirely. A base-only registration is one created with no ANSName and no Identity Certificate. An existing versioned registration MAY add, remove, or roll its Identity Certificate via the `IDENTITY_CERT_UPDATED` event (defined in
-[ANS-1](ans-1-registration.md#66-identity_cert_updated)); the registration's `agentId`, `agentHost`, ANSName, and anchor binding are unchanged across the event.
+[ANS-1](ans-1-registration.md#65-identity_cert_updated)); the registration's `agentId`, `agentHost`, ANSName, and anchor binding are unchanged across the event.
 
 When present, ANS-2 specifies:
 
@@ -98,7 +98,7 @@ Steps 3 and 4 of the handshake sequence above require the party being authentica
 
 DANE (`_443._tcp` TLSA) remains an optional additional pinning check across all scenarios.
 
-The combination a callee presents may change during the registration's life via `IDENTITY_CERT_UPDATED` (defined in [ANS-1](ans-1-registration.md#66-identity_cert_updated)). A versioned callee that removes its Identity Certificate stays a versioned registration but presents only a Server Certificate during the next handshake; callers that previously verified the Identity Certificate fall back to
+The combination a callee presents may change during the registration's life via `IDENTITY_CERT_UPDATED` (defined in [ANS-1](ans-1-registration.md#65-identity_cert_updated)). A versioned callee that removes its Identity Certificate stays a versioned registration but presents only a Server Certificate during the next handshake; callers that previously verified the Identity Certificate fall back to
 badge or TL verification, and the caller does not need to re-discover the agent.
 
 ## 5. Private-key Confirmation Challenge (PriCC)

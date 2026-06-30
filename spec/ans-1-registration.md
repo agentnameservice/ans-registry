@@ -14,7 +14,6 @@ ANS-1 defines how an agent's **primary anchor** — an FQDN proven through ANS-0
 - The registration aggregate's data shape and identifier set.
 - The lifecycle state machine (PENDING_VALIDATION → PENDING_CERTS → PENDING_DNS → ACTIVE → DEPRECATED → REVOKED, plus EXPIRED and FAILED).
 - The event set the RA emits to the Transparency Log (ANS-4) and event stream consumers.
-- The cross-anchor `EquivalenceLink` event shape.
 - Base-only registration handling, including the special-case rules around verification and uniqueness.
 - The skill registration sub-profile, where artifacts register as catalog entries under a parent agent.
 - Capability token discipline for ANS-registered agents issuing verifiable credentials to verifiers.
@@ -42,10 +41,9 @@ ANS-1 does **not** specify the proof-of-control gate itself (ANS-0), the ANSName
 
 - **Registration**: an aggregate the RA owns, identified by `agentId`, carrying one `IdentityClaim` plus operational metadata, status, and lifecycle history.
 - **AHP (Agent Hosting Platform)**: the operator that hosts the agent's code and manages its DNS and certificates. Submits the registration request.
-- **Lifecycle event**: a `RegistrationEvent` the RA emits when a registration changes state (`AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`, `AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED`).
+- **Lifecycle event**: a `RegistrationEvent` the RA emits when a registration changes state (`AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`, `AGENT_REVOKED`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED`).
 - **Base-only registration**: a registration with no `version` and no Identity CSR. The agent's identity is the ANS-0 anchor alone; there is no ANSName.
 - **Versioned registration**: a registration with a `version` and an Identity CSR. The ANSName form (ANS-2) names the version; an Identity Certificate binds it.
-- **`EquivalenceLink`**: a TL event recording that two registrations share an operator and refer to the same agent through different anchor types (defined in the event-set section).
 - **Capability token**: a JWT issued by an ANS-registered agent to an ANS-registered verifier, carrying claims that bind the token's use to specific audiences and constrain its lifetime.
 
 ## 3. The `RegistrationService` interface
@@ -202,49 +200,11 @@ Emitted when the Identity Certificate (versioned registrations) or Server Certif
 
 Emitted when the AHP or RA revokes a registration. Payload includes `revocationReasonCode` (an RFC 5280 reason code; AHP submissions use the friendlier short field name `reason` and the sealed event canonicalizes to `revocationReasonCode`) and `revokedAt`.
 
-### 6.4 `EQUIVALENCE_LINK`
-
-Emitted when an operator links two registrations as referring to the same agent (per [ANS-0 §11](ans-0-identity-anchor.md#11-cross-identity-equivalence)). Both registrations' active keys MUST authorize the link.
-
-> **Superseded for the single-RA case.** Within one RA, the same-operator/same-agent
-> relationship is now expressed by linking a **Verified Identity** to the agent(s) it operates
-> ([ANS-0 §6](ans-0-identity-anchor.md#6-identity-links)) — one who-object linked to many agents,
-> not two registrations joined by anchor type. `EQUIVALENCE_LINK` is retained for the
-> **federated multi-RA** case below, where the registrations live on different RAs and the
-> cryptographic co-signature model applies.
-
-- **Single-RA case (current).** When both registrations live on the same RA, the RA's authentication system verifies that the caller controls both registrations before accepting the link request, and the RA's producer key signs the resulting envelope. Caller-side ownership of both registrations is the authorization signal.
-- **Federated multi-RA case (future amendment).** When the registrations live on different RAs, the cryptographic co-signature requirement applies: the inner-event JCS bytes are signed by the primary registration's anchor key, and the producer envelope carries a co-signature from the equivalent registration's anchor key. The envelope schema admitting the co-signer block is a future amendment.
-
-The wire shape:
-
-```json
-{
-  "eventType": "EQUIVALENCE_LINK",
-  "linkedAnsId": "f3c2d4e5-...-1234",
-  "linkedAnsName": "ans://v1.0.0.invoicing.acme.com",
-  "linkedAnchorType": "lei",
-  "linkedAnchorResolvedId": "549300EXAMPLE00LEI17",
-  "rationale": "Cross-anchor binding: same agent, dual identity assertion (FQDN + LEI).",
-  "raId": "id-A",
-  "timestamp": "2026-05-17T18:00:00Z"
-}
-```
-
-Field semantics:
-
-- `linkedAnsId`: the `agentId` of the equivalent (linked-to) registration. The event itself is sealed under the primary registration's `agentId`.
-- `linkedAnsName`: the equivalent registration's ANSName, when versioned. Absent for base-only equivalents.
-- `linkedAnchorType`: the equivalent registration's `claim.anchorType` (`fqdn`, `did`, or `lei`).
-- `linkedAnchorResolvedId`: the equivalent registration's `claim.resolvedId`.
-- `rationale`: free-form operator note explaining the equivalence, surfaced to verifiers.
-- `raId`, `timestamp`: standard event headers.
-
-### 6.5 `INTEGRITY_WARNING` and `INTEGRITY_RESOLVED`
+### 6.4 `INTEGRITY_WARNING` and `INTEGRITY_RESOLVED`
 
 Emitted when the AIM (ANS-5) reports a confirmed mismatch and when the discrepancy clears. Both events leave the registration `ACTIVE`.
 
-### 6.6 `IDENTITY_CERT_UPDATED`
+### 6.5 `IDENTITY_CERT_UPDATED`
 
 Emitted when the operator adds, removes, or rolls the Identity Certificate on an existing registration without otherwise changing the agent's identity. The registration's `agentId`, `agentHost`, ANSName (when present), and anchor binding are unchanged across the event.
 
@@ -278,9 +238,9 @@ Three state transitions a single event can carry:
 The `absent` to `absent` transition is not a valid event; the RA rejects the operation.
 
 (`IDENTITY_CERT_UPDATED` concerns the agent's Identity *Certificate* and is distinct from the
-Verified-Identity event family in §6.7 below — the similar names notwithstanding.)
+Verified-Identity event family in §6.6 below — the similar names notwithstanding.)
 
-### 6.7 Identity events (V2)
+### 6.6 Identity events (V2)
 
 These events exist only when the RA implements the **optional** Verified Identity surface
 ([ANS-0 §12.2](ans-0-identity-anchor.md#122-optional-capability-verified-identities)); an RA
@@ -309,7 +269,6 @@ that is never stored on the registration.
 | **Version bump** (versioned only) | Code or config change | new `version` + fresh `identityCsrPEM` | Re-validates anchor proof, issues new Identity Certificate | `AGENT_REGISTERED` | New per-version records added (`_ans`, `_ans-badge`); shared records unchanged. AHP updates `_ans-identity._tls` for the new Identity Certificate |
 | **Renewal** | Cert approaching expiration, code unchanged | new CSR, same `version` (or none for base-only) | Re-runs anchor proof, issues fresh certificate | `AGENT_RENEWED` | None |
 | **Revocation** | Agent shutdown or version retirement | RFC 5280 reason code | Revokes certificates at issuing CA(s) | `AGENT_REVOKED` | Per-version records removed immediately; shared records removed when last ACTIVE version is gone |
-| **Equivalence link** | Operator binds two registrations as one agent | Co-signed link payload (defined in the event-set section) | Verifies both anchor signatures, records the link | `EQUIVALENCE_LINK` | None |
 | **Integrity warning** | AIM finding confirmed by RA re-verification | (AIM-initiated) | Re-verifies against TL sealed records | `INTEGRITY_WARNING` | None. Agent stays `ACTIVE` |
 | **Integrity resolved** | Discrepancy clears | (AIM-initiated) | Confirms live state matches TL | `INTEGRITY_RESOLVED` | None |
 | **Identity-cert toggle** | Operator adds, removes, or rolls the Identity Certificate without changing the registration's version | new `identityCsrPEM` plus PriCC (add or roll), or removal request (remove) | Validates anchor proof; issues or revokes the Identity Certificate at the Private CA | `IDENTITY_CERT_UPDATED` | AHP updates `_ans-identity._tls` to publish the new fingerprint, or removes the record on a remove |
@@ -449,7 +408,7 @@ A conformant ANS-1 implementation:
 4. Implements the `(agentHost, claim.anchorType)` uniqueness predicate.
 5. Stores `anchor_type` and `anchor_resolved_id` as nullable columns and treats nil as FQDN-implicit per ANS-0.
 6. Does not persist `IdentityClaim.publicKey` on the registration row per ANS-0.
-7. Emits the event set above to the ANS-4 TL with the `EQUIVALENCE_LINK` schema.
+7. Emits the event set above to the ANS-4 TL.
 8. Honors the lifecycle state machine and produces TL events only on transitions to `ACTIVE`, `DEPRECATED`, `REVOKED`, `RENEWED`, and `EXPIRED`.
 9. Exposes a `list(filter)` operation that supports `agentHost` filtering as the transitional cross-anchor join.
 10. Passes the conformance test vectors at `docs/tests/conformance/ans-1/`.

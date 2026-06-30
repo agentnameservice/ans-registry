@@ -43,7 +43,7 @@ ANS-0 specifies, for both:
 - The **who/what relationship** and the agent's FQDN primary anchor (§9).
 - The **identity-profile registration mechanism** — how each identifier kind plugs in without
   touching this core contract (§10), and the registry of profiles defined today.
-- Cross-identity equivalence within and across RAs (§11).
+- Cross-identity equivalence within an RA, expressed via identity links (§11).
 
 ANS-0 does **not** specify:
 
@@ -652,19 +652,11 @@ exists; the seam is extracted only when the kinds themselves justify it.
 
 ## 11. Cross-identity equivalence
 
-An operator MAY assert that one agent is reachable as the same entity under more than one
-identity. ANS handles this in two distinct ways depending on the trust boundary:
-
-- **Within one RA (the common case): identity links.** The owner proves a Verified Identity once
-  and links it to the agent(s) it operates (§6). This *supersedes* v0.1.0's model of cross-anchor
-  equivalence as separate registrations joined by `EQUIVALENCE_LINK` for the single-RA case: a
-  Verified Identity is one owner-level object linked to many agents, not N registrations a
-  verifier must reconcile.
-- **Across RAs (federated): `EQUIVALENCE_LINK`.** When the registrations live on different RAs,
-  the cryptographic co-signature model of ANS-1 §6.4 `EQUIVALENCE_LINK` is **retained unchanged** —
-  the inner-event JCS bytes signed by the primary registration's key, the producer envelope
-  carrying a co-signature from the equivalent registration's key. That federated, multi-RA case
-  is unaffected by this spec and remains a future amendment to admit at the envelope level.
+An operator that runs an agent reachable as the same entity under more than one identity expresses
+that **by linking a single Verified Identity to all of those agents** (§6) — one owner-level
+who-object joined to many agents, not N registrations a verifier must reconcile. There is no
+separate equivalence event: the link *is* the equivalence assertion. This supersedes v0.1.0's
+model of cross-anchor equivalence as separate registrations a verifier had to reconcile.
 
 **Uniqueness.** One `(kind, value)` is `VERIFIED` by at most one owner across an RA. Competing
 unproven claims race to prove control; the first to prove wins (the loser's verify-time flip
@@ -747,8 +739,8 @@ treats a `REVOKED` identity as revoked regardless of any later stream entry (§8
 
 - Identity profiles: [`identity-profiles/`](identity-profiles/) (fqdn, did-web, did-key, lei,
   and deferred sketches).
-- [ANS-1: Registration & Lifecycle](ans-1-registration.md) — the agent (the what), the event set,
-  `EQUIVALENCE_LINK`.
+- [ANS-1: Registration & Lifecycle](ans-1-registration.md) — the agent (the what) and the event
+  set.
 - [ANS-4: Transparency](ans-4-transparency.md) — the single Merkle log, identity ingest and read
   surface, SCITT receipts.
 - [ANS-5: Integrity Monitoring](ans-5-integrity-monitoring.md) — per-identity monitoring.

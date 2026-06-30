@@ -320,7 +320,7 @@ A compromised witness backend (Hedera consensus topic operator collusion, OpenTi
 ### 10.5 Sealed event types
 
 The TL records the agent event family — `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`,
-`AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`,
+`AGENT_REVOKED`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`,
 `IDENTITY_CERT_UPDATED` — and the
 Verified-Identity event family — `IDENTITY_VERIFIED`, `IDENTITY_UPDATED`, `IDENTITY_REVOKED`,
 `IDENTITY_LINKED`, `IDENTITY_UNLINKED` (defined in
