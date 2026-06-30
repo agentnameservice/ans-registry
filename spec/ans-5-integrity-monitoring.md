@@ -106,7 +106,7 @@ As everywhere in ANS-5, a drift finding is a **report, not a revocation**: the R
 
 ## 5. Verification procedure (verifier-facing)
 
-A verifier checks an agent through independent steps, each using a different trust channel. The cryptographic verification path is anchor-agnostic; the per-step checks reduce to anchor-specific calls inside ANS-0 resolution.
+A verifier checks an agent through independent steps, each using a different trust channel. The cryptographic verification path is profile-agnostic; the per-step checks reduce to per-kind calls into the relevant ANS-0 profile (the §3 proof-of-control gate / the profile's key source).
 
 | Step | Check | Trust channel | What it proves |
 | --- | --- | --- | --- |

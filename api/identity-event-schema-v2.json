@@ -103,8 +103,12 @@
       "properties": {
         "verificationMethod": {
           "type": "object",
-          "description": "The verification method quoted EXACTLY as the source published it (id, type, controller, and the key material in publicKeyJwk or publicKeyMultibase) — member-for-member, values untouched. Additional members are preserved verbatim.",
+          "description": "The verification method quoted EXACTLY as the source published it (id, type, controller, and the key material in publicKeyJwk or publicKeyMultibase) — member-for-member, values untouched. Additional members are preserved verbatim. At least one key-material member MUST be present so the seal is checkable from the badge alone (ANS-0 §8.4).",
           "required": ["id"],
+          "anyOf": [
+            { "required": ["publicKeyJwk"] },
+            { "required": ["publicKeyMultibase"] }
+          ],
           "properties": {
             "id": { "type": "string", "minLength": 1 },
             "type": { "type": "string" },

@@ -13,7 +13,7 @@ The authoritative status is the ANS-0 table; this page is a convenience map.
 | `fqdn` (agent primary) | [fqdn.md](fqdn.md) | Required | identifier (ACME) + key (CSR) | n/a (cert-bound) | Active |
 | `did:web` | [did-web.md](did-web.md) | Optional | key only (multi-key) | verbatim verification method | Active |
 | `did:key` | [did-key.md](did-key.md) | Optional | key only | verbatim verification method | Active |
-| `lei` | [lei.md](lei.md) | Optional | key only (vLEI-validated) | thumbprint-only | Postponed |
+| `lei` | [lei.md](lei.md) | Optional | key only (vLEI-validated) | thumbprint-only (AID + key thumbprint) | Postponed |
 | `did:plc` | [did-plc.md](did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `did:ethr` / `did:pkh` | [did-ethr.md](did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion.md](did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |

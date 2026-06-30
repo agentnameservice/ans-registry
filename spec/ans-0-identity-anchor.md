@@ -73,8 +73,10 @@ as resolution: an `AnchorResolver` fetched whatever key an identifier published 
 registering. v0.2.0 replaces resolution-as-identity with **proof-of-control-as-identity**: the
 authoritative key is still resolved, but resolution is only an internal step of a control proof,
 and nothing is sealed until the registrant demonstrates possession of that key bound to this
-operation. The resolver interface, the `IdentityClaim` type, and the "FQDN-implicit" treatment
-of v0.1.0 are retired; §9 and §11 describe what replaces them.
+operation. The resolver interface and the `IdentityClaim` type of v0.1.0 are retired; the
+"FQDN-implicit" treatment is **narrowed, not removed** — it now applies only to an agent's FQDN
+primary anchor, never to Verified Identities (§9). §9 and §11 describe what replaces
+resolution-as-identity.
 
 ## 2. Terminology
 
@@ -158,8 +160,8 @@ bound to **this object and operation** (anti-replay, anti-cross-use).
      carries `challenges[].signingInput` = the base64url of the exact JCS bytes. For JWS schemes
      the compact JWS's **payload segment MUST equal that string verbatim** (the RA checks
      payload-equality *before* verifying any signature); for non-JOSE schemes (lei CESR) the
-     signed message is the decoded bytes. Canonicalization-mismatch interop failures are
-     structurally impossible.
+     signed message is the decoded bytes. Canonicalization-mismatch interop failures fail closed
+     at the payload-equality check, before any signature is verified.
 3. The RA verifies the proof(s) against the **authoritatively resolved** key(s), with `alg`
    pinned to the resolved key type (alg-confusion defense), confirms the `nonce` is unexpired and
    unconsumed, and consumes it **in the same transaction that flips the row state** — a
@@ -185,7 +187,7 @@ different key, each header naming that key's `kid`. The RA verifies **every** su
 (§8), against the **one** shared nonce, consumed once. `did:key` and `lei` are single-key.
 
 **Token discipline (normative).** The `nonce` is single-use and bound to its row; default TTL 1
-hour (configurable; ANS-2's 5-minute PriCC recommendation is the floor for high-assurance
+hour (configurable; ANS-2's 5-minute PriCC (Private-key Confirmation Challenge) recommendation is the floor for high-assurance
 deployments). A proof against a consumed or expired nonce is rejected. A **failed** verify
 attempt does **not** consume the nonce — consumption happens only inside the success transaction
 — so a registrant may retry a bad proof until expiry. After expiry, recovery is the **idempotent
@@ -237,8 +239,8 @@ interface VerifiedIdentity {
 
 There is **no public-key column**. Proven keys live in the identity's sealed TL events (§8), not
 as durable row state — the same key-transience rule v0.1.0 applied to `IdentityClaim.publicKey`,
-preserved here: a stored key that bypasses the proof path defeats freshness and rotation by
-construction.
+preserved here: a stored key would be a second copy that can drift from the freshness-bounded
+sealed source, so the authoritative key state lives only in the sealed events.
 
 An identity is created and proven entirely on its own; an identity with **zero** linked agents is
 a valid state, and that independence is what makes the continuity story (§9) work.
@@ -268,7 +270,9 @@ REVOKED  --> [*]                 terminal
    proof lands (the row remains `VERIFIED` with the replacement staged); a replacement that never
    verifies expires with its nonce. A clean verify-control seals `IDENTITY_UPDATED` — **one
    event, regardless of how many agents are linked** (§8 fan-out). Cross-kind replacement is
-   rejected (remove + add, not a rotation).
+   rejected (remove + add, not a rotation). Value-stable rotation applies only to kinds whose
+   identifier value survives a key change; for `did:key` the value *is* the key, so a key change
+   is a new identifier (a new identity object), not a `PUT` rotation (see the did:key profile).
 4. **Revoke** — `POST /v2/ans/identities/{identityId}/revoke` → `REVOKED`, seal
    `IDENTITY_REVOKED`. **Not a `DELETE`:** an identity cannot be deleted, only state-changed; its
    history is append-only in the TL, and the verb mirrors the agent's `POST …/revoke`.
@@ -303,7 +307,10 @@ identity's keys without owning the agent gets nothing, and owning an agent witho
 identity gets nothing.
 
 **Liveness gate (normative).** The identity MUST be `VERIFIED`, and every agent MUST be in a
-**live** state — `ACTIVE` or `DEPRECATED`. Terminal agents (`REVOKED`/`EXPIRED`/`FAILED`) and
+**live** registration state — `ACTIVE` or `DEPRECATED`. (The link gate sees only *registration*
+status; the TL-computed read-time badge states `WARNING`/`EXPIRED` are not registration statuses,
+so they do not appear here — but the §8.2 visibility predicate, which reads the TL badge status,
+additionally treats `WARNING` as live.) Terminal agents (`REVOKED`/`EXPIRED`/`FAILED`) and
 pre-activation agents are rejected with `AGENT_NOT_LINKABLE` (a terminal link is dead on arrival
 under the §8.2 predicate; a pre-activation agent has no sealed presence to join). `DEPRECATED` is
 deliberately linkable: it still serves during migration and the who remains true.
@@ -319,14 +326,16 @@ exactly two places — proof and rotation — never for routine fleet operations
 blocked: an attacker with a **stolen owner credential** registers an agent on their own domain
 under the victim's account and links the victim's identity to it (reputation transfer). Accepted
 for v1 with the system's standard answer — **detection via transparency**: `IDENTITY_LINKED` is a
-sealed, visible TL event naming the `identityId`, so the owner or a monitor (ANS-5) catches it.
-The RA sends no owner notifications (it collects no contact info, and the account it could notify
-is the one whose credential performed the link). Deployments MAY additionally require **step-up
-authentication** on link/unlink/revoke. The link route enforces a per-owner rate limit and a hard
-`agentIds[]` cardinality cap per call.
+sealed event on the victim identity's own audit stream (`GET /v1/identities/{identityId}/audit`),
+so the owner, a third party, or an ANS-5 monitor catches it — but detection is **pull-only**: it
+depends on someone actively polling that stream. The RA pushes nothing (it collects no contact
+info, and the account it could notify is the one whose credential performed the link). Deployments MAY additionally require **step-up
+authentication** on link/unlink/revoke. The link route enforces a per-owner rate limit and a
+per-call `agentIds[]` cardinality cap (both deployment-configured).
 
 **Mechanics.** Linking a batch is **one** owner-gated call sealing **one** `IDENTITY_LINKED`
-event carrying `ansIds[]`; fleet linking is O(1) sealed events. Unlink (`DELETE
+event whose `ansIds[]` carries exactly the agent ids submitted as the request's `agentIds[]` (§7);
+fleet linking is O(1) sealed events. Unlink (`DELETE
 …/links/{agentId}`) seals `IDENTITY_UNLINKED`; the association ends but its history persists, and
 the RA's write-side link row is retained as `UNLINKED` (never deleted) — that retained row is a
 projection-fidelity contract, not an API feature. Cross-owner linking is out of scope (§11); if
@@ -359,7 +368,7 @@ additionally require owning the agent (§6). A read for an identity the caller d
   challenges:[{kid, signingInput}]}` — one challenge entry per eligible key, all over the one
   shared nonce.
 - Verify-control request: JWS schemes `{signedProofs:[<compact JWS>, …]}`; `lei`
-  `{cesrSignature}` (the presentation rides register; §lei profile).
+  `{cesrSignature}` (the presentation rides register; see the [lei profile](identity-profiles/lei.md)).
 - Link request: `{agentIds:[…]}`; response `200 {linked: N}`.
 - List response: the standard cursor-paginated envelope shared with the agent list —
   `{items:[IdentityDetails], returnedCount, limit, nextCursor, hasMore}`.
@@ -392,6 +401,8 @@ Identity events ride the **same producer lane** as agent events (RA producer-sig
 submission) but through their **own ingest route**, `POST /v1/internal/identities/event` —
 different object type, different payload schemas. An `IDENTITY_*` body on the agent route (or an
 `AGENT_*` body on the identity route) is rejected `422 INVALID_EVENT`; the V1 lane stays frozen.
+(The `/v1/...` route namespace and the events' `SchemaVersion = V2` are independent: the route
+prefix is the TL's HTTP-API generation, the schema version is the event-envelope generation.)
 The TL dispatches on `eventType` + payload, indexes proofs/rotations/revocations under
 `identityId`, and additionally indexes link events under **each named `ansId`** for the read-time
 join. (ANS-4 specifies the ingest contract and read routes.)
@@ -481,11 +492,16 @@ revocation are therefore visible on every linked agent's badge immediately, with
 fan-out**: rotating an identity linked to 10,000 agents seals **one** `IDENTITY_UPDATED`.
 
 A link is **visible** in a "current" view when the link's latest event is `LINKED` **and** the
-agent is **live** (`ACTIVE`/`DEPRECATED`/`WARNING`, not terminal). Within a visible entry, the
-identity's own status is reported as-is:
+agent is **live** — `ACTIVE`, `DEPRECATED`, or `WARNING` (not terminal). `WARNING` is a
+TL-computed read-time badge state: the agent's identity or server certificate is approaching
+expiry but it is still serving; the TL derives it at read time (not a registration lifecycle
+status) and ANS SDKs honor it for validation — which is why it appears here but not in §6's
+registration-status link gate. Within a visible entry, the identity's own status is reported
+as-is:
 
 - A `VERIFIED` identity carries its current proven `keys[]` (verbatim verification methods, §8.4)
-  and `keysLogId`.
+  and `keysLogId` — the `logId` of the `IDENTITY_VERIFIED`/`IDENTITY_UPDATED` seal those keys are
+  quoted from.
 - A `REVOKED` identity **stays listed** with `identityStatus: REVOKED` and `keys[]` omitted — a
   verifier looking at a still-linked agent MUST see that the who was revoked, not have it
   silently vanish. Only an unlink removes the entry.
@@ -559,7 +575,10 @@ effectiveness is computed at read time from both (§8.2).
 
 Each identifier **kind** is defined by a separate **identity profile** under
 [`identity-profiles/`](identity-profiles/). A profile is where all kind-specific mechanics live;
-the core contract above never changes when a profile is added, amended, or retired.
+the core *mechanics* above (the §3 gate and the §4–§9 object / lifecycle / link / API / TL
+surfaces) never change when a profile is added, amended, or retired. Adding or retiring a kind is
+a bounded ANS-0 amendment touching only the §10.1 registry and the closed `kind` / `proofMethod`
+enums it feeds (§10.3).
 
 ### 10.1 The profile registry
 
@@ -567,12 +586,16 @@ the core contract above never changes when a profile is added, amended, or retir
 | --- | --- | --- | --- | --- | --- |
 | `fqdn` (agent primary) | [fqdn](identity-profiles/fqdn.md) | Required | identifier (ACME) + key (CSR) | n/a (cert-bound) | Active |
 | `did:web` | [did-web](identity-profiles/did-web.md) | Optional | key only (multi-key) | verbatim verification method | Active |
-| `did:key` | [did-key](identity-profiles/did-key.md) | Optional | key only | verbatim verification method | Active |
+| `did:key` | [did-key](identity-profiles/did-key.md) | Optional | key only | verbatim verification method (derived Multikey) | Active |
 | `lei` | [lei](identity-profiles/lei.md) | Optional | key only (vLEI-validated) | thumbprint-only (AID + key thumbprint) | Postponed |
 | `did:plc` | [did-plc](identity-profiles/did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
-| `did:ethr` / `did:pkh` | [did-ethr](identity-profiles/did-ethr.md) | Optional | key only (EIP-712) | verbatim verification method | Deferred (sketch) |
+| `did:ethr` / `did:pkh` | [did-ethr](identity-profiles/did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion](identity-profiles/did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `dnsid` | [dnsid](identity-profiles/dnsid.md) | Optional | key only (DNS-rooted) | verbatim verification method | Deferred (sketch) |
+
+> `fqdn` is the agent's primary anchor proven on the ANS-1 registration path — it is **not** a
+> `/v2/ans/identities` dispatch kind. It sits in this registry only as the archetype the
+> proof-of-control gate generalizes; the `(agent primary)` and `n/a (cert-bound)` cells mark it.
 
 **Requirement.** `fqdn` is the one **required** profile — it is the agent's primary anchor (the
 what), proven for every agent registration on the ANS-1 path, independent of whether the RA
@@ -608,13 +631,17 @@ Every profile document MUST specify, in this order:
 9. **Status and requirement** — Active / Postponed / Deferred, what gates promotion, and whether
    supporting the kind is Required (only `fqdn`) or Optional (every who-identity profile; optional
    to adopt, mandatory in execution once enabled).
+10. **Object schemas** — worked request / challenge / seal examples (Active and Postponed profiles).
 
 ### 10.3 Adding or changing a kind
 
 A new kind is added by writing a profile document and adding a row to the §10.1 registry table —
 an ANS-0 amendment. The core sections (§3–§9) do not change. Generic control failures use the
 `IDENTIFIER_*` / `PRICC_*` codes defined here; kind-specific failures use the scheme-prefixed
-codes the profile defines (`FQDN_*`, `DID_*`, `LEI_*`).
+codes the profile defines (`FQDN_*`, `DID_*`, `LEI_*`). The `PRICC_*` family
+(`PRICC_SIGNATURE_INVALID`, `PRICC_TOKEN_EXPIRED`, `PRICC_TOKEN_ALREADY_USED`) names §3.2
+proof-of-control failures shared by every key-control profile — distinct from ANS-2's
+versioned-issuance PriCC (Private-key Confirmation Challenge).
 
 **Why a closed, spec-governed set rather than an open plugin API.** The kind set is frozen by
 specification precisely so verifiers can reason about it: a verifier maps the 4-byte `kid` in a
@@ -630,11 +657,11 @@ identity. ANS handles this in two distinct ways depending on the trust boundary:
 
 - **Within one RA (the common case): identity links.** The owner proves a Verified Identity once
   and links it to the agent(s) it operates (§6). This *supersedes* v0.1.0's model of cross-anchor
-  equivalence as separate registrations joined by `EquivalenceLink` for the single-RA case: a
+  equivalence as separate registrations joined by `EQUIVALENCE_LINK` for the single-RA case: a
   Verified Identity is one owner-level object linked to many agents, not N registrations a
   verifier must reconcile.
-- **Across RAs (federated): `EquivalenceLink`.** When the registrations live on different RAs,
-  the cryptographic co-signature model of ANS-1 §6.4 `EquivalenceLink` is **retained unchanged** —
+- **Across RAs (federated): `EQUIVALENCE_LINK`.** When the registrations live on different RAs,
+  the cryptographic co-signature model of ANS-1 §6.4 `EQUIVALENCE_LINK` is **retained unchanged** —
   the inner-event JCS bytes signed by the primary registration's key, the producer envelope
   carrying a co-signature from the equivalent registration's key. That federated, multi-RA case
   is unaffected by this spec and remains a future amendment to admit at the envelope level.

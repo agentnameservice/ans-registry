@@ -30,7 +30,7 @@ per-kind mechanics. The agent (the *what*) carries one FQDN primary anchor; oper
 > now a *control-proven* object, an agent's primary anchor is always an FQDN, and DID / LEI /
 > other identifiers are **who-identities** (Verified Identities) linked to agents rather than
 > registration *anchor types*. Portions of this ANS-1 DRAFT still use the earlier vocabulary —
-> `IdentityClaim`, `claim.anchorType ∈ {fqdn, did, lei}`, the `(agentHost, claim.anchorType)`
+> `IdentityClaim`, the `AnchorResolver` dependency, `claim.anchorType ∈ {fqdn, did, lei}`, the `(agentHost, claim.anchorType)`
 > uniqueness predicate, base-only DID / LEI registrations. Where the two differ, **ANS-0 is
 > authoritative**; reconciling that vocabulary throughout ANS-1 is a tracked follow-up revision.
 > For FQDN registrations — the only primary-anchor kind in the current model — the two
@@ -42,7 +42,7 @@ ANS-1 does **not** specify the proof-of-control gate itself (ANS-0), the ANSName
 
 - **Registration**: an aggregate the RA owns, identified by `agentId`, carrying one `IdentityClaim` plus operational metadata, status, and lifecycle history.
 - **AHP (Agent Hosting Platform)**: the operator that hosts the agent's code and manages its DNS and certificates. Submits the registration request.
-- **Lifecycle event**: a `RegistrationEvent` the RA emits when a registration changes state (`AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED`).
+- **Lifecycle event**: a `RegistrationEvent` the RA emits when a registration changes state (`AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`, `AGENT_REVOKED`, `EQUIVALENCE_LINK`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`, `IDENTITY_CERT_UPDATED`).
 - **Base-only registration**: a registration with no `version` and no Identity CSR. The agent's identity is the ANS-0 anchor alone; there is no ANSName.
 - **Versioned registration**: a registration with a `version` and an Identity CSR. The ANSName form (ANS-2) names the version; an Identity Certificate binds it.
 - **`EquivalenceLink`**: a TL event recording that two registrations share an operator and refer to the same agent through different anchor types (defined in the event-set section).
