@@ -10,7 +10,7 @@ In order to give the community time to respond and upgrade, we strongly urge you
 report all security issues privately.
 
 To report a security issue in one of our Open Source projects email us directly
-at **oss@godaddy.com** and include the word "SECURITY" in the subject line.
+at **<oss@godaddy.com>** and include the word "SECURITY" in the subject line.
 
 This mail is delivered to our Open Source Security team.
 

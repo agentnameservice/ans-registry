@@ -1,0 +1,27 @@
+---
+# Markdownlint configuration consumed by super-linter
+# (MARKDOWN_CONFIG_FILE defaults to .markdown-lint.yml under LINTER_RULES_PATH).
+#
+# Mirrors super-linter's bundled defaults, with two project additions:
+#   - MD013.tables: false  -> do not enforce line length on table rows
+#                             (a table row is a single physical line and
+#                             cannot be wrapped without breaking the table)
+#   - MD060: false         -> do not enforce table pipe-spacing column style
+#
+# Linter rules doc: https://github.com/DavidAnson/markdownlint
+
+MD004: false # Unordered list style
+MD007:
+  indent: 2 # Unordered list indentation
+MD013:
+  line_length: 400 # Max line length for prose
+  tables: false # Do not enforce line length on table rows
+MD026:
+  punctuation: ".,;:!。，；:" # Disallowed trailing punctuation in headings
+MD029: false # Ordered list item prefix
+MD033: false # Allow inline HTML
+MD036: false # Emphasis used instead of a heading
+MD060: false # Table column / pipe-spacing style
+
+# Rules by tag
+blank_lines: false # Disable blank-line rules (MD012/MD022/MD031/MD032)

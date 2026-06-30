@@ -30,11 +30,11 @@ a Github issue in that project. All dependencies should be open source software
 and can be found on Github.
 
 Submit a ticket for your issue, assuming one does not already exist:
-  - Create it on the project's [issue Tracker][issues].
-  - Clearly describe the issue by following the template layout
-    - Make sure to include steps to reproduce the bug.
-    - A reproducible (unit) test could be helpful in solving the bug.
-    - Describe the environment that (re)produced the problem.
+- Create it on the project's [issue Tracker][issues].
+- Clearly describe the issue by following the template layout
+  - Make sure to include steps to reproduce the bug.
+  - A reproducible (unit) test could be helpful in solving the bug.
+  - Describe the environment that (re)produced the problem.
 
 ## Triaging bugs or contributing code
 
@@ -60,17 +60,19 @@ Github comments. After reaching a consensus with core
 contributors about the change, discuss the best way to go about implementing it.
 
 > Tip: Keep your master branch pointing at the original repository and make
->  pull requests from branches on your fork. To do this, run:
->   ```
+> pull requests from branches on your fork. To do this, run:
+>
+> ```bash
 > git remote add upstream https://github.com/godaddy/ans-registry.git
 > git fetch upstream
 > git branch --set-upstream-to=upstream/master master
->   ```
->   This will add the original repository as a "remote" called "upstream," Then
->   fetch the git information from that remote, then set your local master
->   branch to use the upstream master branch whenever you run git pull. Then you
->   can make all of your pull request branches based on this master branch.
->   Whenever you want to update your version of master, do a regular git pull.
+> ```
+>
+> This will add the original repository as a "remote" called "upstream," Then
+> fetch the git information from that remote, then set your local master
+> branch to use the upstream master branch whenever you run git pull. Then you
+> can make all of your pull request branches based on this master branch.
+> Whenever you want to update your version of master, do a regular git pull.
 
 ## Code Review
 
@@ -104,7 +106,7 @@ Generally speaking, Git handles attribution automatically.
 Ensure that your contribution follows the standards set by the project's style
 guide with respect to patterns, naming, documentation and testing.
 
-# Additional Resources
+## Additional Resources
 
 - [General GitHub Documentation](https://help.github.com/)
 - [GitHub Pull Request documentation](https://help.github.com/send-pull-requests/)

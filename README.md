@@ -13,13 +13,18 @@ services are federated, but the identity always anchors to a domain name.
 
 ## Specifications
 
-Two open specifications define the protocol and trust evaluation,
-with a companion security analysis:
+The ANS protocol is split across six layered specifications under [`spec/`](spec/):
 
-**[DESIGN.md](DESIGN.md)** — Architecture and protocol. How the Registration
-Authority verifies domain ownership, issues certificates, provisions DNS records,
-and seals events into the Transparency Log. Data model, identifiers, verification
-tiers, DNS record formats, mTLS exchange, and the full registration lifecycle.
+| Layer | File | Topic |
+| --- | --- | --- |
+| ANS-0 | [`spec/ans-0-identity-anchor.md`](spec/ans-0-identity-anchor.md) | Identity anchor, `IdentityClaim`, `AnchorResolver`, FQDN/DID/LEI profiles |
+| ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set, Trust Card |
+| ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | ANSName URI form, Identity Certificate URI SAN binding, PriCC, Stable Aliases, mTLS |
+| ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
+| ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, witness profiles |
+| ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
+
+Worked examples for ANS-1 live at [`spec/examples/ans-1-examples.md`](spec/examples/ans-1-examples.md). [`DESIGN.md`](DESIGN.md) is a pointer to the layered specs and to the IETF draft.
 
 **[TRUST_INDEX_SPEC.md](TRUST_INDEX_SPEC.md)** — Trust evaluation. How a Trust
 Index crawls sealed data from federated Registration Authorities, combines it with
