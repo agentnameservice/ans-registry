@@ -1,4 +1,4 @@
-# ANS-1 worked examples (registration request, AGENT_REGISTERED event, EQUIVALENCE_LINK event, revocation)
+# ANS-1 worked examples (registration request, AGENT_REGISTERED event, revocation)
 
 Non-normative worked examples for ans-1-registration. Implementers MAY use these as fixtures or schema cross-checks.
 
@@ -115,26 +115,7 @@ Base-only / non-FQDN anchor registrations are a forward-looking ANS-0/ANS-1 capa
 
 No `ansName`, no `identityCerts`. `claim.anchorType` and `claim.resolvedId` carry the DID. `agent.host` is the operational endpoint; `claim.resolvedId` is the identity. The two diverge per ANS-0 §3.1.
 
-## A.3 `EQUIVALENCE_LINK` event
-
-`EQUIVALENCE_LINK` is a forward-looking ANS-1 event (not in the current V2 TL event-type enum). The event is sealed under the primary registration's `ansId` and references the linked registration's `ansId`.
-
-```json
-{
-  "ansId": "550e8400-e29b-41d4-a716-446655440000",
-  "eventType": "EQUIVALENCE_LINK",
-  "linkedAnsId": "f3c2d4e5-1234-5678-9abc-def012345678",
-  "linkedAnchorType": "did",
-  "linkedAnchorResolvedId": "did:web:sdk-did-agent.plang.example.com",
-  "rationale": "Same agent; FQDN-anchored production registration linked to DID-anchored sandbox registration for cross-environment continuity testing.",
-  "raId": "id-A",
-  "timestamp": "2026-05-17T18:00:00Z"
-}
-```
-
-For the single-RA case (the current shape), the RA's authentication system authorizes the link before the RA's producer key signs the envelope. Cryptographic co-signature applies to the federated multi-RA case as a future amendment per §6.4.
-
-## A.4 Registration request — V1 RA format
+## A.3 Registration request — V1 RA format
 
 A representative request payload (the AHP submits this to the RA's `POST /v1/agents/register` endpoint). Shared fields use the V1 RA names (`agentDisplayName`, `agentDescription`, `version`, `identityCsrPEM`, `serverCsrPEM`, `metaDataUrl`); `claim`, `trustCardContent`, and `echConfigList` are forward-looking ANS additions on top of the V1 request.
 
@@ -169,7 +150,7 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 
 A base-only request (forward-looking) omits `version` and `identityCsrPEM`. Under the V1 RA, `version` and `identityCsrPEM` are both required.
 
-## A.5 Revocation request
+## A.4 Revocation request
 
 ```json
 {
@@ -180,7 +161,7 @@ A base-only request (forward-looking) omits `version` and `identityCsrPEM`. Unde
 
 Submitted to `POST /v1/agents/{agentId}/revoke`. `reason` is required (RFC 5280 reason code); `comments` is optional, max 200 chars. The sealed `AGENT_REVOKED` event canonicalizes `reason` to `revocationReasonCode` so the immutable record is unambiguous.
 
-## A.6 Trust Card body
+## A.5 Trust Card body
 
 The normative schema and hashing rules for the Trust Card body are in [ANS-1 Appendix A](../ans-1-registration.md#appendix-a-trust-card-and-metadata-normative). The Trust Card is optional. Agents without one register fully; the Trust Index scores their integrity lower because the hash-consistency check is unavailable.
 
