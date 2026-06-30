@@ -591,7 +591,6 @@ enums it feeds (§10.3).
 | `did:plc` | [did-plc](identity-profiles/did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `did:ethr` / `did:pkh` | [did-ethr](identity-profiles/did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion](identity-profiles/did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
-| `dnsid` | [dnsid](identity-profiles/dnsid.md) | Optional | key only (DNS-rooted) | verbatim verification method | Deferred (sketch) |
 
 > `fqdn` is the agent's primary anchor proven on the ANS-1 registration path — it is **not** a
 > `/v2/ans/identities` dispatch kind. It sits in this registry only as the archetype the

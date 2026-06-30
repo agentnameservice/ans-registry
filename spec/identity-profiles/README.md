@@ -17,7 +17,6 @@ The authoritative status is the ANS-0 table; this page is a convenience map.
 | `did:plc` | [did-plc.md](did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `did:ethr` / `did:pkh` | [did-ethr.md](did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion.md](did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
-| `dnsid` | [dnsid.md](dnsid.md) | Optional | key only (DNS-rooted) | verbatim verification method | Deferred (sketch) |
 
 **Requirement.** `fqdn` is the one required profile (the agent's primary anchor, the *what* —
 required by ANS-1 for every agent registration). Every who-identity profile is **optional**: the

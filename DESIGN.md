@@ -11,7 +11,7 @@ This file is a pointer. The normative ANS specification is layered across six do
 | ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, witness profiles |
 | ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
 
-Per-identifier-kind detail (fqdn, did:web, did:key, lei, and deferred sketches for did:plc / did:ethr / did:ion / dnsid) lives in the [identity profiles](spec/identity-profiles/) under ANS-0 — adding a kind drops in a profile without changing the ANS-0 core contract.
+Per-identifier-kind detail (fqdn, did:web, did:key, lei, and deferred sketches for did:plc / did:ethr / did:ion) lives in the [identity profiles](spec/identity-profiles/) under ANS-0 — adding a kind drops in a profile without changing the ANS-0 core contract.
 
 Worked examples live at [`spec/examples/ans-1-examples.md`](spec/examples/ans-1-examples.md).
 
