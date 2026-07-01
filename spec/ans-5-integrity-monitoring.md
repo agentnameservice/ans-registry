@@ -20,9 +20,10 @@ ANS-5 specifies:
 - The principal-binding verification procedures for DID_WEB, LEI, BIOMETRIC_HASH, and ENS_ENSIP25 binding types.
 
 ANS-5 is **profile-agnostic and DNS-profile-agnostic by construction**. The same worker runs
-across registrations regardless of anchor profile; against legacy `_ans` TXT, against
-Consolidated Approach SVCB, against agents with no DNS at all. It consults the relevant ANS-3
-profile through the `DNSEmitter.records()` contract for expected DNS state. **Verified
+across registrations regardless of anchor profile; against the `ANS_TXT` `_ans` TXT family, against
+the `ANS_DNSAID` SVCB profile, against agents with no DNS at all. It consults the relevant ANS-3
+discovery profile through the `ProfileEmitter` composition contract
+([ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) for expected DNS state. **Verified
 Identities** (the *who*, [ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)) are
 monitored on their own per-identity cadence (§4.3), independently of the agents that link them.
 
@@ -52,10 +53,9 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | Check | What the AIM does | Pass condition | Required when |
 | --- | --- | --- | --- |
 | **TL presence** | Query the ANS-4 TL for the registration's most recent sealed event | Inclusion proof verifies against the TL's Signed Tree Head | Always |
-| **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist and validate | When the anchor profile emits DNS records (ANS-3) |
+| **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist and validate | Always (against the record set the registration's discovery profiles emit, [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) |
 | **Server Certificate match** | TLS handshake to the operational endpoint, extract certificate fingerprint | Fingerprint matches the value sealed in the TL | When the anchor profile ties to TLS (FQDN; `did:web` resolved domain) |
 | **Identity Certificate match** | TLS handshake; extract Identity Cert fingerprint; compare with TL value | Fingerprint matches | Only when ANS-2 versioned registration |
-| **Trust Card hash match** | Fetch the Trust Card from the path in the SVCB row's `wk` SvcParam (consolidated style) or the URL in the `_ans` record (legacy style), or fall back to `/.well-known/ans/trust-card.json`; hash the JCS-canonical bytes | Hash matches the `capabilitiesHash` sealed at registration | Only when Trust Card is hosted AND `trustCardContent` was submitted at registration |
 | **Schema integrity** | Fetch each endpoint's `metaDataUrl`, hash the document | Hash matches the protocol-keyed entry in the TL `attestations.metadataHashes` map (e.g. `metadataHashes["A2A"]`) | Only when per-endpoint `metaDataHash` values were submitted at registration |
 | **Principal binding (ENS_ENSIP25)** | Resolve ENS name; verify `agent-registration[<registry>][<tokenId>]` text record; verify ERC-8004 registration file lists the ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
 | **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID document exists with a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
@@ -66,9 +66,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | **Witness attestation** | Query the ANS-4 TL's `/v1/witnesses` endpoint, verify each attestation's external proof against the relevant backend | At least one witness attestation has been made within the witness profile's cadence window | Only when the registration's deployment posture requires a witness profile (Federated deployment) |
 | **RDAP status** | Query the registrar's RDAP endpoint for the agent's domain, parse the registrant entity status | No status of `pendingDelete`, `redemptionPeriod`, `serverHold`; no recent registrant-entity-handle change | Only when the FQDN's registrar exposes RDAP per RFC 9083 and the operator has not opted out |
 
-Most registered agents do not host a Trust Card. For those agents, the AIM verifies DNS records and Server Certificate only (plus TL presence). The verification record records which checks fired; downstream consumers react per their own policy.
-
-When `trustCardContent` was submitted at registration, the RA sealed its hash at activation. When omitted, a conforming AIM computes the baseline hash from the live Trust Card on first successful fetch, if one is hosted. Trust Cards behind authentication cannot be fetched by the AIM; the absence of a verifiable hash is recorded in the verification record so consumers see the gap.
+The verification record records which checks fired; downstream consumers react per their own policy.
 
 ### 4.1 ECH key rotation
 
@@ -114,7 +112,7 @@ A verifier checks an agent through independent steps, each using a different tru
 | 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_443._tcp.{agentHost}`. A compromised CA alone cannot forge this record |
 | 3 | TL inclusion proof verification | TL (signed by KMS-rooted key) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof |
 | 4 | Witness attestation verification (Federated deployment) | External consensus system | The TL state at the time of inclusion has been anchored to a backend the verifier independently trusts. Defeats RA / TL collusion |
-| 5 | Live state match | DNS + TLS + Trust Card fetch | The current DNS records, certificates, and Trust Card hash match what was sealed |
+| 5 | Live state match | DNS + TLS | The current DNS records and certificates match what was sealed |
 
 **TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
 
@@ -134,7 +132,7 @@ The AIM is external to the RA. A malicious monitor could try to disable valid ag
 | **Quorum before action** | The RA MUST NOT act on a single report from one monitor. Corroboration from multiple independent monitors is required |
 | **Evidence MUST be verifiable** | Every finding MUST include cryptographic proof of the discrepancy. The RA re-verifies independently before sealing an `INTEGRITY_WARNING` |
 
-The RA's remediation scope is infrastructure integrity: do the live DNS records, Server Certificate, and Trust Card hash match what the RA sealed? The RA does not evaluate an agent's behavior or quality.
+The RA's remediation scope is infrastructure integrity: do the live DNS records and Server Certificate match what the RA sealed? The RA does not evaluate an agent's behavior or quality.
 
 ### 7.1 Warning, not state change
 

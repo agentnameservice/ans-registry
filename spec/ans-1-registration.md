@@ -288,8 +288,8 @@ A base-only registration has no ANSName, no Identity Certificate, and no version
 
 ### 7.3 Migration: base-only to versioned
 
-A base-only registration that later wants version discipline submits a new registration with a `version` and `identityCsrPEM`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records, so the "MUST NOT mix versioned and unversioned" constraint in [ANS-3
-§6.2](ans-3-dns-publication.md#62-legacy-_ans-txt-family-status-active) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
+A base-only registration that later wants version discipline submits a new registration with a `version` and `identityCsrPEM`. The RA validates and seals the new versioned registration; the AHP then atomically swaps DNS records by removing the base-only `_ans` and `_ans-badge` records as it publishes the new per-version records,
+so the "MUST NOT mix versioned and unversioned" constraint in the [ANS_TXT discovery profile](discovery-profiles/ans-txt.md) ([ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) is preserved. A brief discovery gap during the DNS swap is expected and is bounded by the zone's DNS TTL.
 
 After the swap, the AHP submits `AGENT_REVOKED` for the base-only registration. The TL records both the new versioned registration and the base-only revocation, in order.
 
@@ -441,8 +441,8 @@ Some payload fields (`onChainId`, `ensName`, `ansUrn`) are advisory metadata at 
 
 ### A.1 Scope and unique content
 
-The Trust Card is the JSON document an AHP hosts at `/.well-known/ans/trust-card.json`. The AHP submits the same bytes as `trustCardContent` at registration. The RA hashes the JCS-canonical bytes (RFC 8785) and seals `SHA-256(JCS(trustCardContent))` into the `AGENT_REGISTERED` event under `attestations.metadataHashes.capabilitiesHash`. The same digest, base64url-encoded, populates the SVCB
-`card-sha256` SvcParam at `agentHost` (per [ANS-3 consolidated SVCB](ans-3-dns-publication.md#61-consolidated-svcb-status-active-default)). A verifier holding any one of those three values can confirm the other two without trusting the channel that delivered each one.
+The Trust Card is the JSON document an AHP hosts at `/.well-known/ans/trust-card.json`. The AHP submits the same bytes as `trustCardContent` at registration. The RA hashes the JCS-canonical bytes (RFC 8785) and seals `SHA-256(JCS(trustCardContent))` into the `AGENT_REGISTERED` event under `attestations.metadataHashes.capabilitiesHash`.
+The same digest, base64url-encoded, populates the SVCB `card-sha256` SvcParam at `agentHost`. A verifier holding any one of those three values can confirm the other two without trusting the channel that delivered each one.
 
 The Trust Card carries content that no protocol-native metadata file holds:
 
