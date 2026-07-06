@@ -125,7 +125,7 @@ into `dnsRecordsProvisioned[]` for this registration.
 | --- | --- | --- | --- |
 | Discovery (the `_ans.{agentHost}` TXT for `ANS_TXT`, the `{agentHost}` SVCB for `ANS_DNSAID`, per §6) | RA performs a DNS lookup for each announced discovery record at its label | Each required discovery record resolves to the announced content | Registration stays in `PENDING_DNS`; the RA retries on schedule and the registrant reconciles by publishing the announced record |
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
-| Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | At least one TLSA record present and DNSSEC validates to `fully_validated` | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
+| Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | No DNSSEC-validated TLSA record contradicts the expected fingerprint (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
 
 **`dnssecStatus` enum.** The RA emits one of three values in the activation record:
 

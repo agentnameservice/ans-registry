@@ -109,7 +109,7 @@ A verifier checks an agent through independent steps, each using a different tru
 | Step | Check | Trust channel | What it proves |
 | --- | --- | --- | --- |
 | 1 | PKI certificate validation | CA system | Standard TLS. Cannot detect a compromised CA |
-| 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_443._tcp.{agentHost}`. A compromised CA alone cannot forge this record |
+| 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_{port}._tcp.{agentHost}` for the endpoint's port ([ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). A compromised CA alone cannot forge this record |
 | 3 | TL inclusion proof verification | TL (signed by KMS-rooted key) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof |
 | 4 | Witness attestation verification (Federated deployment) | External consensus system | The TL state at the time of inclusion has been anchored to a backend the verifier independently trusts. Defeats RA / TL collusion |
 | 5 | Live state match | DNS + TLS | The current DNS records and certificates match what was sealed |
