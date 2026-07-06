@@ -89,24 +89,12 @@ continue to follow the A, AAAA, or CNAME.
 | Connection hint (HTTPS RR) | `{agentHost}` | HTTPS | `ANS_TXT` | `1 . alpn=h2` service binding | No (CNAME at apex precludes it) |
 | Badge | `_ans-badge.{agentHost}` | TXT | family (every profile) | TL badge URL for verification (§6.3) | Yes |
 | Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate fingerprint (`3 0 1`, selector 0); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
-| Identity DANE | `_ans-identity._tls.{agentHost}` | TLSA | AHP-managed; **not** emitted by any discovery profile | Identity Certificate fingerprint. Written by the AHP per the duty-split rule in §8.1. Absent in base-only registrations | Multi-valued across coexisting ACTIVE versions |
-
-The discovery-profile emitter produces the discovery, HTTPS-hint, badge, and Server-DANE rows. It
-never produces `_ans-identity._tls`: the RA has no TLSA write authority, and the AHP owns the
-Identity DANE record (§8.1).
 
 When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it
 provisioned for that FQDN. The RA's revocation response lists the records to delete (see
 [ANS-1 §6.3](ans-1-registration.md#63-agent_revoked) for the revoke event payload).
 
-### 3.1 Identity DANE coexistence across ACTIVE versions
-
-The `_ans-identity._tls.{agentHost}` TLSA record set is multi-valued: the AHP publishes one TLSA
-record per active Identity Certificate and prunes on version revocation, so every ACTIVE version
-retains its DANE pinning during coexistence windows. The RA does not write `_ans-identity._tls` (per
-the duty-split rule in §8.1) and no discovery profile emits it; the AHP owns this record.
-
-### 3.2 Discoverer fallback chain
+### 3.1 Discoverer fallback chain
 
 A discoverer (a service or peer agent that wants to look up an agent's metadata) walks three sources
 in order when assembling that metadata, stopping at the first source that resolves and verifies:
@@ -138,7 +126,6 @@ into `dnsRecordsProvisioned[]` for this registration.
 | Discovery (the `_ans.{agentHost}` TXT for `ANS_TXT`, the `{agentHost}` SVCB for `ANS_DNSAID`, per §6) | RA performs a DNS lookup for each announced discovery record at its label | Each required discovery record resolves to the announced content | Registration stays in `PENDING_DNS`; the RA retries on schedule and the registrant reconciles by publishing the announced record |
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
 | Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | At least one TLSA record present and DNSSEC validates to `fully_validated` | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
-| Identity DANE TLSA (versioned only) | RA queries `_ans-identity._tls.{agentHost}` for TLSA records; compares against the version's Identity Certificate | At least one TLSA record fingerprint matches the version's Subject Public Key Info hash; `dnssecStatus` indicates `fully_validated`, `signed_broken`, or `not_signed` | A version with no matching Identity TLSA is non-fatal; the version marks `identityDaneStatus: "not_provisioned"` and transitions to ACTIVE |
 
 **`dnssecStatus` enum.** The RA emits one of three values in the activation record:
 
@@ -150,8 +137,8 @@ into `dnsRecordsProvisioned[]` for this registration.
 
 | Actor | Initial registration tasks | Ongoing lifecycle tasks | Deregistration tasks |
 | --- | --- | --- | --- |
-| **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates. Provisions `_ans-identity._tls` independently of the RA (per §8.1) | Autonomous DNS updates, monitors renewals, submits config changes. Updates `_ans-identity._tls` on Identity Certificate rotation | Submits deregistration request, revokes RA access |
-| **RA** | Generates ACME challenge, verifies record, generates permanent record content (excluding `_ans-identity._tls`) | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE version is deregistered |
+| **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates | Autonomous DNS updates, monitors renewals, submits config changes | Submits deregistration request, revokes RA access |
+| **RA** | Generates ACME challenge, verifies record, generates permanent record content | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE version is deregistered |
 | **DNS provider** | Hosts authorization endpoint, processes AHP's API requests to provision ANS records | Processes AHP's modification requests | Processes deletion requests from the AHP |
 
 A CNAME at the agent's FQDN blocks apex-level HTTPS and SVCB records (RFC 1034 §3.6.2) but does not
@@ -278,13 +265,12 @@ any deployment exposed to external verifiers.
 
 ### 8.1 RA-DNS privilege separation
 
-The RA's DNS permissions MUST exclude TLSA write access. A compromised RA that could write both
-`_{port}._tcp.{agentHost}` (Server DANE) and `_ans-identity._tls.{agentHost}` (Identity DANE) TLSA
-records plus issue a fraudulent Server Certificate could compromise DANE's defense-in-depth in a
-single action. The RA generates the expected Server TLSA *content* from the issued Server
-Certificate (the operator publishes it); the AHP publishes both Server TLSA and Identity TLSA to
-DNS. The split keeps both DANE records under AHP authority while the certificate-issuance authority
-stays with the RA, and preserves DANE as an independent verification channel.
+The RA's DNS permissions MUST exclude TLSA write access. A compromised RA that could write the
+`_{port}._tcp.{agentHost}` (Server DANE) TLSA record plus issue a fraudulent Server Certificate
+could compromise DANE's defense-in-depth in a single action. The RA generates the expected Server
+TLSA *content* from the issued Server Certificate; the AHP publishes it to DNS. The split keeps the
+DANE record under AHP authority while the certificate-issuance authority stays with the RA, and
+preserves DANE as an independent verification channel.
 
 A compromise of either party alone is detectable through a mismatch in the verification record
 (mismatched fingerprints, DNSSEC signature failures, or divergent TL evidence). Compromise of both
@@ -342,19 +328,16 @@ A conformant ANS-3 implementation:
    RFC 9460 §14.3.1 Private Use `keyNNNNN` presentation form, never the named DNS-AID forms.
 6. Validates `discoveryProfiles` (`INVALID_DISCOVERY_PROFILE` on an unknown element) and asserts
    registry/enum coherence at server start.
-7. Specifies Identity Certificate TLSA content (`_ans-identity._tls`) only when the registration is
-   versioned; the AHP writes the record per §8.1 (the RA MUST NOT write TLSA records, and no
-   discovery profile emits Identity DANE).
-8. Honors the per-version TTL parameter from operator policy.
-9. Operates in lookup-mode for any deployment exposed to external verifiers; declares noop-bypass
+7. Honors the per-version TTL parameter from operator policy.
+8. Operates in lookup-mode for any deployment exposed to external verifiers; declares noop-bypass
    mode explicitly when used.
-10. Publishes records in public DNS, queryable by any third party.
+9. Publishes records in public DNS, queryable by any third party.
 
 **Optional surface.** Discovery-profile choice (`ANS_TXT`, `ANS_DNSAID`, or the union); DNS
 verification mode (lookup vs noop-bypass, with noop-bypass non-conformant for external-facing
-deployments); the TLSA-write duty split (per §8.1, the RA MUST NOT write `_ans-identity._tls`; the
-AHP MUST). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator
-chose `ANS_TXT` over `ANS_DNSAID` (or vice versa).
+deployments); the TLSA-write duty split (per §8.1, the RA generates TLSA content but MUST NOT write
+it; the AHP publishes it). A conforming verifier MUST NOT downgrade integrity scoring solely because
+an operator chose `ANS_TXT` over `ANS_DNSAID` (or vice versa).
 
 ## References
 
@@ -383,7 +366,7 @@ annotated.
 ;
 ; Record ownership legend:
 ;   [RA-content]: RA generates the expected content; AHP publishes the record (discovery, badge, Server DANE)
-;   [AHP]: AHP both generates content and publishes the record (Identity DANE, A/AAAA)
+;   [AHP]: AHP both generates content and publishes the record (A/AAAA)
 
 ; A/AAAA records (AHP)
 ai-agent.acmecorp.com.        300  IN A        203.0.113.42
@@ -407,16 +390,12 @@ _ans-badge.ai-agent.acmecorp.com. 3600 IN TXT  "v=ans-badge1; version=2.1.0; url
 ; Server DANE TLSA [RA-content] — family record; one per distinct TLS port (443 and 8443); 3 0 1 over the full Server Certificate
 _443._tcp.ai-agent.acmecorp.com.  3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 _8443._tcp.ai-agent.acmecorp.com. 3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
-
-; Identity DANE TLSA (AHP per §8.1) — SHA-256 over the Identity Certificate's SubjectPublicKeyInfo.
-; Written by the AHP, never the RA; no discovery profile emits it.
-_ans-identity._tls.ai-agent.acmecorp.com. 3600 IN TLSA 3 1 1 f1e2d3c4b5a6978869584837261504a32c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f
 ```
 
 **Record ownership summary:**
 
 - RA generates expected content for: `ANS_TXT` `_ans` TXT, `ANS_TXT` HTTPS RR, `ANS_DNSAID` SVCB, `_ans-badge` TXT, Server DANE TLSA.
-- AHP publishes all DNS records (using RA-generated content where applicable) and additionally generates content for: A/AAAA and Identity DANE TLSA (`_ans-identity._tls`). The RA has no DNS write access.
+- AHP publishes all DNS records (using RA-generated content where applicable) and additionally generates content for: A/AAAA. The RA has no DNS write access.
 - Both may set: TTL, record management cadence (update/delete).
 
 **Union and version notes:**
@@ -424,4 +403,4 @@ _ans-identity._tls.ai-agent.acmecorp.com. 3600 IN TLSA 3 1 1 f1e2d3c4b5a69788695
 - With `["ANS_DNSAID", "ANS_TXT"]`, both families' discovery records coexist; the `_ans` TXT rows carry the required signal and the SVCB rows are `Required=false` (§6.4).
 - The composed canonical order sealed into `dnsRecordsProvisioned[]` is `[_ans TXT×N, HTTPS, SVCB×N, badge, TLSA×ports]`.
 - Server DANE TLSA is per distinct TLS port; both 443 and 8443 carry the same full-certificate fingerprint (the cert is FQDN-scoped, not per-port).
-- When v2.1.0 is revoked, the RA's revocation response lists the v2.1.0 `_ans`, SVCB, and `_ans-badge` records to delete; the AHP removes the matching Identity TLSA at the same time.
+- When v2.1.0 is revoked, the RA's revocation response lists the v2.1.0 `_ans`, SVCB, and `_ans-badge` records to delete.
