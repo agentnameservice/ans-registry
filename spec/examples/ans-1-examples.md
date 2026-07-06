@@ -41,13 +41,13 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
       {
         "name": "_ans.support.example.com",
         "type": "TXT",
-        "data": "v=ans1; version=1.5.0; p=a2a; mode=direct; url=wss://support.example.com/a2a",
+        "data": "v=ans1; version=v1.5.0; p=a2a; mode=direct; url=wss://support.example.com/a2a",
         "dnssecVerified": true
       },
       {
         "name": "_ans-badge.support.example.com",
         "type": "TXT",
-        "data": "v=ans-badge1; version=1.5.0; url=https://transparency.ra.ansregistry.com/v1/agents/550e8400-e29b-41d4-a716-446655440000",
+        "data": "v=ans-badge1; version=v1.5.0; url=https://transparency.ra.ansregistry.com/v1/agents/550e8400-e29b-41d4-a716-446655440000",
         "dnssecVerified": true
       }
     ],
@@ -63,11 +63,12 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
 }
 ```
 
-`agent.version` and the `version=` field in TXT record data carry the bare semver (`1.5.0`); the `v`-prefixed
-form lives only inside the ANSName's hostname label (`ans://v1.5.0.support.example.com`). `dnssecVerified`
-appears on a provisioned record when the verifying resolver returned the DNSSEC Authenticated-Data bit for
-that record's query; it is absent otherwise. `metadataHashes` carries the AHP-declared per-endpoint metadata
-digests keyed by protocol token, present only for endpoints that submitted a `metaDataHash`.
+The `version=` field in TXT record data carries the `v`-prefixed form (`v1.5.0`), matching the ANSName's
+version segment and ANS-3's record syntax. `agent.version` in the event payload and the registration
+request's `version` field carry the bare semver (`1.5.0`). `dnssecVerified` appears on a provisioned record
+when the verifying resolver returned the DNSSEC Authenticated-Data bit for that record's query; it is absent
+otherwise. `metadataHashes` carries the AHP-declared per-endpoint metadata digests keyed by protocol token,
+present only for endpoints that submitted a `metaDataHash`.
 
 ## A.2 Registration request — V1 RA format
 
