@@ -16,7 +16,7 @@ Pub/Sub message envelope:
 }
 ```
 
-`logId` is the Transparency Log entry identifier (UUIDv7). The inner event payload mirrors the `AGENT_REGISTERED` event in [ANS-1 Appendix A.1](../ans-1-registration.md#a1-agent_registered-event-versioned-fqdn-anchored), whose identifier field is `ansId`.
+`logId` is the Transparency Log entry identifier (UUIDv7). The inner event payload mirrors the `AGENT_REGISTERED` event in [ANS-1 worked example A.1](ans-1-examples.md#a1-agent_registered-event-v2-tl-format), whose identifier field is `ansId`.
 
 ## A.2 TL badge response
 

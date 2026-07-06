@@ -178,7 +178,7 @@ Non-normative worked example (AIM finding payload) lives at [`examples/ans-5-exa
 ## 13. References
 
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). The proof-of-control gate, the Verified Identity object and its monitoring, the [identity profiles](identity-profiles/).
-- ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Registration aggregate, `INTEGRITY_WARNING` event payload schema field consumers, Trust Card structure.
+- ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Registration aggregate, lifecycle, event set.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md). Expected DNS records.
 - ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md). TL receipts, witness attestations, INTEGRITY_WARNING/RESOLVED envelope.
 - [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698): DANE TLSA records.

@@ -48,7 +48,7 @@ Operators that also publish an SVCB record at the agent FQDN (per the consolidat
 | DANE (Server) | `_443._tcp.{agentHost}` | TLSA | Server Certificate fingerprint (selector 0). Active in DNSSEC-signed zones | Shared across versions |
 | Identity DANE | `_ans-identity._tls.{agentHost}` | TLSA | Identity Certificate fingerprint. Managed by the AHP, not the RA, per the duty-split rule in §8.1. Absent in base-only registrations | Multi-valued across coexisting ACTIVE versions |
 
-When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it provisioned for that FQDN. The RA's revocation response lists the records to delete (see [ANS-1 §6.3](ans-1-registration.md#63-agent_revoked) for the revoke event payload).
+When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it provisioned for that FQDN. The RA's revocation response lists the records to delete (see [ANS-1 §6.2](ans-1-registration.md#62-agent_revoked) for the revoke event payload).
 
 ### 3.1 Identity DANE coexistence across ACTIVE versions
 

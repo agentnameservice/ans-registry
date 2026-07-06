@@ -5,7 +5,7 @@ This file is a pointer. The normative ANS specification is layered across six do
 | Layer | File | Topic |
 | --- | --- | --- |
 | ANS-0 | [`spec/ans-0-identity-anchor.md`](spec/ans-0-identity-anchor.md) | Identity: the proof-of-control gate, the Verified Identity object (the *who*) vs the agent's FQDN primary anchor (the *what*), identity links, and the [identity profiles](spec/identity-profiles/) |
-| ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set, Trust Card |
+| ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set |
 | ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | ANSName URI form, Identity Certificate URI SAN binding, PriCC, Stable Aliases, mTLS |
 | ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
 | ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, witness profiles |
