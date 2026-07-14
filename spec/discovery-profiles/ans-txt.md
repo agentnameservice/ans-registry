@@ -33,12 +33,12 @@ service mode.
 **`_ans` TXT discovery record**, one per endpoint, value built in this fixed field order:
 
 ```text
-v=ans1; version={version}; p={protocol-token}; mode=direct; url={agentUrl}
+v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
 ```
 
 - `v` — always `ans1`.
-- `version` — the registration's semantic version, **with no `v` prefix** (e.g. `1.0.0`, never
-  `v1.0.0`). The published value is the bare semver.
+- `version` — the registration's semantic version, **prefixed with `v`** (e.g. `v1.0.0`), matching
+  the ANSName's version segment (ANS-2).
 - `p` — the protocol token (§3): `a2a`, `mcp`, or `http-api`.
 - `mode` — always `direct` on every emitted row.
 - `url` — the endpoint's `agentUrl`, verbatim.
@@ -90,9 +90,9 @@ expected records through the ANS-3 composition contract ([ANS-5 §4](../ans-5-in
 ## 6. Lifecycle specifics
 
 The `_ans` records are per-registration: one row per endpoint for the registration's version. Version
-coexistence across registrations and the atomic DNS swap on a base-only → versioned migration are
-ANS-1/ANS-2 concerns ([ANS-1 §7](../ans-1-registration.md#7-lifecycle-operations)); a versioned and
-an unversioned `_ans` family MUST NOT coexist for the same `{fqdn}`. On revocation of the last
+coexistence across registrations is an ANS-1/ANS-2 concern
+([ANS-1 §7](../ans-1-registration.md#7-lifecycle-operations)); every `_ans` family row carries its
+registration's version. On revocation of the last
 ACTIVE version the AHP removes the `_ans`, HTTPS, and family records the RA's revocation response
 lists.
 
@@ -129,13 +129,13 @@ on file:
 
 ```text
 ; discovery record — one per endpoint
-_ans.agent.example.com.        3600 IN TXT   "v=ans1; version=1.0.0; p=a2a; mode=direct; url=https://agent.example.com/a2a"
+_ans.agent.example.com.        3600 IN TXT   "v=ans1; version=v1.0.0; p=a2a; mode=direct; url=https://agent.example.com/a2a"
 
 ; connection hint — one per registration, at the apex
 agent.example.com.             3600 IN HTTPS 1 . alpn=h2
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
-_ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
+_ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
 _443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 

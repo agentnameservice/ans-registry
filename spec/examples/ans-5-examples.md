@@ -27,4 +27,4 @@ The AIM publishes a signed finding when it observes a confirmed mismatch. The pa
 }
 ```
 
-The RA, on consuming this finding plus at least one corroborating finding from an independent AIM, re-verifies the discrepancy and, if confirmed, emits `INTEGRITY_WARNING` to the TL per ANS-1 §6.5.
+The RA, on consuming this finding plus at least one corroborating finding from an independent AIM, re-verifies the discrepancy and, if confirmed, emits `INTEGRITY_WARNING` to the TL.

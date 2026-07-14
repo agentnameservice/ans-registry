@@ -92,20 +92,18 @@ continue to follow the A, AAAA, or CNAME.
 
 When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it
 provisioned for that FQDN. The RA's revocation response lists the records to delete (see
-[ANS-1 §6.3](ans-1-registration.md#63-agent_revoked) for the revoke event payload).
+[ANS-1 §6.2](ans-1-registration.md#62-agent_revoked) for the revoke event payload).
 
 ### 3.1 Discoverer fallback chain
 
-A discoverer (a service or peer agent that wants to look up an agent's metadata) walks three sources
+A discoverer (a service or peer agent that wants to look up an agent's metadata) walks two sources
 in order when assembling that metadata, stopping at the first source that resolves and verifies:
 
-1. `GET https://{agentHost}/.well-known/ans/trust-card.json`. Use the response if reachable and the
-   integrity check (per [ANS-5](ans-5-integrity-monitoring.md)) passes.
-2. Otherwise, query DNS for the registration's discovery records. With `ANS_DNSAID`, read the SVCB
+1. Query DNS for the registration's discovery records. With `ANS_DNSAID`, read the SVCB
    row at `agentHost` and follow its per-endpoint capability locator (`key65400` / `key65409`); with
    `ANS_TXT`, read the `_ans.{agentHost}` TXT records and follow each row's `url` (`mode=direct`).
    Use the record if reachable and DNSSEC-valid, or DNSSEC-unsigned and operator-acceptable.
-3. Otherwise, use the metadata payload from the Transparency Log event the discoverer already
+2. Otherwise, use the metadata payload from the Transparency Log event the discoverer already
    consumed from the log's event stream.
 
 The ordering is normative.
@@ -127,11 +125,12 @@ into `dnsRecordsProvisioned[]` for this registration.
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
 | Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | No DNSSEC-validated TLSA record contradicts the expected fingerprint (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
 
-**`dnssecStatus` enum.** The RA emits one of three values in the activation record:
-
-- `fully_validated`: The TLSA record carries a valid DNSSEC signature chain to the zone's delegated DNSKEY.
-- `signed_broken`: The zone is DNSSEC-signed but the record's signature is missing, expired, or fails validation.
-- `not_signed`: The zone is not DNSSEC-signed; the record resolves but DNSSEC validation does not apply.
+**DNSSEC result.** TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
+result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified` — `true` when the
+record's query returned the AD bit, absent otherwise; TXT lookups never carry the flag
+([ANS-1 §6.1](ans-1-registration.md#61-agent_registered)). A DNSSEC-validated record that
+contradicts the announced content is an attack signal and blocks activation (per the TLSA row
+above).
 
 ## 5. DNS management roles
 
@@ -196,8 +195,8 @@ Both ANS-family profiles emit two shared trust records, deduped to a single inst
 composition walker (§6.4). They are emitted by whichever profile(s) the registration selects, so a
 profile registered alone still produces them:
 
-- **Badge** — `_ans-badge.{agentHost}` TXT, value `v=ans-badge1; version={version}; url={badgeURL}`,
-  where `{version}` is the registration's semver with no `v` prefix and `{badgeURL}` is the
+- **Badge** — `_ans-badge.{agentHost}` TXT, value `v=ans-badge1; version=v{version}; url={badgeURL}`,
+  where `{version}` is the registration's semver (the value carries the `v` prefix, matching the ANSName's version segment) and `{badgeURL}` is the
   Transparency Log badge endpoint for the agent (`{tlPublicBaseURL}/v1/agents/{agentId}`), falling
   back to the agent's first endpoint URL when no public TL URL is configured. Emitted only when the
   registration has at least one endpoint. **`Required=true`**: a badge-verifying client will not
@@ -372,9 +371,9 @@ annotated.
 ai-agent.acmecorp.com.        300  IN A        203.0.113.42
 ai-agent.acmecorp.com.        300  IN AAAA     2001:db8::42
 
-; ANS_TXT discovery [RA-content] — one `_ans` TXT per endpoint; version has no `v` prefix; mode=direct
-_ans.ai-agent.acmecorp.com.   3600 IN TXT      "v=ans1; version=2.1.0; p=a2a; mode=direct; url=https://ai-agent.acmecorp.com/a2a"
-_ans.ai-agent.acmecorp.com.   3600 IN TXT      "v=ans1; version=2.1.0; p=mcp; mode=direct; url=https://ai-agent.acmecorp.com:8443/mcp"
+; ANS_TXT discovery [RA-content] — one `_ans` TXT per endpoint; version carries the `v` prefix; mode=direct
+_ans.ai-agent.acmecorp.com.   3600 IN TXT      "v=ans1; version=v2.1.0; p=a2a; mode=direct; url=https://ai-agent.acmecorp.com/a2a"
+_ans.ai-agent.acmecorp.com.   3600 IN TXT      "v=ans1; version=v2.1.0; p=mcp; mode=direct; url=https://ai-agent.acmecorp.com:8443/mcp"
 
 ; ANS_TXT connection hint [RA-content] — one HTTPS RR at the apex (Required=false)
 ai-agent.acmecorp.com.        3600 IN HTTPS    1 . alpn=h2
@@ -385,7 +384,7 @@ ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=a2a port=443 key65400=ht
 ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=mcp port=8443 key65402=mcp
 
 ; Badge TXT [RA-content] — family record; one per registration; points at the TL badge endpoint
-_ans-badge.ai-agent.acmecorp.com. 3600 IN TXT  "v=ans-badge1; version=2.1.0; url=https://transparency-log.example.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
+_ans-badge.ai-agent.acmecorp.com. 3600 IN TXT  "v=ans-badge1; version=v2.1.0; url=https://transparency-log.example.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
 
 ; Server DANE TLSA [RA-content] — family record; one per distinct TLS port (443 and 8443); 3 0 1 over the full Server Certificate
 _443._tcp.ai-agent.acmecorp.com.  3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2

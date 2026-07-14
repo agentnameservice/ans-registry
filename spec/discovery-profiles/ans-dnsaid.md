@@ -163,7 +163,7 @@ agent.example.com.            3600 IN SVCB  1 . alpn=a2a port=443 key65400=https
 agent.example.com.            3600 IN SVCB  1 . alpn=mcp port=443 key65402=mcp
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
-_ans-badge.agent.example.com. 3600 IN TXT   "v=ans-badge1; version=1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
+_ans-badge.agent.example.com. 3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
 _443._tcp.agent.example.com.  3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 

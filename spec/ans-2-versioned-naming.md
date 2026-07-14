@@ -8,8 +8,14 @@ Audience: implementers adding semantic-version routing and Private-key Confirmat
 
 ## 1. Scope
 
-ANS-2 is **optional** at registration time and through the registration's life. A conforming Core deployment skips it entirely. A base-only registration is one created with no ANSName and no Identity Certificate. An existing versioned registration MAY add, remove, or roll its Identity Certificate via the `IDENTITY_CERT_UPDATED` event (defined in
-[ANS-1](ans-1-registration.md#65-identity_cert_updated)); the registration's `agentId`, `agentHost`, ANSName, and anchor binding are unchanged across the event.
+Every registration declares a `version` and derives an ANSName ([ANS-1
+§4.1](ans-1-registration.md#41-step-1--pending-registration)). What is **optional** is the Identity
+Certificate: a registration MAY omit its Identity CSR and operate on its Server Certificate alone ([ANS-1
+§7.2](ans-1-registration.md#72-registrations-without-an-identity-certificate)). The identity-certificate
+surface of ANS-2 — the URI SAN binding, PriCC, and the mTLS semantics — applies when the certificate is
+present. An identity-bearing registration MAY roll its Identity Certificate via the rotation operation ([ANS-1
+§7](ans-1-registration.md#7-lifecycle-operations)); the registration's `agentId`, `agentHost`, and ANSName are
+unchanged across a roll, and a registration created without an Identity CSR cannot add one later.
 
 When present, ANS-2 specifies:
 
@@ -20,7 +26,7 @@ When present, ANS-2 specifies:
 - mTLS handshake semantics that consume the Identity Certificate.
 - Stable Aliases (§6): operator-facing subdomains that resolve to a specific versioned identifier.
 
-ANS-2 is FQDN-shaped. The Identity Certificate URI SAN encodes an ANSName whose host component is an FQDN, and ANS-1 enforces `NON_FQDN_REQUIRES_BASE_ONLY` to gate versioned registrations to FQDN anchors.
+ANS-2 is FQDN-shaped. The Identity Certificate URI SAN encodes an ANSName whose host component is an FQDN — true by construction, since every ANSName is derived from the registration's `agentHost`.
 
 ## 2. The ANSName
 
@@ -28,7 +34,7 @@ ANS-2 is FQDN-shaped. The Identity Certificate URI SAN encodes an ANSName whose 
 
 Example: `ans://v1.0.0.sentiment-analyzer.example.com`
 
-The ANSName exists when the registrant declares a version. A base-only registration has no ANSName; its identity is the ANS-0 anchor alone.
+Every registration declares a version, so every registration has an ANSName; the name is constructed at registration ([ANS-1 §4.1](ans-1-registration.md#41-step-1--pending-registration)) and is consumed **permanently** — uniqueness is checked against all registration rows regardless of status, so a FAILED, EXPIRED, or cancelled attempt still holds its version and a retry must use a new one.
 
 | Component | Constraints | Example |
 | --- | --- | --- |
@@ -56,7 +62,7 @@ The display name is the human-readable label shown in discovery UIs. It supports
 
 ### 2.3 Supersession
 
-When a registrant submits a version bump, the new ACTIVE registration's TL event carries a `supersededBy` reference linking forward and backward in the version chain. The supersession reference is `agentId`-keyed; consumers of the TL event stream reconstruct the version chain for an `agentHost` by walking `supersededBy` links.
+Versions are independent registrations: a version bump is a new registration under the same `agentHost` with a new `version` ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)). Consumers of the TL event stream reconstruct the version history for an `agentHost` by filtering the log on the host — each version's `AGENT_REGISTERED` event carries the full ANSName.
 
 A patch bump may coexist for hours; a major version change may coexist for months. ANS-2 does not impose a retirement timeline. If the new registration fails validation, the old version remains ACTIVE.
 
@@ -91,15 +97,21 @@ The RA's Private CA issues Identity Certificates that ANS-aware callers and call
 
 Steps 3 and 4 of the handshake sequence above require the party being authenticated to hold an Identity Certificate. Four scenarios cover the combinations:
 
-- **Versioned callee, versioned caller.** Standard mTLS. Both parties present Identity Certificates and verify the other against the ANS Private CA. The caller verifies the server's fingerprint at step 6 against the sealed badge; the server learns the caller's ANSName.
-- **Base-only callee, versioned caller.** Steps 3 and 4 run for the caller: the callee verifies the caller's Identity Certificate against the ANS Private CA. The callee authenticates itself via its Server Certificate only; the caller verifies the server's identity at step 6 against the badge sealed for the base-only registration.
-- **Versioned callee, base-only caller.** Steps 3 and 4 collapse: the base-only caller has no Identity Certificate to present, so step 5 establishes a server-authenticated TLS session rather than mTLS. The callee authenticates via its Server and Identity Certificates; the caller is anonymous at the TLS layer and MUST authenticate through application-layer means (API key, OAuth, delegation token).
-- **Both base-only.** Both parties authenticate via Server Certificates only; the session is server-authenticated TLS with no ANS Identity Certificate on either side. Step 6 (badge or TL verification) still runs on the callee.
+- **Identity-bearing callee, identity-bearing caller.** Standard mTLS. Both parties present Identity Certificates and verify the other against the ANS Private CA. The caller verifies the server's fingerprint at step 6 against the sealed badge; the server learns the caller's ANSName.
+- **Server-Certificate-only callee, identity-bearing caller.** Steps 3 and 4 run for the caller: the callee verifies the caller's Identity Certificate against the ANS Private CA. The callee authenticates itself via its Server Certificate only; the caller verifies the server's identity at step 6 against the badge sealed for the registration.
+- **Identity-bearing callee, Server-Certificate-only caller.** Steps 3 and 4 collapse: the caller has no
+  Identity Certificate to present, so step 5 establishes a server-authenticated TLS session rather than mTLS.
+  The callee authenticates via its Server and Identity Certificates; the caller is anonymous at the TLS layer
+  and MUST authenticate through application-layer means (API key, OAuth, delegation token).
+- **Both Server-Certificate-only.** Both parties authenticate via Server Certificates only; the session is server-authenticated TLS with no ANS Identity Certificate on either side. Step 6 (badge or TL verification) still runs on the callee.
 
 DANE (`_443._tcp` TLSA) remains an optional additional pinning check across all scenarios.
 
-The combination a callee presents may change during the registration's life via `IDENTITY_CERT_UPDATED` (defined in [ANS-1](ans-1-registration.md#65-identity_cert_updated)). A versioned callee that removes its Identity Certificate stays a versioned registration but presents only a Server Certificate during the next handshake; callers that previously verified the Identity Certificate fall back to
-badge or TL verification, and the caller does not need to re-discover the agent.
+The combination a callee presents is fixed at registration ([ANS-1
+§7.2](ans-1-registration.md#72-registrations-without-an-identity-certificate)): a registration created without
+an Identity CSR cannot add an Identity Certificate later, and an identity-bearing registration rolls its
+certificate via rotation without changing the combination. Callers therefore learn a stable authentication
+shape from the sealed badge and do not need to re-discover the agent across certificate rolls.
 
 ## 5. Private-key Confirmation Challenge (PriCC)
 
@@ -109,7 +121,7 @@ PriCC sequence:
 
 1. The RA generates a random PriCC token (32 bytes, base64url-encoded; for example `Lzx7nPjQXr_2VbW8C5sDrGYE9q1mF4uHkN0pT-aZsvI`).
 2. The RA returns the token plus the registration's pending state in the response to the AHP's `register` call.
-3. The AHP signs the token concatenated with the JCS-canonical bytes of the registration's authoritative payload (the `RegisterInput` body excluding `claim.publicKey`, which is transient). The signing key is the private key whose public half appears in the Identity CSR.
+3. The AHP signs the token concatenated with the JCS-canonical bytes of the registration's authoritative payload (the registration request body). The signing key is the private key whose public half appears in the Identity CSR.
 4. The AHP submits the signed challenge to the RA's `POST /v1/agents/{agentId}/pricc-confirm` endpoint.
 5. The RA verifies the signature against the Identity CSR's public key. Match → registration proceeds to activation. Mismatch → RA rejects with `PRICC_SIGNATURE_INVALID` and the registration stays in `PENDING`.
 
@@ -130,9 +142,8 @@ A conformant ANS-2 implementation:
 1. Constructs ANSNames per the ANSName section above with the documented length limits enforced.
 2. Issues Identity Certificates that carry the ANSName in a `uniformResourceIdentifier` SAN.
 3. Implements PriCC before activation.
-4. Refuses to issue an Identity Certificate when the anchor type is not `fqdn` (the v0.1.0 restriction; lifts via amendment).
-5. Supports the mTLS handshake semantics for caller-side and callee-side roles across the four registration shapes named above.
-6. Implements Stable Aliases per §6 if it offers the feature.
+4. Supports the mTLS handshake semantics for caller-side and callee-side roles across the four authentication shapes named above.
+5. Implements Stable Aliases per §6 if it offers the feature.
 
 ## 8. Security considerations
 
@@ -147,8 +158,8 @@ The PriCC token is single-use within the registration's lifetime. A token submit
 
 ### 8.3 Cryptographic consent
 
-A versioned registration's Identity Certificate private key signs transaction payloads when the agent commits to an action. The signature produces a non-repudiable record tying the specific version to the specific transaction. A registration without an ANSName has no Identity Certificate and therefore cannot produce this signature; a counterparty requiring cryptographic consent MUST require a
-versioned counterparty.
+An identity-bearing registration's Identity Certificate private key signs transaction payloads when the agent commits to an action. The signature produces a non-repudiable record tying the specific version to the specific transaction. A registration without an Identity Certificate cannot produce this signature; a counterparty requiring cryptographic consent MUST require an identity-bearing
+counterparty.
 
 ## 9. References
 

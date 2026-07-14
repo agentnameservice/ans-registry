@@ -4,12 +4,13 @@ Non-normative worked examples for ans-1-registration. Implementers MAY use these
 
 Identifier conventions, by surface (these are distinct identifiers, not aliases):
 
-- **`agentId`** (RA API, `/v1/agents/{agentId}`): the agent *registration instance* UUID the RA assigns and uses on its management API.
-- **`ansId`** (TL event, UUIDv7): the *Transparency Log entry* identifier carried inside the sealed event payload.
+- **`agentId`** (RA API, `/v2/ans/agents/{agentId}` and `/v1/agents/{agentId}`): the agent *registration instance* UUID the RA assigns and uses on its management API.
+- **`ansId`** (TL event payload): the agent identifier carried inside the sealed event payload; in the reference implementation it is the same value as `agentId`.
+- **`logId`** (TL envelope, UUIDv7): the *Transparency Log entry* identifier the TL assigns when it seals the event.
 
 TL event payloads below follow the **V2 TL response format**: certificates are carried as `identityCerts[]` / `serverCerts[]` arrays of `{fingerprint, type, notAfter}`, and `dnsRecordsProvisioned` is an array of `{name, type, data}` objects.
 
-## A.1 `AGENT_REGISTERED` event (versioned, FQDN-anchored) — V2 TL format
+## A.1 `AGENT_REGISTERED` event (V2 TL format)
 
 ```json
 {
@@ -19,8 +20,7 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
   "agent": {
     "host": "support.example.com",
     "name": "Acme Support Agent",
-    "version": "v1.5.0",
-    "providerId": "PID-8294"
+    "version": "1.5.0"
   },
   "attestations": {
     "identityCerts": [
@@ -41,19 +41,23 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
       {
         "name": "_ans.support.example.com",
         "type": "TXT",
-        "data": "v=ans1; version=v1.5.0; url=https://support.example.com/.well-known/agent-card.json"
+        "data": "v=ans1; version=v1.5.0; p=a2a; mode=direct; url=wss://support.example.com/a2a"
       },
       {
         "name": "_ans-badge.support.example.com",
         "type": "TXT",
         "data": "v=ans-badge1; version=v1.5.0; url=https://transparency.ra.ansregistry.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
+      },
+      {
+        "name": "_443._tcp.support.example.com",
+        "type": "TLSA",
+        "data": "3 0 1 d2b71bc02f119a61611b77eadc44c23670917ac4f435fe4e1095d4e5209087ea",
+        "dnssecVerified": true
       }
     ],
     "domainValidation": "ACME-DNS-01",
-    "dnssecStatus": "fully_validated",
     "metadataHashes": {
-      "A2A": "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b",
-      "capabilitiesHash": "SHA256:9f3a2b1c4d5e6f7890abcdef0123456789abcdef0123456789abcdef01234567"
+      "A2A": "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b"
     }
   },
   "expiresAt": "2026-10-05T18:00:00.000000Z",
@@ -63,61 +67,16 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
 }
 ```
 
-`agent.version` carries the `v` prefix (`v1.5.0`) because the TL stores the ANSName-formatted version. The registration request (`AgentRegistrationRequest.version`) accepts `1.5.0` without the prefix; the RA adds it. `providerId` is the provider/organization identifier the RA assigns. `dnssecStatus` is an ANS attestation signal carried alongside the V2 attestation fields.
+The `version=` field in TXT record data carries the `v`-prefixed form (`v1.5.0`), matching the ANSName's
+version segment and ANS-3's record syntax. `agent.version` in the event payload and the registration
+request's `version` field carry the bare semver (`1.5.0`). `dnssecVerified` appears on a provisioned TLSA, SVCB, or
+HTTPS record when the verifying resolver returned the DNSSEC Authenticated-Data bit for that record's query;
+it is absent otherwise, and TXT records never carry it. `metadataHashes` carries the AHP-declared per-endpoint metadata digests keyed by protocol token,
+present only for endpoints that submitted a `metaDataHash`.
 
-## A.2 `AGENT_REGISTERED` event (base-only, DID-anchored) — forward-looking
+## A.2 Registration request — V1 RA format
 
-Base-only / non-FQDN anchor registrations are a forward-looking ANS-0/ANS-1 capability not yet modeled by the V2 TL schema (which requires `agent.version` and an `ansName`). The example applies the V2 attestation layout and `ansId`; the anchor (`claim`), the absent `ansName`, the absent `identityCerts`, and the `DID-WEB-CHALLENGE` validation value are the new-design parts.
-
-```json
-{
-  "ansId": "f3c2d4e5-1234-5678-9abc-def012345678",
-  "eventType": "AGENT_REGISTERED",
-  "agent": {
-    "host": "sdk-did-agent.plang.example.com",
-    "name": "SDK DID Sandbox Agent",
-    "providerId": "PID-9302"
-  },
-  "claim": {
-    "anchorType": "did",
-    "resolvedId": "did:web:sdk-did-agent.plang.example.com",
-    "publicKey": { "kty": "OKP", "crv": "Ed25519", "x": "11qYAY..." },
-    "issuedAt": "2026-05-17T09:55:00Z"
-  },
-  "attestations": {
-    "serverCerts": [
-      {
-        "fingerprint": "SHA256:7a91...",
-        "type": "X509-DV-SERVER",
-        "notAfter": "2027-05-17T10:00:00Z"
-      }
-    ],
-    "dnsRecordsProvisioned": [
-      {
-        "name": "_ans.sdk-did-agent.plang.example.com",
-        "type": "TXT",
-        "data": "v=ans1; url=https://sdk-did-agent.plang.example.com/.well-known/ans/trust-card.json"
-      },
-      {
-        "name": "_ans-badge.sdk-did-agent.plang.example.com",
-        "type": "TXT",
-        "data": "v=ans-badge1; url=https://transparency.ra.ansregistry.com/v1/agents/f3c2d4e5-1234-5678-9abc-def012345678"
-      }
-    ],
-    "domainValidation": "DID-WEB-CHALLENGE",
-    "dnssecStatus": "not_signed"
-  },
-  "issuedAt": "2026-05-17T10:00:00Z",
-  "raId": "id-A",
-  "timestamp": "2026-05-17T10:00:00Z"
-}
-```
-
-No `ansName`, no `identityCerts`. `claim.anchorType` and `claim.resolvedId` carry the DID. `agent.host` is the operational endpoint; `claim.resolvedId` is the identity. The two diverge per ANS-0 §3.1.
-
-## A.3 Registration request — V1 RA format
-
-A representative request payload (the AHP submits this to the RA's `POST /v1/agents/register` endpoint). Shared fields use the V1 RA names (`agentDisplayName`, `agentDescription`, `version`, `identityCsrPEM`, `serverCsrPEM`, `metaDataUrl`); `claim`, `trustCardContent`, and `echConfigList` are forward-looking ANS additions on top of the V1 request.
+A representative request payload (the AHP submits this to the RA's `POST /v1/agents/register` endpoint; the V2 lane accepts the same fields at `POST /v2/ans/agents`).
 
 ```json
 {
@@ -125,32 +84,24 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
   "agentDescription": "Customer support agent.",
   "version": "1.5.0",
   "agentHost": "support.example.com",
-  "claim": {
-    "anchorType": "fqdn",
-    "resolvedId": "support.example.com",
-    "publicKey": { "kty": "EC", "crv": "P-256", "x": "...", "y": "..." },
-    "issuedAt": "2025-10-05T17:55:00Z"
-  },
   "endpoints": [
     {
       "protocol": "A2A",
       "agentUrl": "wss://support.example.com/a2a",
       "metaDataUrl": "https://support.example.com/.well-known/agent-card.json",
       "metaDataHash": "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b",
-      "transports": ["STREAMABLE-HTTP", "SSE"],
+      "transports": ["STREAMABLE_HTTP", "SSE"],
       "functions": [{ "id": "lookupOrder", "name": "Lookup Order", "tags": ["order", "support"] }]
     }
   ],
   "identityCsrPEM": "-----BEGIN CERTIFICATE REQUEST-----\n...truncated...\n-----END CERTIFICATE REQUEST-----",
-  "serverCsrPEM": "-----BEGIN CERTIFICATE REQUEST-----\n...truncated...\n-----END CERTIFICATE REQUEST-----",
-  "trustCardContent": { "...JCS-canonical Trust Card body..." },
-  "echConfigList": "AEn+DQBFKwAg...truncated..."
+  "serverCsrPEM": "-----BEGIN CERTIFICATE REQUEST-----\n...truncated...\n-----END CERTIFICATE REQUEST-----"
 }
 ```
 
-A base-only request (forward-looking) omits `version` and `identityCsrPEM`. Under the V1 RA, `version` and `identityCsrPEM` are both required.
+`version`, `agentHost`, `agentDisplayName`, and at least one endpoint are required. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it registers the agent without an Identity Certificate ([ANS-1 §7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
 
-## A.4 Revocation request
+## A.3 Revocation request
 
 ```json
 {
@@ -159,10 +110,4 @@ A base-only request (forward-looking) omits `version` and `identityCsrPEM`. Unde
 }
 ```
 
-Submitted to `POST /v1/agents/{agentId}/revoke`. `reason` is required (RFC 5280 reason code); `comments` is optional, max 200 chars. The sealed `AGENT_REVOKED` event canonicalizes `reason` to `revocationReasonCode` so the immutable record is unambiguous.
-
-## A.5 Trust Card body
-
-The normative schema and hashing rules for the Trust Card body are in [ANS-1 Appendix A](../ans-1-registration.md#appendix-a-trust-card-and-metadata-normative). The Trust Card is optional. Agents without one register fully; the Trust Index scores their integrity lower because the hash-consistency check is unavailable.
-
-A worked Trust Card document lives in the public ANS registry mirror at `spec/examples/trust-card-example.json`.
+Submitted to `POST /v1/agents/{agentId}/revoke` (V2: `POST /v2/ans/agents/{agentId}/revoke`). `reason` is required (an RFC 5280 revocation reason name token); `comments` is optional, max 200 chars. The sealed `AGENT_REVOKED` event canonicalizes `reason` to `revocationReasonCode` so the immutable record is unambiguous.

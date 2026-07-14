@@ -12,7 +12,7 @@ ANS-4 specifies how registration **and identity** events flow into an append-onl
 log that produces verifiable receipts. ANS-4 is part of the ANS notary layer, which records what
 can be cryptographically verified without making judgments about trust. Trust scoring is out of
 scope for ANS and lives in a separate `ti-*` layer set. There is one Merkle tree; agent and
-Verified-Identity events share it, read through per-object indexes (§5.4).
+Verified-Identity events share it, read through per-object indexes (§5.3).
 
 ANS-4 specifies:
 
@@ -20,9 +20,8 @@ ANS-4 specifies:
 - The `TransparencyLog` code-interface contract: append, range query, inclusion proof, witness query.
 - The TL's public verification API surface.
 - Producer authentication (RA → TL).
-- Receipt distribution: live retrieval and SCITT stapling.
+- Receipt distribution: live retrieval.
 - The witness contract: a profile mechanism by which the log's state roots are anchored to external consensus systems.
-- Integrity commitment sealing: the TL preserves committed deployment hashes; the commitment format and verification mechanics live in ANS-1.
 
 ANS-4 is **deployment-optional**. Single-tenant deployments with no cross-organizational trust MAY skip it.
 
@@ -31,14 +30,11 @@ ANS-4 does **not** specify:
 - The wire format an RA submits over (HTTPS POST is recommended; the spec is transport-agnostic on this point).
 - Which witness profile to deploy. Witness profiles are operator-choice within the constraint that a multi-operator deployment requires at least one.
 - How verifiers score the freshness of a receipt. Receipt-staleness scoring is out of scope here.
-- How verifiers enforce token-discipline policy at runtime. (See ANS-1 §9 for runtime token-verification mechanics.)
-- The integrity commitment composition (Trust Card hash, capabilities manifest, SBOM, SLSA attestation). (See ANS-1 §A and §9 for commitment content.)
 
 ## 2. Terminology
 
 - **SCITT statement**: the unit the TL accepts and seals. Carries the issuer (anchor URI form), the JCS-canonical inner-event payload, and a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
 - **SCITT receipt**: the proof of inclusion the TL returns. Carries the statement hash, log identifier, Merkle inclusion proof, and a TL signature.
-- **Stapling**: distribution shape where a SCITT receipt is carried inline in the agent's Trust Card payload, allowing offline verification.
 - **Witness profile**: a normative subsection of this document (§7) specifying how the TL's state roots are anchored to an external consensus system (Hedera, ENS, OpenTimestamps, RFC 6962-style trillian instances).
 - **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing keys (which sign checkpoints and receipts).
 - **Checkpoint**: a signed snapshot of the log's state at a given size. Produced periodically; consumed by witnesses and consistency-proof verifiers.
@@ -91,17 +87,11 @@ A conforming TL MUST expose the following REST API surface (HTTPS, JSON unless n
 
 Implementations MAY expose additional endpoints specific to their proof format. Verification MUST NOT require access to producer public keys, authentication for read-only operations, or knowledge of RA implementation details.
 
-### 5.1 Inline Receipt Distribution (SCITT Stapling)
-
-A staple is a SCITT receipt copied inline into the agent's Trust Card payload at registration or renewal time. A verifier consuming a stapled Trust Card validates the receipt locally without a TL roundtrip.
-
-The staple format is the binary COSE receipt produced by the TL's `proofFor` endpoint, base64-encoded, embedded as a `transparencyReceipt` field in the Trust Card body (see ANS-1 Appendix A.5).
-
-### 5.2 Key distribution
+### 5.1 Key distribution
 
 The TL MUST distribute verification keys via the `GET /root-keys` endpoint so any verifier can check root signatures without contacting the RA. Historical keys SHOULD be retained; without them, proofs signed before a key rotation become unverifiable.
 
-### 5.3 ANS-BADGE attestation type identifier
+### 5.2 ANS-BADGE attestation type identifier
 
 Discovery surfaces (Agent Finder catalogs, search indices, peer agent runtimes) point at the TL badge endpoint using the `ANS-BADGE` attestation-type identifier:
 
@@ -126,7 +116,7 @@ A failure at any step is a poisoning finding; the consumer SHOULD record the fin
 }
 ```
 
-### 5.4 Identity surface
+### 5.3 Identity surface
 
 This surface is present only when the RA implements the **optional** Verified Identity capability
 ([ANS-0 §12.2](ans-0-identity-anchor.md#122-optional-capability-verified-identities)). A TL
@@ -253,30 +243,7 @@ interface WitnessBinding {
 
 The profile document specifies the `externalProof` shape, the verification procedure, and the cadence at which the witness produces fresh attestations.
 
-## 8. Integrity commitment sealing
-
-ANS-1 §9 specifies the operator-declared integrity commitment over Trust Card content, capabilities manifest, endpoint configuration, SBOM, and optional SLSA attestation. ANS-4's role is to seal the commitment hash plus a timestamp and to preserve them with cryptographic proof of inclusion.
-
-The TL's conformance contract: accept commitment-bearing events from authorized RA producers, seal each into a leaf with its statement hash, return an inclusion proof, and preserve the leaf for the lifetime of the log. The TL does not evaluate the commitment; it preserves the reference.
-
-### 8.1 Cost envelope
-
-Each capability entry in the Trust Card's capabilities manifest MAY declare a `cost_envelope` with per-invocation and per-window maxima:
-
-```json
-{
-  "cost_envelope": {
-    "per_invocation_max_units": 0.25,
-    "per_window_max_units": 500.0,
-    "window_seconds": 3600,
-    "unit": "USD"
-  }
-}
-```
-
-The unit is operator-defined (USD, LLM tokens, external API calls). A verifier presented with a request whose projected cost would exceed the per-invocation or per-window limit MUST refuse. The envelope sits inside the capabilities manifest that the integrity commitment hashes, so changing it bumps the commitment.
-
-## 9. Conformance
+## 8. Conformance
 
 A conformant ANS-4 implementation:
 
@@ -284,62 +251,55 @@ A conformant ANS-4 implementation:
 2. Returns SCITT receipts matching the receipt format defined above with binary COSE inclusion proofs.
 3. Exposes the verification API over HTTPS with no authentication required for read-only endpoints.
 4. Implements producer authentication with overlap-window key rotation.
-5. Supports SCITT stapling.
-6. Accepts at least one witness profile if the deployment involves cross-organizational verification.
-7. Distributes verification keys via `/root-keys` with historical keys retained.
-8. Honors JCS canonicalization, JWS Detached signatures, and the protected-header set defined in the cryptographic-standards section above.
+5. Accepts at least one witness profile if the deployment involves cross-organizational verification.
+6. Distributes verification keys via `/root-keys` with historical keys retained.
+7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header set defined in the cryptographic-standards section above.
 
 
 **Optional surface.** Which witness profile to deploy is operator choice within the multi-operator-deployment constraint; SCITT alternative profiles (`draft-ietf-scitt-architecture` admits implementation choices the spec leaves open); TL operator policy (rotation cadence, checkpoint frequency, batching window). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator
 chose witness profile 4.A over 4.C (or vice versa), and MUST NOT reject a receipt because the operator's checkpoint cadence differs from another deployment's.
 
-## 10. Security considerations
+## 9. Security considerations
 
-### 10.1 RA / TL collusion
+### 9.1 RA / TL collusion
 
 When the RA and TL are operated by the same entity, that entity could in principle forge events with no independent check, because the keys that sign producer signatures and TL checkpoints are under the same operator's control. Witness profiles are the primary mitigation: a witness's external attestation against the TL state cannot be forged without compromising the witness's backend (Hedera,
 OpenTimestamps, etc.) too. A private audit trail inside the registry's own infrastructure cannot be checked by third parties; a multi-operator log with witness-based monitoring can.
 
 A federated deployment runs the RA and TL under different operators, eliminating collusion as a single-entity risk.
 
-### 10.2 Producer-key compromise
+### 9.2 Producer-key compromise
 
 A compromised producer key allows an attacker to submit forged events to the TL. The TL accepts them because the signature validates. Mitigations:
 
 - The overlap-window rotation rule above lets the operator revoke the compromised key without breaking historical signatures.
 - Witness attestation cadence: a witness attestation made before the compromise becomes a recovery point that lets verifiers know what state was sealed pre-compromise.
 
-### 10.3 Stapled-receipt freshness
-
-A stapled receipt sealed before a revocation event remains cryptographically valid against the TL's historical checkpoint even after the registration is revoked. Verifiers handling high-stakes transactions MUST cross-check against live TL state for revocation events; stapling is offline-capable evidence of inclusion at sealing time, not evidence of current liveness.
-
-### 10.4 Witness backend compromise
+### 9.3 Witness backend compromise
 
 A compromised witness backend (Hedera consensus topic operator collusion, OpenTimestamps timestamp authority compromise) allows the witness's attestations to be forged. A deployment using only one witness profile inherits that backend's compromise surface. Defense: configure two or more witness profiles and treat divergent attestations as a finding.
 
-### 10.5 Sealed event types
+### 9.4 Sealed event types
 
 The TL records the agent event family — `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`,
-`AGENT_REVOKED`, `INTEGRITY_WARNING`, `INTEGRITY_RESOLVED`,
-`IDENTITY_CERT_UPDATED` — and the
+`AGENT_REVOKED` — and the
 Verified-Identity event family — `IDENTITY_VERIFIED`, `IDENTITY_UPDATED`, `IDENTITY_REVOKED`,
 `IDENTITY_LINKED`, `IDENTITY_UNLINKED` (defined in
-[ANS-0 §8.1](ans-0-identity-anchor.md#81-the-identity-event-family-and-ingest)). Event payload
-schemas for `INTEGRITY_WARNING` and `INTEGRITY_RESOLVED` are defined in ANS-5; ANS-4 specifies
-only that the TL accepts these event types, seals them with the same receipt format as other
-events, and preserves them. All of them are appended to the one Merkle tree (§5.4); the
-per-object "streams" are read indexes, not separate logs.
+[ANS-0 §8.1](ans-0-identity-anchor.md#81-the-identity-event-family-and-ingest)). ANS-4 specifies
+that the TL accepts these event types, seals each with the same receipt format, and preserves
+them. All of them are appended to the one Merkle tree (§5.3); the per-object "streams" are read
+indexes, not separate logs.
 
 ## Appendix A: Worked examples
 
 Non-normative worked examples (Pub/Sub envelope, TL badge response, revocation event, producer key registration) live at [`examples/ans-4-examples.md`](examples/ans-4-examples.md).
 
-## 14. References
+## 10. References
 
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). Binding rule, foundational principles.
-- ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Event set, registration aggregate, integrity commitment composition, capability token discipline.
+- ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Event set, registration aggregate, lifecycle.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md). `_ans-badge` record carrying the TL endpoint pointer.
-- ANS-5 specification: [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md). Integrity Monitor operating principles, INTEGRITY_WARNING/RESOLVED event semantics, verification procedure consuming TL receipts.
+- ANS-5 specification: [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md). Integrity Monitor operating principles, verification procedure consuming TL receipts.
 - Witness profiles defined inline above (Hedera Consensus Service, ENS Reserved, OpenTimestamps, Trillian Reserved).
 - [draft-ietf-scitt-architecture](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/): SCITT Transparency Service.
 - [RFC 9943](https://www.rfc-editor.org/rfc/rfc9943): SCITT (informational reference; consult `draft-ietf-scitt-architecture` for the in-progress normative shape).
