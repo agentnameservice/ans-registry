@@ -178,7 +178,7 @@ Non-normative worked example (AIM finding payload) lives at [`examples/ans-5-exa
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). The proof-of-control gate, the Verified Identity object and its monitoring, the [identity profiles](identity-profiles/).
 - ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Registration aggregate, lifecycle, event set.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md). Expected DNS records.
-- ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md). TL receipts, witness attestations, INTEGRITY_WARNING/RESOLVED envelope.
+- ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md). TL receipts, witness attestations.
 - [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698): DANE TLSA records.
 - [RFC 9083](https://www.rfc-editor.org/rfc/rfc9083): RDAP JSON responses.
 - [ISO 17442](https://www.iso.org/standard/78829.html): Legal Entity Identifier (LEI).

@@ -34,7 +34,7 @@ ANS-2 is FQDN-shaped. The Identity Certificate URI SAN encodes an ANSName whose 
 
 Example: `ans://v1.0.0.sentiment-analyzer.example.com`
 
-Every registration declares a version, so every registration has an ANSName; the name is constructed at registration and reserved for the registration's life ([ANS-1 §4.1](ans-1-registration.md#41-step-1--pending-registration)).
+Every registration declares a version, so every registration has an ANSName; the name is constructed at registration ([ANS-1 §4.1](ans-1-registration.md#41-step-1--pending-registration)) and is consumed **permanently** — uniqueness is checked against all registration rows regardless of status, so a FAILED, EXPIRED, or cancelled attempt still holds its version and a retry must use a new one.
 
 | Component | Constraints | Example |
 | --- | --- | --- |

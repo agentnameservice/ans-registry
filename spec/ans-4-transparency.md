@@ -22,7 +22,6 @@ ANS-4 specifies:
 - Producer authentication (RA → TL).
 - Receipt distribution: live retrieval.
 - The witness contract: a profile mechanism by which the log's state roots are anchored to external consensus systems.
-- Integrity commitment sealing: the TL preserves committed deployment hashes; the commitment format and verification mechanics live in ANS-1.
 
 ANS-4 is **deployment-optional**. Single-tenant deployments with no cross-organizational trust MAY skip it.
 

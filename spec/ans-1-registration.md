@@ -66,6 +66,7 @@ The AHP submits a registration request:
 | | per-endpoint `documentationUrl` | No | Developer documentation |
 | | per-endpoint `functions` | No | Function declarations: `id`, `name`, optional `tags` |
 | | per-endpoint `transports` | No | `STREAMABLE_HTTP`, `SSE`, `JSON_RPC`, `GRPC`, `REST`, `HTTP` |
+| **Discovery** | `discoveryProfiles` | No | The DNS record families the RA emits for this registration, per [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles). Defaults to `ANS_TXT` |
 | **Certificates** | `identityCsrPEM` | No | CSR for the Identity Certificate. When omitted, the agent registers without one and cannot add one later (§7.2) |
 | | `serverCsrPEM` | Conditional | CSR for the RA-issued Server Certificate |
 | | `serverCertificatePEM` (+ optional `serverCertificateChainPEM`) | Conditional | BYOC Server Certificate. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present |
@@ -75,7 +76,7 @@ Pending-stage validations:
 1. `agentHost` MUST be a syntactically valid FQDN (RFC 1123).
 2. Each endpoint's `agentUrl` MUST carry `agentHost` as its hostname (case-insensitive). The constraint keeps endpoint URLs reachable through the same TLS certificate that anchors the agent's identity.
 3. Exactly one of `serverCsrPEM` and `serverCertificatePEM` MUST be present (CSR or BYOC, never both, never neither).
-4. The endpoint set MUST contain at least one endpoint with valid `protocol` and `agentUrl`.
+4. The endpoint set MUST contain at least one endpoint with valid `protocol` and `agentUrl`, and at most one endpoint per protocol (`DUPLICATE_PROTOCOL`, 422).
 5. `agentDisplayName` and `agentDescription` length limits apply (64 and 150 chars respectively).
 6. The ANSName derived from `version` + `agentHost` MUST be globally unique; a taken name is rejected with `ANS_NAME_TAKEN` (409).
 
@@ -89,13 +90,13 @@ On a passing gate the RA:
 
 1. Finalizes the server-certificate order (or validates the BYOC certificate). Asynchronous CAs (e.g. RFC 8555 ACME CAs) may return an order-pending result; re-POSTing verify-acme re-drives the order until the certificate issues.
 2. Signs the Identity CSR at the private CA — **only when one was submitted at registration**. A registration without a pending Identity CSR is not an error; the agent advances without an Identity Certificate.
-3. Transitions the registration to `PENDING_DNS` and returns the production DNS record set the AHP must publish (content per [ANS-3 §3](ans-3-dns-publication.md)), along with certificate-retrieval locations.
+3. Transitions the registration to `PENDING_DNS`. The verify-acme response is a status body (status, phase, completed/pending steps, timestamps); the AHP fetches the production DNS record set it must publish from the registration detail response while `PENDING_DNS` (content per [ANS-3 §3](ans-3-dns-publication.md)), and the issued certificates from the `GET …/certificates/*` endpoints.
 
 Conformant implementations MUST gate identity-certificate issuance on the presence of a pending Identity CSR, not unconditionally on lifecycle entry.
 
 ### 4.3 Step 3 — verify-dns (activation)
 
-After publishing the production records, the AHP calls `verifyDNS(agentId)`. The RA queries the records live; a DNSSEC-authenticated mismatch blocks activation, and each verified record carries the resolver's DNSSEC Authenticated-Data result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified`.
+After publishing the production records, the AHP calls `verifyDNS(agentId)`. The RA queries the records live; a DNSSEC-authenticated mismatch blocks activation. TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified`; TXT lookups do not carry the flag.
 
 When the records verify, the RA transitions the registration to `ACTIVE` and enqueues the `AGENT_REGISTERED` event to the ANS-4 TL in the same transaction. The event payload is constructed and signed once; retries replay the exact same bytes and signature (the TL dedupes by content hash).
 
@@ -105,11 +106,11 @@ When the records verify, the RA transitions the registration to `ACTIVE` and enq
                 ┌────────────────────┐
                 │ PENDING_VALIDATION │──────────────┐
                 └──────────┬─────────┘              │
-                           │ domain control proven, │ lapsed or
-                           │ certificates issued    │ cancelled
+                           │ domain control proven, │ lapses to EXPIRED /
+                           │ certificates issued    │ cancel to REVOKED
                            ▼                        ▼
                     ┌──────────────┐         ┌───────────────────┐
-                    │ PENDING_DNS  │────────▶│ FAILED / EXPIRED  │
+                    │ PENDING_DNS  │────────▶│ EXPIRED / REVOKED │
                     └──────┬───────┘         └───────────────────┘
                            │ published records verified
                            ▼
@@ -124,13 +125,15 @@ When the records verify, the RA transitions the registration to `ACTIVE` and enq
                     └──────────────────────────────────────────┘
 ```
 
-`REVOKED`, `FAILED`, and `EXPIRED` are terminal. Revocation is idempotent. A pending registration MAY be
-cancelled, removing partial artifacts without a TL event — except a `PENDING_VALIDATION` registration still
-awaiting its domain-control challenge, which is refused (`CANNOT_CANCEL`) and lapses to `EXPIRED` on its own;
-the pre-activation expiry sweep emits no TL event, because under the terminal-only event model no log entry
-exists for an agent that never reached `ACTIVE`.
+`REVOKED`, `FAILED`, and `EXPIRED` are terminal. Revocation is idempotent. Cancelling a pending
+registration transitions it to `REVOKED` without a TL event (no log entry exists for an agent that never
+reached `ACTIVE`), revoking any already-issued Identity Certificates at the private CA — except a
+`PENDING_VALIDATION` registration still awaiting its domain-control challenge, which is refused
+(`CANNOT_CANCEL`) and lapses to `EXPIRED` on its own; the pre-activation expiry sweep likewise emits no TL
+event.
 
-`DEPRECATED` is a defined state and `ACTIVE → DEPRECATED` a valid transition, but no RA operation drives it today (§6.3).
+`DEPRECATED` and `FAILED` are defined states (`ACTIVE → DEPRECATED` a valid transition, `FAILED` a
+pending-side terminal), but no RA operation drives either today (§6.3).
 
 TL events fire only on the `ACTIVE` and `REVOKED` transitions. Everything before activation is RA-internal.
 
@@ -158,9 +161,13 @@ Emitted at activation (the verify-dns transition to `ACTIVE`). Payload follows t
 `identityCerts[]` (when the registration carries Identity Certificates) and `serverCerts[]`, each entry
 `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` records, each optionally
 carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC Authenticated-Data bit;
-`domainValidation` (the domain-control method token, e.g. `ACME-DNS-01`); an optional `metadataHashes` map
+`domainValidation` (the constant `ACME-DNS-01`); an optional `metadataHashes` map
 keyed by protocol token — plus `expiresAt` (the earliest `notAfter` across the attested certificates),
 `issuedAt`, `raId`, and `timestamp`.
+
+Registrations driven through the V1 paths (`/v1/agents/*`) seal **V1-format** payloads instead: a map-typed
+`dnsRecordsProvisioned` with no `dnssecVerified`, and `validIdentityCerts[]` / `validServerCerts[]`
+rotation arrays (§6.4's "V1 lane stays frozen" covers identity events; the V1 agent lane remains live).
 
 A worked example payload appears in the [ANS-1 worked examples](examples/ans-1-examples.md).
 
@@ -198,8 +205,8 @@ A linked agent's badge reflects its who-identities by a **read-time join** over 
 ([ANS-0 §8.2](ans-0-identity-anchor.md#82-computed-reads-and-the-visibility-predicate)) — an
 identity rotation or revocation seals exactly one event regardless of how many agents are linked,
 and **no identity operation writes to an agent's event history** (nor the reverse). The agent
-detail/list responses gain a computed, optional `identities[]` array (the current-links view)
-that is never stored on the registration.
+detail response gains a computed, optional `identities[]` array (the current-links view) that is
+never stored on the registration; the list response carries no identities field.
 
 ## 7. Lifecycle operations
 
@@ -209,6 +216,11 @@ that is never stored on the registration.
 | **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | Nothing today (`AGENT_RENEWED` reserved — §6.3) | None |
 | **Identity-certificate rotation** | Key roll on an identity-bearing registration | A fresh `identityCsrPEM` | Issues a new Identity Certificate at the private CA. Additive: the prior certificate remains valid until it expires. No fresh domain-control proof. `ACTIVE` registrations only; a registration created without an Identity CSR is refused (`IDENTITY_CSR_NOT_PERMITTED`, 409) | Nothing | AHP updates any published fingerprint records per ANS-3 |
 | **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists `dnsRecordsToRemove`; the AHP removes them |
+
+One exception to the renewal re-proof: a CSR renewal whose provider order arrives with no challenges (ACME
+authorization reuse inside the provider's validity window) finalizes directly — the re-proof is the
+provider's cached validation rather than a fresh RA-side check. Re-driven verify-acme calls on an
+already-finalizing order likewise skip the artifact check by design.
 
 ### 7.1 Version coexistence
 
@@ -245,17 +257,17 @@ Producer-key expiry and revocation both gate **new** ingest — an expired or re
 Producer-key rotation procedure:
 
 1. Generate the new producer key pair under the RA's key manager. The reference implementation ships a file-based ECDSA P-256 key manager; cloud-KMS adapters slot in at the port boundary.
-2. Register the public key with the TL (`POST /internal/v1/producer-keys`, admin-gated) with `valid_from` set to the rotation cutover time and the required `expires_at` (`valid_from` must precede `expires_at`).
+2. Register the public key with the TL (`POST /internal/v1/producer-keys`, admin-gated). `valid_from` (set to the rotation cutover time) and `expires_at` are both required, and `valid_from` must precede `expires_at`.
 3. Continue signing with the old key until cutover; the RA's signing identity is its configured `{keyId, raId}` attestation pair.
 4. At cutover, switch the RA's configuration to the new key. The old key remains registered and inside its validity window, so in-flight outbox events replaying their persisted signatures still verify at ingest.
-5. Revoke the old key (`DELETE /internal/v1/producer-keys/{keyId}`) once no in-flight events reference it. Revocation stops the key from authorizing new ingest; previously-sealed events remain verifiable through the TL's own attestations and receipts.
+5. Revoke the old key (`DELETE /internal/v1/producer-keys/{key_id}`) once no in-flight events reference it. Revocation stops the key from authorizing new ingest; previously-sealed events remain verifiable through the TL's own attestations and receipts.
 
 ## 9. Conformance
 
 A conformant ANS-1 implementation:
 
 1. Exposes a `RegistrationService` whose register operation accepts the registration request (§4.1) and returns the pending registration with its domain-control challenges.
-2. Verifies domain control before certificate issuance on every registration and renewal — the challenge gate is unconditional.
+2. Verifies domain control before certificate issuance on every registration and renewal — the challenge gate is unconditional, except a renewal order that arrives challenge-free under ACME authorization reuse (§7).
 3. Gates Identity Certificate issuance on the presence of a pending Identity CSR (the verify-acme rule, §4.2), never unconditionally on lifecycle entry.
 4. Enforces global ANSName uniqueness at registration (`ANS_NAME_TAKEN`, 409).
 5. Never generates, holds, or accesses an agent's private keys, and does not persist proven public keys as live state (key transience per [ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)).
@@ -270,7 +282,8 @@ A conformant ANS-1 implementation:
 When a domain transfers ownership, the FQDN persists but the operator does not. Reputation accumulated under
 the old operator must not silently transfer to the new one. The registration model bounds the exposure through
 re-proof: domain control is re-proven at every renewal and every new version registration (the challenge gate
-is unconditional), so a party that no longer controls the domain cannot renew or extend the registration. A
+is unconditional, subject to the ACME authorization-reuse window noted in §7), so a party that no longer
+controls the domain cannot renew or extend the registration. A
 failed re-proof fails that renewal — the registration is not auto-revoked — and the certificates lapse on
 their own schedule, surfacing as the TL's read-time `WARNING`/`EXPIRED` derivation. Revoking a live
 registration is an operator or RA action (`AGENT_REVOKED`); downstream consumers evaluate staleness from the
