@@ -125,11 +125,12 @@ into `dnsRecordsProvisioned[]` for this registration.
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
 | Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | No DNSSEC-validated TLSA record contradicts the expected fingerprint (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
 
-**DNSSEC result.** Each verified record carries the resolver's DNSSEC Authenticated-Data result
-into the sealed event as `dnsRecordsProvisioned[].dnssecVerified` — `true` when the record's query
-returned the AD bit, absent otherwise ([ANS-1 §6.1](ans-1-registration.md#61-agent_registered)). A
-DNSSEC-validated record that contradicts the announced content is an attack signal and blocks
-activation (per the TLSA row above).
+**DNSSEC result.** TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
+result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified` — `true` when the
+record's query returned the AD bit, absent otherwise; TXT lookups never carry the flag
+([ANS-1 §6.1](ans-1-registration.md#61-agent_registered)). A DNSSEC-validated record that
+contradicts the announced content is an attack signal and blocks activation (per the TLSA row
+above).
 
 ## 5. DNS management roles
 
