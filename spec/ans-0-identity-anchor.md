@@ -187,8 +187,8 @@ different key, each header naming that key's `kid`. The RA verifies **every** su
 (§8), against the **one** shared nonce, consumed once. `did:key` and `lei` are single-key.
 
 **Token discipline (normative).** The `nonce` is single-use and bound to its row; default TTL 1
-hour (configurable; ANS-2's 5-minute PriCC (Private-key Confirmation Challenge) recommendation is the floor for high-assurance
-deployments). A proof against a consumed or expired nonce is rejected. A **failed** verify
+hour (configurable; high-assurance deployments SHOULD configure a materially shorter window, on
+the order of minutes). A proof against a consumed or expired nonce is rejected. A **failed** verify
 attempt does **not** consume the nonce — consumption happens only inside the success transaction
 — so a registrant may retry a bad proof until expiry. After expiry, recovery is the **idempotent
 re-add** (§5): re-`POST` the same `value` and receive `202` with a fresh nonce on the **same**
@@ -639,8 +639,8 @@ an ANS-0 amendment. The core sections (§3–§9) do not change. Generic control
 `IDENTIFIER_*` / `PRICC_*` codes defined here; kind-specific failures use the scheme-prefixed
 codes the profile defines (`FQDN_*`, `DID_*`, `LEI_*`). The `PRICC_*` family
 (`PRICC_SIGNATURE_INVALID`, `PRICC_TOKEN_EXPIRED`, `PRICC_TOKEN_ALREADY_USED`) names §3.2
-proof-of-control failures shared by every key-control profile — distinct from ANS-2's
-versioned-issuance PriCC (Private-key Confirmation Challenge).
+proof-of-control failures shared by every key-control profile (PriCC: Private-key Confirmation
+Challenge, the challenge-bound proof of key possession).
 
 **Why a closed, spec-governed set rather than an open plugin API.** The kind set is frozen by
 specification precisely so verifiers can reason about it: a verifier maps the 4-byte `kid` in a
