@@ -21,6 +21,7 @@ ANS-4 specifies:
 - The TL's public verification API surface, including the C2SP checkpoint and tile endpoints.
 - Producer authentication (RA → TL).
 - Receipt distribution: live retrieval.
+- Optional checkpoint anchoring to the Hedera Consensus Service per HCS-14 and HCS-27 (§7).
 
 ANS-4 is **deployment-optional**. Single-tenant deployments with no cross-organizational trust MAY skip it.
 
@@ -182,7 +183,35 @@ for the identity event family. The TL rejects a cross-lane body — an `IDENTITY
 agent route, or an `AGENT_*` payload on the identity route — with `422 INVALID_EVENT`, so the two
 object types never interleave at ingest.
 
-## 7. Conformance
+## 7. Checkpoint anchoring to Hedera (HCS)
+
+The TL's checkpoints MAY additionally be published to the [Hedera Consensus Service](https://hedera.com/consensus-service),
+anchoring the log's state roots in a public, append-only consensus history that neither the TL
+operator nor any single network node can rewrite. Two finalized Hashgraph Online standards define
+the shape:
+
+- **[HCS-27 (Merkle Tree Profile and Proofs)](https://hol.org/docs/standards/hcs-27/merkle-profile/)**
+  defines the checkpoint commitment: the TL publishes periodic Merkle root checkpoints (root hash
+  and tree size) to a designated HCS topic as typed consensus messages. The HCS-27 "Merkle v1"
+  tree profile is the RFC 9162 §2 Merkle Tree Hash — SHA-256 with the `0x00` leaf prefix and
+  `0x01` node prefix — which is exactly the tree this TL already builds (§3), so an on-ledger
+  root verifies directly against the log's tiles with no profile translation.
+- **[HCS-14 (Universal Agent ID)](https://hol.org/docs/standards/hcs-14/)** defines the portable
+  agent identifier (`uaid:` scheme) used when referencing ANS-registered agents across networks;
+  its ANS resolution profile maps UAIDs onto the DNS- and web-published ANS surface.
+
+Only cryptographic commitments go on-ledger: log entries, metadata, and proof bundles remain
+off-ledger with the TL. A verifier checks an anchored checkpoint by fetching the topic message
+from at least two independent HCS mirror nodes, comparing it against the TL's published
+checkpoint byte-for-byte, and validating the TL signature via `/root-keys` (§5.1). The operator
+publishes the HCS topic ID alongside its TL origin documentation; pinning the topic ID to the
+TL's identity is the defense against topic substitution.
+
+**Status.** The HCS-14 and HCS-27 standards are finalized. The open-source reference
+implementation does not yet ship the HCS publishing adapter; it slots in at the checkpoint
+boundary without changing the wire contract of any surface above.
+
+## 8. Conformance
 
 A conformant ANS-4 implementation:
 
@@ -194,21 +223,22 @@ A conformant ANS-4 implementation:
 6. Distributes its verification key via `/root-keys` (§5.1).
 7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header rules of §3.
 
-**Operator policy** (rotation cadence, checkpoint batching window, status-token TTL) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's cadence differs from another deployment's.
+**Operator policy** (rotation cadence, checkpoint batching window, status-token TTL, HCS anchoring cadence) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's cadence differs from another deployment's.
 
-## 8. Security considerations
+## 9. Security considerations
 
-### 8.1 RA / TL collusion
+### 9.1 RA / TL collusion
 
 When the RA and TL are operated by the same entity, that entity could in principle forge events with no
 independent check, because the keys that sign producer signatures and TL checkpoints are under the same
 operator's control. The public checkpoint and tile surface is the mitigation the log itself provides:
 checkpoints are signed, history is retained, and any third party can fetch tiles and verify consistency
 between checkpoints — a rewritten log cannot produce consistent proofs against previously published
-checkpoints. A federated deployment runs the RA and TL under different operators, eliminating collusion as a
-single-entity risk.
+checkpoints. Anchoring checkpoints to the Hedera Consensus Service (§7) strengthens this further: the
+on-ledger consensus history is outside the operator's control entirely. A federated deployment runs the RA
+and TL under different operators, eliminating collusion as a single-entity risk.
 
-### 8.2 Producer-key compromise
+### 9.2 Producer-key compromise
 
 A compromised producer key allows an attacker to submit forged events to the TL. The TL accepts them because
 the signature validates. The overlap-window rotation rule (§6) lets the operator revoke the compromised key
@@ -216,7 +246,7 @@ without disturbing the log: revocation stops new ingest under that key, previous
 verifiable through the TL's own signatures, and the sealed history bounds what the attacker could have
 injected to the compromise window.
 
-### 8.3 Sealed event types
+### 9.3 Sealed event types
 
 The TL records the agent event family — `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`,
 `AGENT_REVOKED` — and the
@@ -231,7 +261,7 @@ indexes, not separate logs.
 
 Non-normative worked examples (sealed envelope, TL badge response, revocation event, producer key registration) live at [`examples/ans-4-examples.md`](examples/ans-4-examples.md).
 
-## 9. References
+## 10. References
 
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). Binding rule, foundational principles.
 - ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Event set, registration aggregate, lifecycle.
@@ -242,4 +272,6 @@ Non-normative worked examples (sealed envelope, TL badge response, revocation ev
 - [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515): JWS.
 - [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052): COSE (binary receipt envelope).
 - [RFC 6962](https://www.rfc-editor.org/rfc/rfc6962): Merkle tree leaf hashing (§3).
+- [HCS-14](https://hol.org/docs/standards/hcs-14/): Universal Agent ID (§7).
+- [HCS-27](https://hol.org/docs/standards/hcs-27/merkle-profile/): Merkle Tree Profile and Proofs — HCS checkpoint anchoring (§7).
 - [C2SP tlog-checkpoint / tlog-tiles](https://c2sp.org/): checkpoint note and tile formats (§5.2).
