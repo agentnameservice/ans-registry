@@ -8,7 +8,7 @@ This file is a pointer. The normative ANS specification is layered across six do
 | ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set |
 | ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | ANSName URI form, Identity Certificate URI SAN binding, mTLS |
 | ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
-| ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, witness profiles |
+| ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, checkpoints and tiles |
 | ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
 
 Per-identifier-kind detail (fqdn, did:web, did:key, lei, and deferred sketches for did:plc / did:ethr / did:ion) lives in the [identity profiles](spec/identity-profiles/) under ANS-0 — adding a kind drops in a profile without changing the ANS-0 core contract.

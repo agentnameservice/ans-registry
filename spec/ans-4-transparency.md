@@ -2,119 +2,123 @@
 
 Status: DRAFT v1.0
 Spec: ANS-4 (Transparency & Receipts)
-Version: 0.1.0
-Date: 2026-05-17
-Audience: implementers building or operating an ANS Transparency Log (TL), AHPs and verifiers consuming SCITT receipts, and witness operators
+Version: 0.2.0
+Date: 2026-07-18
+Audience: implementers building or operating an ANS Transparency Log (TL), and AHPs and verifiers consuming SCITT receipts
 
 ## 1. Scope
 
 ANS-4 specifies how registration **and identity** events flow into an append-only cryptographic
 log that produces verifiable receipts. ANS-4 is part of the ANS notary layer, which records what
 can be cryptographically verified without making judgments about trust. Trust scoring is out of
-scope for ANS and lives in a separate `ti-*` layer set. There is one Merkle tree; agent and
+scope for ANS and lives in the separate Trust Index specification. There is one Merkle tree; agent and
 Verified-Identity events share it, read through per-object indexes (§5.3).
 
 ANS-4 specifies:
 
-- The inner-event JCS canonicalization and the cryptographic envelope (SCITT statement plus receipt).
-- The `TransparencyLog` code-interface contract: append, range query, inclusion proof, witness query.
-- The TL's public verification API surface.
+- The inner-event JCS canonicalization, the sealed envelope, and the leaf-hash rule.
+- The `TransparencyLog` contract: append with producer-signature verification, per-object reads, checkpointing.
+- The TL's public verification API surface, including the C2SP checkpoint and tile endpoints.
 - Producer authentication (RA → TL).
 - Receipt distribution: live retrieval.
-- The witness contract: a profile mechanism by which the log's state roots are anchored to external consensus systems.
 
 ANS-4 is **deployment-optional**. Single-tenant deployments with no cross-organizational trust MAY skip it.
 
 ANS-4 does **not** specify:
 
 - The wire format an RA submits over (HTTPS POST is recommended; the spec is transport-agnostic on this point).
-- Which witness profile to deploy. Witness profiles are operator-choice within the constraint that a multi-operator deployment requires at least one.
 - How verifiers score the freshness of a receipt. Receipt-staleness scoring is out of scope here.
 
 ## 2. Terminology
 
-- **SCITT statement**: the unit the TL accepts and seals. Carries the issuer (anchor URI form), the JCS-canonical inner-event payload, and a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
-- **SCITT receipt**: the proof of inclusion the TL returns. Carries the statement hash, log identifier, Merkle inclusion proof, and a TL signature.
-- **Witness profile**: a normative subsection of this document (§7) specifying how the TL's state roots are anchored to an external consensus system (Hedera, ENS, OpenTimestamps, RFC 6962-style trillian instances).
-- **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing keys (which sign checkpoints and receipts).
-- **Checkpoint**: a signed snapshot of the log's state at a given size. Produced periodically; consumed by witnesses and consistency-proof verifiers.
+- **SCITT statement**: the unit the TL accepts and seals — the JCS-canonical inner-event payload plus a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
+- **Sealed envelope**: the record the TL appends — `{payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status}`, where the outer `signature` is the TL's own attestation. The leaf hash covers the fully signed envelope (§3).
+- **SCITT receipt**: the proof of inclusion the TL returns — a binary COSE_Sign1 carrying the inclusion proof (§5.2).
+- **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing key (which signs checkpoints, receipts, attestations, and status tokens).
+- **Checkpoint**: a C2SP signed note recording the log's size and root hash at a point in time. Produced as batches seal; consumed by consistency-proof verifiers.
 
 ## 3. Cryptographic standards
 
 | Requirement | Standard | Rule |
 | --- | --- | --- |
-| Canonicalization | [JCS (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) | All JSON inner-event payloads MUST be canonicalized before signing or hashing. Without deterministic serialization, two implementations hashing the same logical object produce different results |
+| Canonicalization | [JCS (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) | All JSON payloads MUST be canonicalized before signing or hashing. Without deterministic serialization, two implementations hashing the same logical object produce different results |
 | Signature format | [JWS Detached (RFC 7515 Appendix F)](https://www.rfc-editor.org/rfc/rfc7515) | Payload is not embedded. Signatures are stored in separate fields from the data they sign |
 | Co-located signatures | JWS Detached | When a signature resides in the same JSON object as its data, the signature fields MUST be excluded from the signed payload. The exclusion scope MUST be explicit |
-| Algorithm | ES256 (ECDSA P-256/SHA-256) | Default. Implementations MUST support algorithm agility through the JWS `alg` header |
 | Signature wire format | JWS Compact | `<protected_header>..<signature>` (two dots; empty middle section is the detached payload) |
+| Algorithms | ES256 (ECDSA P-256/SHA-256) | Every TL-produced signature — checkpoint, attestation, receipt, status token — and every producer key is ES256. The JWS layer additionally recognizes RS256 for interoperability (verified if presented, never emitted) and EdDSA on the ANS-0 identity-proof surface |
+| Leaf hash | [RFC 6962 §2.1](https://www.rfc-editor.org/rfc/rfc6962) | `SHA-256(0x00 ‖ JCS(envelope))` over the **fully signed envelope** — including the TL's outer attestation signature. This is the leaf Tessera appends and the hash an offline verifier recomputes when walking an inclusion proof |
 
-Every signature MUST include the following protected headers:
+JWS protected headers: `alg` and `kid` are REQUIRED on every signature; `typ`, `timestamp` (unix
+seconds at signing), and `raid` (RA instance identifier, producer signatures only) are OPTIONAL.
 
-| Header | Value |
-| --- | --- |
-| `alg` | Signing algorithm |
-| `kid` | Key identifier |
-| `typ` | Type indicator (e.g., `JWT`) |
-| `timestamp` | Unix timestamp of signature creation |
-| `raid` | RA instance identifier |
+**TL signing-key topology.** One ECDSA P-256 key drives every outbound TL signature: the C2SP
+checkpoint's primary signature line, the JWS additional-signer line on the same checkpoint, the
+outer envelope attestation on every appended event, SCITT COSE receipts, and status tokens.
+`GET /root-keys` advertises exactly one verification line (§5.1); verifiers map the 4-byte `kid`
+in a receipt's protected header to that key in O(1). The single-key topology is intentional —
+multiple signing keys would force verifiers to maintain a key-rotation strategy that adds no
+security but doubles the implementation burden.
 
 ## 4. The `TransparencyLog` interface
 
-The `TransparencyLog` interface is the protocol contract for ANS-4: append, batched checkpoint, public verification API, witness binding.
+The `TransparencyLog` contract is the protocol surface for ANS-4: append, per-object reads, and checkpointing.
 
-`append` is the primary write operation. The TL validates the producer signature on the statement, sequences the statement into the next available log position, batches with other statements arriving in the same window, signs a checkpoint that includes the new tree root, and returns a SCITTReceipt covering the inclusion proof for the appended statement.
+`append` is the write operation. The RA POSTs the raw inner-event body with its producer signature in the
+`X-Signature` header (a detached JWS; request bodies are capped at 256 KiB). The TL validates the signature
+against the producer-key registry (§6), wraps the event in a sealed envelope, sequences it into the next
+available log position — batching with other events arriving in the same window — and signs a checkpoint
+covering the new tree root as each batch seals. The append response is `200` with the assigned `logId`; the TL
+**dedupes by content hash**, so a retried submission of the exact same signed bytes lands on the same leaf
+rather than a duplicate. Receipts are retrieved afterward from the per-object receipt endpoints.
 
-`range` is the primary read operation for downstream consumers (Discovery Services, federated discovery catalogs, scoring services). Pagination is index-based; `start` is an absolute leaf index, `count` bounds the response size.
+Per-object reads serve one agent's or identity's sealed state: the badge (latest sealed event plus inclusion proof and computed status), the audit history (every event on the object's stream, each with its own proof), the COSE receipt, and — for agents — a status token (§5.2).
 
-`proofFor` is the lookup-by-statement-hash variant. Verifiers that have a SCITT statement and want to confirm inclusion query this endpoint and validate the returned proof against the latest checkpoint.
-
-`witnesses` returns the most recent attestation from each configured witness profile, plus the checkpoint each attestation was made against.
+Bulk reads are the checkpoint endpoints plus the static C2SP tile surface (§5.2): consumers that want the whole log walk the tiles; there is no separate paginated range API.
 
 ## 5. Public verification API
 
-A conforming TL MUST expose the following REST API surface (HTTPS, JSON unless noted; binary endpoints serve `application/cbor` or COSE):
+A conforming TL MUST expose the following REST API surface (HTTPS; JSON unless noted):
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /v1/agents/{agentId}` | Sealed event, TL signature, and inclusion proof for one agent (HTML or JSON) |
-| `GET /v1/agents/{agentId}/audit` | Paginated history of all lifecycle events for one agent, each with its own proof |
-| `GET /v1/log/checkpoint` | Latest signed checkpoint: log size, root hash, and TL signature |
+| `GET /v1/agents/{agentId}` | Badge: sealed event, TL attestation, inclusion proof, and computed status for one agent |
+| `GET /v1/agents/{agentId}/audit` | Paginated history of the agent's events, each with its own proof |
+| `GET /v1/agents/{agentId}/receipt` | SCITT COSE receipt for the agent's leaf (binary COSE) |
+| `GET /v1/agents/{agentId}/status-token` | Short-lived signed status token (`application/ans-status-token+cbor`, §5.2) |
+| `GET /v1/log/checkpoint` | Latest signed checkpoint (JSON view) |
 | `GET /v1/log/checkpoint/history` | Checkpoint history with pagination, for consistency-proof verification |
 | `GET /v1/log/schema/{version}` | JSON Schema definition for a given event schema version |
-| `GET /root-keys` | TL verification keys, including historical keys for older proofs |
-| `GET /v1/witnesses` | Witness profile attestations (per the `witnesses()` operation defined above) |
+| `GET /root-keys` | The TL verification line (§5.1, text/plain) |
+| `GET /checkpoint` | The raw C2SP signed checkpoint note (static tile surface) |
+| `GET /tile/*` | C2SP tlog-tiles: Merkle tree tiles and entry bundles for bulk verification |
 
-Implementations MAY expose additional endpoints specific to their proof format. Verification MUST NOT require access to producer public keys, authentication for read-only operations, or knowledge of RA implementation details.
+Read-only endpoints require no authentication. Verification MUST NOT require access to producer public keys or knowledge of RA implementation details: every proof verifies against the TL's own published key.
 
 ### 5.1 Key distribution
 
-The TL MUST distribute verification keys via the `GET /root-keys` endpoint so any verifier can check root signatures without contacting the RA. Historical keys SHOULD be retained; without them, proofs signed before a key rotation become unverifiable.
+The TL distributes its verification key via `GET /root-keys` as a single sumdb-note verifier line
+(text/plain), so any verifier can check checkpoint, receipt, attestation, and status-token
+signatures without contacting the RA. The single line reflects the single-key topology (§3); the
+4-byte key hash embedded in the line is the same value receipts carry as the COSE `kid`.
 
-### 5.2 ANS-BADGE attestation type identifier
+### 5.2 Receipts, status tokens, checkpoints
 
-Discovery surfaces (Agent Finder catalogs, search indices, peer agent runtimes) point at the TL badge endpoint using the `ANS-BADGE` attestation-type identifier:
+**COSE receipt profile.** A receipt is a COSE_Sign1 (RFC 9052): protected header `{alg: ES256,
+kid: <4-byte SPKI key hash>, vds: 1 (RFC 9162 SHA-256), CWT claims: {iss, iat}}`; unprotected
+header `{396 (verifiable-data-structure proofs): {-1: treeSize, -2: leafIndex, -3: inclusion
+path, -4: rootHash}}`. The signature covers the leaf; a verifier recomputes the leaf hash from
+the envelope (§3) and walks the path to the signed root.
 
-**Attestation fields.** `type` is always `ANS-BADGE`. `issuer` is the TL's DID (typically `did:web:<tl-host>`). `uri` is the TL badge endpoint. `evidenceHash` is the SHA-256 fingerprint of the agent's Server Certificate; a poisoned redirect to an attacker's lookalike TL endpoint cannot also produce a matching `evidenceHash` against the genuine agent's certificate.
+**Status tokens.** `GET /v1/agents/{agentId}/status-token` returns a short-lived signed
+assertion of the agent's computed status (`application/ans-status-token+cbor`; default TTL one
+hour), signed by the same TL key. Verifiers that need a fresh liveness signal without walking
+proofs consume this; verifiers MUST check the token's expiry themselves.
 
-**Verification procedure for an `ANS-BADGE` consumer.** A discovery client consuming an attestation MUST:
-
-1. Issue an HTTPS GET against `ANS-BADGE.uri`; validate the response is a TL badge response per the public verification API above.
-2. Resolve `ANS-BADGE.issuer`; retrieve the TL's signing key; validate the badge response's signature.
-3. Walk the badge's Merkle inclusion proof; confirm the leaf hash recovers a root the TL has signed.
-4. **Authority matching.** Confirm the `agentHost` (or the DID's resolved domain) inside the sealed event payload matches the authority of the consumer's target URL. A poisoned entry whose target points at the legitimate domain but whose `ANS-BADGE.uri` resolves to a registration for `attacker.example.com` fails closed here.
-5. **Evidence hash check.** Open a TLS connection to the agent's target URL; extract the Server Certificate; compute its SHA-256 fingerprint; compare against `ANS-BADGE.evidenceHash`. A match confirms the running agent is the agent the attestation points at.
-
-A failure at any step is a poisoning finding; the consumer SHOULD record the finding and SHOULD NOT proceed with delegation. A consumer that skips steps 4 or 5 is vulnerable to poisoning even when the badge itself is valid.
-
-```json
-{
-  "type": "ANS-BADGE",
-  "issuer": "did:web:transparency-log.example.com",
-  "uri": "https://transparency-log.example.com/v1/agents/{agentId}",
-  "evidenceHash": "SHA256:..."
-}
-```
+**Checkpoints and tiles.** The raw checkpoint at `GET /checkpoint` is a C2SP signed note. Its
+primary signature line carries `<4-byte keyhash> ‖ <ASN.1 DER ECDSA signature over SHA-256(note
+body)>`, base64-encoded per the note format; a standard-JWS additional-signer line is appended to
+the same note by the same key. The `GET /tile/*` surface serves the Merkle tree in C2SP
+tlog-tiles form for bulk and offline verification.
 
 ### 5.3 Identity surface
 
@@ -156,130 +160,63 @@ offline-evidence hop); only the ingest lane (§6) requires the producer credenti
 
 ## 6. Producer authentication
 
-The TL MUST verify that each event came from an authorized RA instance before sealing it. Each RA instance registers a public key with the TL and signs every submitted event; the TL validates the signature before accepting the event.
+The TL MUST verify that each event came from an authorized RA instance before sealing it. Every submitted event carries a detached-JWS producer signature in the `X-Signature` header; the TL resolves the `(raid, kid)` pair from the signature's protected header against its producer-key registry and rejects an unknown, expired, or revoked key.
 
-Producer-key registration sequence:
+Producer-key registration:
 
-1. RA generates a key pair inside a secure key store it controls (the choice of HSM, cloud KMS, hardware enclave, or software keystore with OS-level isolation is implementation; the spec requires only that the private key never leave the RA instance).
-2. RA submits the public key with `validFrom` and an algorithm identifier to the TL's producer-key registration endpoint.
-3. TL acknowledges with a `keyId` and stores the key in its producer-key registry.
-4. RA includes `keyId` in the protected header of every subsequent statement signature.
+1. The operator generates the producer key pair under the RA's key manager; the private key never leaves the RA instance.
+2. The operator registers the public key with the TL (`POST /internal/v1/producer-keys`, admin-gated), supplying the client-chosen `key_id`, the `ra_id`, `public_key_pem` (SPKI), `algorithm` (`ES256`), and the required `valid_from` and `expires_at` window (`valid_from` must precede `expires_at`). A duplicate `key_id` is rejected (409). Bootstrap seeding via configuration is equivalent.
+3. The TL stores the key under `(ra_id, key_id)` and returns the `key_id`, `status`, and a `fingerprint` of the registered key.
+4. The RA carries the `kid` and `raid` in the protected header of every statement signature.
 
-Rotation uses an overlap window: new keys are registered with future `validFrom` dates; both old and new remain active during the transition. Producer private keys never leave the RA instance. Historical signatures remain valid after key expiration; a key whose `validFrom` window has elapsed cannot sign new events but its prior signatures continue to verify.
-
-A revocation of a producer key invalidates the key's authority for new signatures; previously-sealed events remain verifiable through the TL's preserved key history.
+Rotation uses an overlap window: new keys are registered with future `valid_from` dates; both old and new
+remain active during the transition. Expiry and revocation both gate **new** ingest — an expired or revoked
+key can no longer sign events the TL will accept. Already-sealed events are unaffected: the log is
+append-only, and verifiers check the TL's own attestations, receipts, and checkpoints against `/root-keys`,
+never producer keys.
 
 Agent and identity events ride the **same** producer lane (the same producer-key registry and
-signature check) through **separate** ingest routes: `POST /v1/internal/agents/event` for the
-agent event family and `POST /v1/internal/identities/event` for the identity event family. The TL
-rejects a cross-lane body — an `IDENTITY_*` payload on the agent route, or an `AGENT_*` payload on
-the identity route — with `422 INVALID_EVENT`, so the two object types never interleave at ingest.
+signature check) through **separate** ingest routes: `POST /v1/internal/agents/event` and `POST
+/v2/internal/agents/event` for the agent event families and `POST /v1/internal/identities/event`
+for the identity event family. The TL rejects a cross-lane body — an `IDENTITY_*` payload on an
+agent route, or an `AGENT_*` payload on the identity route — with `422 INVALID_EVENT`, so the two
+object types never interleave at ingest.
 
-## 7. Witness profiles
-
-The TL's state roots are anchored to external consensus systems through witness profiles. Multiple witnesses may attest to the same TL state in parallel; verifiers compose with whichever witnesses they trust.
-
-ANS-4 admits four witness profiles in v0.1.0. The profile identifier carried in `WitnessAttestation.witnessProfile` is the suffixed form below (e.g., `4.A-hedera`).
-
-| Profile | Backend | Status |
-| --- | --- | --- |
-| 4.A | Hedera Consensus Service (HCS-27 Merkle profile) | Active (reference deployment) |
-| 4.B | ENS / ENSIP-25 (Ethereum Name Service anchoring) | Reserved (ENS partnership in design) |
-| 4.C | OpenTimestamps (Bitcoin-anchored timestamps) | Active |
-| 4.D | RFC 6962 / Trillian (classic CT-style log anchoring) | Reserved |
-
-A Federated deployment MUST run at least one Active witness profile.
-
-### 7.A Hedera Consensus Service (Status: Active, reference deployment)
-
-Profile identifier `4.A-hedera`. Anchors the TL's state roots to the [Hedera Consensus Service (HCS)](https://hedera.com/consensus-service) per the [HCS-27 Merkle Tree Checkpoint standard](https://hashgraphonline.com/) `[DRAFT:HCS-27]`. The TL emits checkpoints to a designated HCS topic; the topic's append-only consensus history neither the TL operator nor any single Hedera node can rewrite.
-
-**Attestation shape.** `logCheckpoint` carries a [HCS-27 Merkle Tree Checkpoint](https://hashgraphonline.com/) record (tree size, root hash, TL signature). `externalProof` is the Hedera consensus receipt (`TransactionRecord` with topic ID, sequence number, consensus timestamp). `attestedAt` is the consensus timestamp from the HCS receipt.
-
-**Cadence.** One attestation per TL batch (5-second window in the reference deployment). Operators MAY configure a coarser cadence when HCS topic costs dominate; the cadence MUST be documented through `GET /v1/witnesses`.
-
-**Verification.** Parse `externalProof` as a Hedera `TransactionRecord`. Query the HCS mirror node for the message at the recovered topic ID and sequence number; confirm the message body matches `logCheckpoint` byte-for-byte. Validate `logCheckpoint`'s signature against the TL's public key. Validate the HCS topic ID matches the topic the TL operator publishes through the signed `GET /v1/witnesses`
-endpoint. Implementations MUST configure at least two HCS mirror nodes to avoid single-mirror dependency.
-
-**Security.** Topic substitution is the primary attack; defense is the signed `GET /v1/witnesses` distribution that ties the topic ID to the TL's identity. A compromise of Hedera's consensus would invalidate every attestation against an HCS topic; ANS-4's general defense is parallel witnesses. HCS topic write-rate limits may force coarser cadence at very high event volumes; verifiers SHOULD accept
-witness gaps up to the operator's published cadence.
-
-### 7.B ENS / ENSIP-25 (Status: Reserved)
-
-Profile identifier `4.B-ens`. Reserved for an ENS-anchored witness per [ENSIP-25](https://docs.ens.domains/ensip/25); spec text pending.
-
-### 7.C OpenTimestamps (Status: Active)
-
-Profile identifier `4.C-opentimestamps`. Anchors the TL's state roots to the Bitcoin blockchain through the [OpenTimestamps protocol](https://opentimestamps.org/). The TL submits checkpoints to an OpenTimestamps calendar service, which aggregates and commits them to Bitcoin. The Bitcoin block confirming the OpenTimestamps commitment provides a backend that no party can rewrite without controlling
-Bitcoin's consensus.
-
-**Attestation shape.** `logCheckpoint` carries the TL state. `externalProof` is an OpenTimestamps proof file (`.ots` format) covering the SHA-256 hash of `logCheckpoint`; the proof carries the calendar-service signatures plus the Bitcoin Merkle path. `attestedAt` is the Bitcoin block timestamp of the confirming block.
-
-**Cadence.** OpenTimestamps batching makes per-event attestation impractical; the calendar service aggregates and commits one Merkle root per ~10-minute Bitcoin block. A reasonable witness cadence is one attestation per hour. Operators MAY configure sparser cadence (per day, per week) for low-volume deployments. Cadence MUST be documented through `GET /v1/witnesses`.
-
-**Confirmation depth.** A Bitcoin block carrying an OpenTimestamps commitment is provisional until enough subsequent blocks confirm it. The reference deployment treats commitments as final after 6 confirmations (~1 hour). The depth MUST be documented through `GET /v1/witnesses`; verifiers handling high-stakes flows MAY require deeper confirmations.
-
-**Verification.** Parse `externalProof` as an OpenTimestamps proof file. Walk the proof's calendar signatures and Merkle path to recover the Bitcoin block hash. Query a Bitcoin node (or configured mirror set) for the block; confirm the OpenTimestamps commitment is in the block's Merkle tree. Validate `logCheckpoint`'s signature against the TL's public key. Validate the SHA-256 hash of
-`logCheckpoint` matches the leaf the proof commits to. Validate the Bitcoin block has at least the documented confirmation depth.
-
-**Security.** A calendar that lies cannot forge a Bitcoin block (the verifier-side Merkle check catches it); a calendar that drops submissions silently is a denial-of-service against the witness, not a forgery. Defense: configure multiple calendars in parallel and treat any one calendar's commitment as sufficient. A Bitcoin reorganization that rolls back the block invalidates the attestation until
-it lands again; the documented confirmation depth bounds the risk. Bitcoin-confirmation lag (~1 hour at default depth) means 4.C is not available immediately after a checkpoint; high-stakes flows requiring fresh attestations within minutes SHOULD also configure 4.A.
-
-### 7.D RFC 6962 / Trillian (Status: Reserved)
-
-Profile identifier `4.D-trillian`. Reserved for an RFC 6962-style cross-witness arrangement using independent Merkle tree logs; spec text pending. References: [RFC 6962](https://www.rfc-editor.org/rfc/rfc6962), [Trillian](https://github.com/google/trillian).
-
-### 7.1 Witness binding interface
-
-Each witness profile registers through a witness-binding interface that takes a TL checkpoint and produces an external attestation. The binding interface is profile-agnostic:
-
-```typescript
-interface WitnessBinding {
-  profileId: string;
-  attest(checkpoint: Uint8Array): Promise<WitnessAttestation>;
-  verify(attestation: WitnessAttestation, checkpoint: Uint8Array): Promise<boolean>;
-}
-```
-
-The profile document specifies the `externalProof` shape, the verification procedure, and the cadence at which the witness produces fresh attestations.
-
-## 8. Conformance
+## 7. Conformance
 
 A conformant ANS-4 implementation:
 
-1. Exposes a `TransparencyLog` whose `append` accepts SCITT statements with verified producer signatures.
-2. Returns SCITT receipts matching the receipt format defined above with binary COSE inclusion proofs.
-3. Exposes the verification API over HTTPS with no authentication required for read-only endpoints.
-4. Implements producer authentication with overlap-window key rotation.
-5. Accepts at least one witness profile if the deployment involves cross-organizational verification.
-6. Distributes verification keys via `/root-keys` with historical keys retained.
-7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header set defined in the cryptographic-standards section above.
+1. Accepts statements only with verified producer signatures (§6) and seals each into a leaf per the leaf-hash rule (§3).
+2. Dedupes appends by content hash, so byte-identical retries land on the same leaf.
+3. Returns SCITT receipts matching the COSE profile in §5.2.
+4. Exposes the verification API (§5) over HTTPS with no authentication on read-only endpoints.
+5. Implements producer authentication with overlap-window key rotation (§6).
+6. Distributes its verification key via `/root-keys` (§5.1).
+7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header rules of §3.
 
+**Operator policy** (rotation cadence, checkpoint batching window, status-token TTL) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's cadence differs from another deployment's.
 
-**Optional surface.** Which witness profile to deploy is operator choice within the multi-operator-deployment constraint; SCITT alternative profiles (`draft-ietf-scitt-architecture` admits implementation choices the spec leaves open); TL operator policy (rotation cadence, checkpoint frequency, batching window). A conforming verifier MUST NOT downgrade integrity scoring solely because an operator
-chose witness profile 4.A over 4.C (or vice versa), and MUST NOT reject a receipt because the operator's checkpoint cadence differs from another deployment's.
+## 8. Security considerations
 
-## 9. Security considerations
+### 8.1 RA / TL collusion
 
-### 9.1 RA / TL collusion
+When the RA and TL are operated by the same entity, that entity could in principle forge events with no
+independent check, because the keys that sign producer signatures and TL checkpoints are under the same
+operator's control. The public checkpoint and tile surface is the mitigation the log itself provides:
+checkpoints are signed, history is retained, and any third party can fetch tiles and verify consistency
+between checkpoints — a rewritten log cannot produce consistent proofs against previously published
+checkpoints. A federated deployment runs the RA and TL under different operators, eliminating collusion as a
+single-entity risk.
 
-When the RA and TL are operated by the same entity, that entity could in principle forge events with no independent check, because the keys that sign producer signatures and TL checkpoints are under the same operator's control. Witness profiles are the primary mitigation: a witness's external attestation against the TL state cannot be forged without compromising the witness's backend (Hedera,
-OpenTimestamps, etc.) too. A private audit trail inside the registry's own infrastructure cannot be checked by third parties; a multi-operator log with witness-based monitoring can.
+### 8.2 Producer-key compromise
 
-A federated deployment runs the RA and TL under different operators, eliminating collusion as a single-entity risk.
+A compromised producer key allows an attacker to submit forged events to the TL. The TL accepts them because
+the signature validates. The overlap-window rotation rule (§6) lets the operator revoke the compromised key
+without disturbing the log: revocation stops new ingest under that key, previously-sealed events remain
+verifiable through the TL's own signatures, and the sealed history bounds what the attacker could have
+injected to the compromise window.
 
-### 9.2 Producer-key compromise
-
-A compromised producer key allows an attacker to submit forged events to the TL. The TL accepts them because the signature validates. Mitigations:
-
-- The overlap-window rotation rule above lets the operator revoke the compromised key without breaking historical signatures.
-- Witness attestation cadence: a witness attestation made before the compromise becomes a recovery point that lets verifiers know what state was sealed pre-compromise.
-
-### 9.3 Witness backend compromise
-
-A compromised witness backend (Hedera consensus topic operator collusion, OpenTimestamps timestamp authority compromise) allows the witness's attestations to be forged. A deployment using only one witness profile inherits that backend's compromise surface. Defense: configure two or more witness profiles and treat divergent attestations as a finding.
-
-### 9.4 Sealed event types
+### 8.3 Sealed event types
 
 The TL records the agent event family — `AGENT_REGISTERED`, `AGENT_RENEWED`, `AGENT_DEPRECATED`,
 `AGENT_REVOKED` — and the
@@ -292,18 +229,17 @@ indexes, not separate logs.
 
 ## Appendix A: Worked examples
 
-Non-normative worked examples (Pub/Sub envelope, TL badge response, revocation event, producer key registration) live at [`examples/ans-4-examples.md`](examples/ans-4-examples.md).
+Non-normative worked examples (sealed envelope, TL badge response, revocation event, producer key registration) live at [`examples/ans-4-examples.md`](examples/ans-4-examples.md).
 
-## 10. References
+## 9. References
 
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md). Binding rule, foundational principles.
 - ANS-1 specification: [`ans-1-registration.md`](ans-1-registration.md). Event set, registration aggregate, lifecycle.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md). `_ans-badge` record carrying the TL endpoint pointer.
 - ANS-5 specification: [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md). Integrity Monitor operating principles, verification procedure consuming TL receipts.
-- Witness profiles defined inline above (Hedera Consensus Service, ENS Reserved, OpenTimestamps, Trillian Reserved).
 - [draft-ietf-scitt-architecture](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/): SCITT Transparency Service.
-- [RFC 9943](https://www.rfc-editor.org/rfc/rfc9943): SCITT (informational reference; consult `draft-ietf-scitt-architecture` for the in-progress normative shape).
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785): JCS canonicalization.
 - [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515): JWS.
 - [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052): COSE (binary receipt envelope).
-- [RFC 6962](https://www.rfc-editor.org/rfc/rfc6962): Certificate Transparency (witness profile 4.D reference).
+- [RFC 6962](https://www.rfc-editor.org/rfc/rfc6962): Merkle tree leaf hashing (§3).
+- [C2SP tlog-checkpoint / tlog-tiles](https://c2sp.org/): checkpoint note and tile formats (§5.2).

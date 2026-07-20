@@ -283,7 +283,7 @@ nameserver, or proprietary lookup channel is permitted. Public discoverability i
 requirement because:
 
 - Verifiers MUST be able to prove the records exist without special access to the domain owner's infrastructure.
-- Attestation by independent witnesses (ANS-4 profiles) requires the witness to query the same DNS zone any other verifier would use.
+- Independent verification (ANS-5 monitors, third-party verifiers) requires querying the same DNS zone any other verifier would use.
 - DNSSEC validation is only meaningful when all verifiers resolve against the same chain of trust.
 
 An implementation that publishes DNS records only to a private zone, requires authentication to
