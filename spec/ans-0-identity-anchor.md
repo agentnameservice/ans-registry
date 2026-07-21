@@ -50,7 +50,7 @@ ANS-0 does **not** specify:
 - The per-kind resolution, control-proof, and validation mechanics. Each kind has its own
   **identity profile** under [`identity-profiles/`](identity-profiles/) (§10).
 - How an agent registration is created, renewed, or revoked. That is [ANS-1](ans-1-registration.md).
-- The internal mechanics of the Transparency Log (Merkle structure, SCITT receipts, witnesses).
+- The internal mechanics of the Transparency Log (Merkle structure, SCITT receipts, checkpoints).
   That is [ANS-4](ans-4-transparency.md); §8 specifies only the identity-facing surface.
 - How identities and anchors are monitored over time. That is [ANS-5](ans-5-integrity-monitoring.md).
 - How the system scores agents or recommends trust. Trust scoring is a separate consumer of ANS

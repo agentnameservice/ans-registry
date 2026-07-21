@@ -305,7 +305,7 @@ Non-normative worked examples (registration request, event payloads) live at [`e
 - ANS-0 specification: [`ans-0-identity-anchor.md`](ans-0-identity-anchor.md) — the proof-of-control gate, the Verified Identity object, identity links, and the [identity profiles](identity-profiles/).
 - ANS-2 specification: [`ans-2-versioned-naming.md`](ans-2-versioned-naming.md) — ANSName form, Identity Certificate binding.
 - ANS-3 specification: [`ans-3-dns-publication.md`](ans-3-dns-publication.md) — DNS record emission per registration.
-- ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md) — TL append, receipt, witness profiles.
+- ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md) — TL append, receipt.
 - ANS-5 specification: [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md) — verification worker contract.
 - [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123): Host requirements (FQDN syntax).
 - [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280): X.509 (revocation reason codes).
