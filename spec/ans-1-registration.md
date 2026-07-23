@@ -66,7 +66,7 @@ The AHP submits a registration request:
 | | per-endpoint `documentationUrl` | No | Developer documentation |
 | | per-endpoint `functions` | No | Function declarations: `id`, `name`, optional `tags` |
 | | per-endpoint `transports` | No | `STREAMABLE_HTTP`, `SSE`, `JSON_RPC`, `GRPC`, `REST`, `HTTP` |
-| **Discovery** | `discoveryProfiles` | No | The DNS record families the RA emits for this registration, per [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles). Defaults to `ANS_TXT` |
+| **Discovery** | `discoveryProfiles` | No | The DNS record families the RA emits for this registration, per [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles). Defaults to `ANS_DNSAID` |
 | **Certificates** | `identityCsrPEM` | No | CSR for the Identity Certificate. When omitted, the agent registers without one and cannot add one later (§7.2) |
 | | `serverCsrPEM` | Conditional | CSR for the RA-issued Server Certificate |
 | | `serverCertificatePEM` (+ optional `serverCertificateChainPEM`) | Conditional | BYOC Server Certificate. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present |

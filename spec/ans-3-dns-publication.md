@@ -14,11 +14,11 @@ families carried on the registration as `discoveryProfiles`. The bundled set in 
 profiles, each defined by one document under [`discovery-profiles/`](discovery-profiles/):
 
 - **`ANS_TXT`** (the [ans-txt profile](discovery-profiles/ans-txt.md)) — the original `_ans` TXT
-  family plus an HTTPS RR. The **default**, and the family the V1 lane is pinned to. Widely deployed;
-  supported indefinitely.
+  family plus an HTTPS RR. **Opt-in** on the V2 lane, and the family the V1 lane is pinned to. Widely
+  deployed; supported indefinitely.
 - **`ANS_DNSAID`** (the [ans-dnsaid profile](discovery-profiles/ans-dnsaid.md)) — a DNS-AID-aligned
   SVCB row per protocol endpoint at the bare FQDN, per [RFC 9460](https://www.rfc-editor.org/rfc/rfc9460.html).
-  **Opt-in**, while the DNS-AID-aligned shape is brought to broad conformance.
+  The **default**: applied when a registration omits `discoveryProfiles`.
 
 The core contract here never changes when a profile is added, amended, or retired; per-profile wire
 detail lives in the profile documents. That split is the point of [§6](#6-discovery-profiles).
@@ -84,8 +84,8 @@ continue to follow the A, AAAA, or CNAME.
 
 | Record | Label | Type | Profile | Purpose | Required |
 | --- | --- | --- | --- | --- | --- |
-| Discovery (`_ans` TXT) | `_ans.{agentHost}` | TXT | `ANS_TXT` (default) | One per endpoint: protocol token + endpoint URL ([ans-txt](discovery-profiles/ans-txt.md)) | Yes |
-| Discovery (SVCB) | `{agentHost}` | SVCB | `ANS_DNSAID` (opt-in) | One per endpoint: DNS-AID SvcParams ([ans-dnsaid](discovery-profiles/ans-dnsaid.md)) | Yes (No in the `ANS_TXT` union, §6.4) |
+| Discovery (`_ans` TXT) | `_ans.{agentHost}` | TXT | `ANS_TXT` (opt-in) | One per endpoint: protocol token + endpoint URL ([ans-txt](discovery-profiles/ans-txt.md)) | Yes |
+| Discovery (SVCB) | `{agentHost}` | SVCB | `ANS_DNSAID` (default) | One per endpoint: DNS-AID SvcParams ([ans-dnsaid](discovery-profiles/ans-dnsaid.md)) | Yes (No in the `ANS_TXT` union, §6.4) |
 | Connection hint (HTTPS RR) | `{agentHost}` | HTTPS | `ANS_TXT` | `1 . alpn=h2` service binding | No (CNAME at apex precludes it) |
 | Badge | `_ans-badge.{agentHost}` | TXT | family (every profile) | TL badge URL for verification (§6.3) | Yes |
 | Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate fingerprint (`3 0 1`, selector 0); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
@@ -148,13 +148,14 @@ skips the apex record; CNAME flattening by the DNS provider avoids this restrict
 ## 6. Discovery profiles
 
 A registration carries a **set** of discovery profiles in `discoveryProfiles`. Each profile is one
-DNS record family; the bundled set is `ANS_TXT` (default) and `ANS_DNSAID` (opt-in). New families
+DNS record family; the bundled set is `ANS_DNSAID` (default) and `ANS_TXT` (opt-in). New families
 plug in as additional `ProfileEmitter` adapters without changing the core contract or the wire.
 
 `discoveryProfiles` is **set semantics**: when omitted or sent as an empty array it normalizes to
-the default `["ANS_TXT"]`; the V1 lane is pinned to `["ANS_TXT"]` regardless of request; an operator
-opts into `ANS_DNSAID` explicitly, alone or in the `["ANS_DNSAID", "ANS_TXT"]` transition union.
-Request order carries no meaning — emission order is the registry's wiring order (§6.4).
+the default `["ANS_DNSAID"]`; the V1 lane never consults the default and is pinned to `["ANS_TXT"]`
+regardless of request; an operator opts into `ANS_TXT` explicitly, alone or in the
+`["ANS_DNSAID", "ANS_TXT"]` transition union. Request order carries no meaning — emission order is
+the registry's wiring order (§6.4).
 
 ### 6.1 The discovery-profile registry
 
@@ -163,13 +164,15 @@ mirrors it.
 
 | Profile | Document | Requirement | Discovery records | Status |
 | --- | --- | --- | --- | --- |
-| `ANS_TXT` | [discovery-profiles/ans-txt.md](discovery-profiles/ans-txt.md) | Default | `_ans` TXT (one per endpoint) + an HTTPS RR at the FQDN | Active |
-| `ANS_DNSAID` | [discovery-profiles/ans-dnsaid.md](discovery-profiles/ans-dnsaid.md) | Optional (opt-in) | SVCB (one per endpoint) at the FQDN, DNS-AID SvcParams | Active |
+| `ANS_TXT` | [discovery-profiles/ans-txt.md](discovery-profiles/ans-txt.md) | Optional (opt-in) | `_ans` TXT (one per endpoint) + an HTTPS RR at the FQDN | Active |
+| `ANS_DNSAID` | [discovery-profiles/ans-dnsaid.md](discovery-profiles/ans-dnsaid.md) | Default | SVCB (one per endpoint) at the FQDN, DNS-AID SvcParams | Active |
 
 **Status meanings.** **Active** — wired, tested, emitting real records an operator publishes and the
 RA verifies at verify-dns. **Default / Opt-in** is the requirement axis, not the status: both
-profiles are Active; `ANS_TXT` is the default set and `ANS_DNSAID` is opt-in (the operator must name
-it) while the DNS-AID-aligned SVCB shape is brought to broad conformance.
+profiles are Active; `ANS_DNSAID` is the default set now that the DNS-AID-aligned SVCB shape is at
+conformance, and `ANS_TXT` is opt-in (the operator must name it) — supported indefinitely for
+operators whose zone-edit tooling targets `_ans.{fqdn}`. Opt-in is a requirement statement, not a
+deprecation signal.
 
 ### 6.2 The profile template
 
@@ -217,7 +220,7 @@ The RA composes `dnsRecordsProvisioned[]` by walking the registry:
 
 1. **Resolve the set.** Filter `reg.discoveryProfiles` to the profiles the registry has wired.
    Empty after filtering (the field was omitted, or every entry was unknown to the registry)
-   normalizes to the default `["ANS_TXT"]`. An unknown stored profile is skipped with a WARN; an
+   normalizes to the default `["ANS_DNSAID"]`. An unknown stored profile is skipped with a WARN; an
    all-unknown request falls back to the default with a distinct WARN so it is not mistaken for an
    operator zone error at verify-dns.
 2. **Walk in wiring order.** Iterate the registry's `IDs()` (the bundled wiring is
@@ -232,8 +235,9 @@ The RA composes `dnsRecordsProvisioned[]` by walking the registry:
    TLSA]`; this pins the TL `dnsRecordsProvisioned[]` canonical bytes.
 5. **Required-flag transition.** SVCB rows arrive from the `ANS_DNSAID` adapter with
    `Required=true`. When `ANS_TXT` is also in the resolved set, every SVCB row is flipped to
-   `Required=false`: during the transition the legacy `_ans` TXT family carries the operator's
-   required signal and SVCB rides along as optional.
+   `Required=false`: in the transition union the `_ans` TXT family carries the operator's
+   required signal and SVCB rides along as optional — SVCB presence is only enforced for
+   sole-`ANS_DNSAID` registrations.
 
 **Validation.** Each `discoveryProfiles` element MUST be a valid `DiscoveryProfile`; an unrecognized
 value is rejected at the API boundary with `422 INVALID_DISCOVERY_PROFILE`. Duplicate elements are
@@ -315,9 +319,10 @@ A conformant ANS-3 implementation:
 
 1. Exposes one or more `ProfileEmitter`s composed through a `ProfileRegistry`; each `Records(reg)`
    is a pure function over the registration aggregate, and the RA composes them per the rules in §6.4.
-2. Defaults `discoveryProfiles` to `["ANS_TXT"]` when the field is omitted or empty, pins the V1 lane
-   to `["ANS_TXT"]`, treats `ANS_DNSAID` as opt-in, and supports the `["ANS_DNSAID", "ANS_TXT"]`
-   union. All paths are conformant; `ANS_TXT` is the default.
+2. Defaults `discoveryProfiles` to `["ANS_DNSAID"]` when the field is omitted or empty, pins the V1
+   lane to `["ANS_TXT"]` (the V1 lane never consults the default), treats `ANS_TXT` as opt-in, and
+   supports the `["ANS_DNSAID", "ANS_TXT"]` union. All paths are conformant; `ANS_DNSAID` is the
+   default.
 3. Runs the activation validations (§4) before transitioning a registration from `PENDING_DNS` to
    `ACTIVE`.
 4. Emits the family trust records (§6.3): the `_ans-badge` TXT (`Required`) and one Server DANE TLSA

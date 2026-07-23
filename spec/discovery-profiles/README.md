@@ -12,14 +12,15 @@ status is the ANS-3 table; this page is a convenience map.
 
 | Profile | Document | Requirement | Discovery records | Status |
 | --- | --- | --- | --- | --- |
-| `ANS_TXT` | [ans-txt.md](ans-txt.md) | Default | `_ans` TXT (one per endpoint) + an HTTPS RR at the FQDN | Active |
-| `ANS_DNSAID` | [ans-dnsaid.md](ans-dnsaid.md) | Optional (opt-in) | SVCB (one per endpoint) at the FQDN, DNS-AID SvcParams | Active |
+| `ANS_TXT` | [ans-txt.md](ans-txt.md) | Optional (opt-in) | `_ans` TXT (one per endpoint) + an HTTPS RR at the FQDN | Active |
+| `ANS_DNSAID` | [ans-dnsaid.md](ans-dnsaid.md) | Default | SVCB (one per endpoint) at the FQDN, DNS-AID SvcParams | Active |
 
-**Requirement.** `ANS_TXT` is the one default profile: a registration that omits `discoveryProfiles`
-(or sends an empty array) is emitted as `["ANS_TXT"]`, and the V1 lane is always pinned to `ANS_TXT`.
-`ANS_DNSAID` is **opt-in** — an operator names it explicitly, alone or in the
-`["ANS_DNSAID", "ANS_TXT"]` transition union — while the DNS-AID-aligned SVCB shape is brought to
-broad conformance; `ANS_TXT` stays the stable, widely-deployed default
+**Requirement.** `ANS_DNSAID` is the one default profile: a registration that omits
+`discoveryProfiles` (or sends an empty array) is emitted as `["ANS_DNSAID"]`, now that the
+DNS-AID-aligned SVCB shape is at conformance. `ANS_TXT` is **opt-in** — an operator names it
+explicitly, alone or in the `["ANS_DNSAID", "ANS_TXT"]` transition union — supported indefinitely
+for operators whose zone-edit tooling targets `_ans.{fqdn}`; the V1 lane never consults the default
+and is always pinned to `ANS_TXT`
 ([ANS-3 §6](../ans-3-dns-publication.md#6-discovery-profiles)). `discoveryProfiles` is **set
 semantics on the wire**: request order carries no meaning, and emission order on the wire is the
 registry's wiring order (ANS-3 §6.4), not request order. Optional to adopt; mandatory in execution
@@ -31,7 +32,7 @@ emit.
 - **Active** — wired, tested, emitting real records an operator publishes and the RA verifies at
   verify-dns.
 - **Default / Opt-in** is the *requirement* axis, not the status: both bundled profiles are Active.
-  `ANS_TXT` is the default set; `ANS_DNSAID` is Active but opt-in (the operator must name it).
+  `ANS_DNSAID` is the default set; `ANS_TXT` is Active but opt-in (the operator must name it).
 - A `discoveryProfiles` element that names no wired profile is rejected at the API boundary with
   `INVALID_DISCOVERY_PROFILE`; a *stored* profile unknown to the running registry (e.g. a value
   from before a rename) is skipped with a WARN, and a registration whose every requested profile is
@@ -62,7 +63,7 @@ shared base.
 ## Conformance artifacts
 
 The `discoveryProfiles` request field and the `DiscoveryProfile` enum — the closed `ANS_DNSAID` /
-`ANS_TXT` set, `minItems: 1`, `uniqueItems: true`, default `["ANS_TXT"]` — are specified in
+`ANS_TXT` set, `minItems: 1`, `uniqueItems: true`, default `["ANS_DNSAID"]` — are specified in
 [ANS-3 §6](../ans-3-dns-publication.md#6-discovery-profiles) and carried as the `DiscoveryProfile`
 schema and `discoveryProfiles[]` field in the RA's OpenAPI document. The composed record set is
 sealed verbatim into the `AGENT_REGISTERED` attestation as `dnsRecordsProvisioned[]`; its

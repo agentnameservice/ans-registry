@@ -7,18 +7,19 @@ Version: 0.1.0
 Date: 2026-06-29
 Audience: implementers building an ANS-conformant Registration Authority
 
-`ANS_TXT` is the original `_ans` TXT family — the **default** discovery profile and the one the V1
-lane is pinned to. It emits one `_ans` TXT record per protocol endpoint plus a single HTTPS RR at
-the agent's bare FQDN, alongside the ANS-family trust records
+`ANS_TXT` is the original `_ans` TXT family — **opt-in** on the V2 lane (the default is
+[ANS_DNSAID](ans-dnsaid.md)) and the profile the V1 lane is pinned to. It emits one `_ans` TXT
+record per protocol endpoint plus a single HTTPS RR at the agent's bare FQDN, alongside the
+ANS-family trust records
 ([ANS-3 §6.3](../ans-3-dns-publication.md#63-family-trust-records)). Supported indefinitely for
 operators whose zone-edit tooling targets `_ans.{fqdn}` and whose DNS provider does not run SVCB in
 service mode.
 
 ## 1. Records, labels, and selection
 
-- **Selection**: the `ANS_TXT` token in the registration's `discoveryProfiles` set. It is the
-  default — a registration that omits `discoveryProfiles` or sends an empty array resolves to
-  `["ANS_TXT"]`, and the V1 lane is pinned to it regardless of request
+- **Selection**: the `ANS_TXT` token in the registration's `discoveryProfiles` set. Opt-in on the
+  V2 lane — an operator names it explicitly, alone or in the `["ANS_DNSAID", "ANS_TXT"]` transition
+  union; the V1 lane is pinned to it regardless of request
   ([ANS-3 §6.4](../ans-3-dns-publication.md#64-composition-ordering-dedup-and-the-required-flag-transition)).
 - **Records** (emitted only when the registration has at least one endpoint):
   - one `_ans.{fqdn}` **TXT** discovery record per endpoint, at the `_ans` child label;
@@ -116,8 +117,11 @@ validation errors (ANS-1); a `discoveryProfiles` element naming no wired profile
 
 ## 9. Status and requirement
 
-**Requirement: Default.** `ANS_TXT` is the profile applied when `discoveryProfiles` is omitted or
-empty, and the V1 lane is pinned to it. An operator need do nothing to select it.
+**Requirement: Optional (opt-in) on the V2 lane; pinned on V1.** An operator names `ANS_TXT`
+explicitly — alone, or in the `["ANS_DNSAID", "ANS_TXT"]` transition union, where the `_ans` TXT
+rows carry the required signal (§4). The V1 lane never consults the default and is always pinned to
+`ANS_TXT`. Opt-in is a requirement statement, not a deprecation signal: the profile is supported
+indefinitely.
 
 **Status: Active.** The original, fully-implemented `_ans` shape, sealing and verifying real
 records.

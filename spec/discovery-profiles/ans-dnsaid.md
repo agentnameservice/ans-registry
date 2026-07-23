@@ -9,15 +9,16 @@ Audience: implementers building an ANS-conformant Registration Authority
 
 `ANS_DNSAID` emits one SVCB record ([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460.html)) per
 protocol endpoint at the agent's bare FQDN, carrying its connection hints and per-endpoint
-capability locators in DNS-AID draft-02 SvcParams. It is **opt-in** — an operator names it
-explicitly — while the DNS-AID-aligned shape is brought to broad conformance; the stable default is
-[ANS_TXT](ans-txt.md). It is self-contained: registering `ANS_DNSAID` alone also emits the ANS-family
-trust records ([ANS-3 §6.3](../ans-3-dns-publication.md#63-family-trust-records)).
+capability locators in DNS-AID draft-02 SvcParams. It is the **default** discovery profile — applied
+when a registration omits `discoveryProfiles` (or sends an empty array); an operator opts into
+[ANS_TXT](ans-txt.md) explicitly. It is self-contained: registering `ANS_DNSAID` alone also emits the
+ANS-family trust records ([ANS-3 §6.3](../ans-3-dns-publication.md#63-family-trust-records)).
 
 ## 1. Records, labels, and selection
 
-- **Selection**: the `ANS_DNSAID` token in the registration's `discoveryProfiles` set. Not in the
-  default set; the operator opts in, alone or in the `["ANS_DNSAID", "ANS_TXT"]` transition union
+- **Selection**: the `ANS_DNSAID` token in the registration's `discoveryProfiles` set. It is the
+  default — a registration that omits `discoveryProfiles` or sends an empty array resolves to
+  `["ANS_DNSAID"]`; the V1 lane never consults the default and is pinned to `ANS_TXT`
   ([ANS-3 §6.4](../ans-3-dns-publication.md#64-composition-ordering-dedup-and-the-required-flag-transition)).
 - **Records** (one per endpoint, emitted only when the registration has at least one endpoint):
   one **SVCB** row at the bare `{fqdn}` (apex), in ServiceMode.
@@ -88,7 +89,7 @@ SVCB row.
 
 | Record | Required | Note |
 | --- | --- | --- |
-| `{fqdn}` SVCB | **Yes**, alone; **No** in the `ANS_TXT` union | The profile emits `Required=true`; the walker flips it to `false` when `ANS_TXT` is also resolved, so the legacy `_ans` TXT carries the required signal during the transition (ANS-3 §6.4) |
+| `{fqdn}` SVCB | **Yes**, alone; **No** in the `ANS_TXT` union | The profile emits `Required=true`; the walker flips it to `false` when `ANS_TXT` is also resolved, so the `_ans` TXT carries the required signal in the transition union (ANS-3 §6.4) |
 | `_ans-badge` TXT (family) | Yes | ANS-3 §6.3 |
 | `_{port}._tcp.{fqdn}` TLSA (family) | No | ANS-3 §6.3; verify-side enforces a match only when the zone is DNSSEC-validated |
 
@@ -143,12 +144,13 @@ publishing the announced record (ANS-3 §4); it is not a distinct error code.
 
 ## 9. Status and requirement
 
-**Requirement: Optional (opt-in).** Supporting `ANS_DNSAID` is optional, and it is never in the
-default set; an operator names it explicitly. An RA that enables it MUST emit the SVCB row exactly as
-§2 specifies — `keyNNNNN` Private-Use presentation, never the named DNS-AID forms.
+**Requirement: Default.** `ANS_DNSAID` is the profile applied when `discoveryProfiles` is omitted
+or empty on the V2 lane; an operator need do nothing to select it. Its SVCB rows carry the required
+signal when it is the sole resolved profile (§4). An RA MUST emit the SVCB row exactly as §2
+specifies — `keyNNNNN` Private-Use presentation, never the named DNS-AID forms. The V1 lane never
+consults the default and stays pinned to `ANS_TXT`.
 
-**Status: Active.** Wired and tested, emitting real SVCB rows the RA verifies at verify-dns, while
-the DNS-AID-aligned shape is brought to broad conformance ahead of any future default change.
+**Status: Active.** Wired and tested, emitting real SVCB rows the RA verifies at verify-dns.
 
 ## 10. Object schemas (worked example)
 
