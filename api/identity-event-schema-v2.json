@@ -51,10 +51,10 @@
           "enum": ["IDENTITY_VERIFIED", "IDENTITY_UPDATED", "IDENTITY_REVOKED", "IDENTITY_LINKED", "IDENTITY_UNLINKED"]
         },
         "identityId": { "type": "string", "minLength": 1, "description": "UUIDv7 — the identity stream key." },
-        "kind": { "type": "string", "enum": ["did:web", "did:key", "lei"] },
+        "kind": { "type": "string", "enum": ["did:web", "did:key", "lei", "ens"] },
         "value": { "type": "string", "minLength": 1, "description": "Canonical identifier, e.g. did:web:identity.acme-corp.com." },
         "timestamp": { "type": "string", "format": "date-time", "description": "RFC 3339." },
-        "proofMethod": { "type": "string", "enum": ["did-web-sig", "did-key-sig", "lei-vlei-acdc"] },
+        "proofMethod": { "type": "string", "enum": ["did-web-sig", "did-key-sig", "lei-vlei-acdc", "ens-account-sig"] },
         "providerId": { "type": "string", "description": "The owning principal — the who's owner." },
         "keys": {
           "type": "array",

@@ -417,13 +417,13 @@ before signing, keyed by `identityId` — carries:
 | --- | --- | --- |
 | `eventType` | enum (the five tokens above) | every event |
 | `identityId` | string (UUIDv7, the stream key) | every event |
-| `kind` | enum `did:web` \| `did:key` \| `lei` | every event |
+| `kind` | enum `did:web` \| `did:key` \| `lei` \| `ens` | every event |
 | `value` | string (canonical identifier) | every event |
 | `timestamp` | string (RFC 3339) | every event |
 | `keys[]` | array of `ProvenKey` | `IDENTITY_VERIFIED`, `IDENTITY_UPDATED` (required, non-empty) |
 | `verifiedAt` | string (RFC 3339) | `IDENTITY_VERIFIED`, `IDENTITY_UPDATED` (required) |
 | `providerId` | string (the who's owner) | `IDENTITY_VERIFIED`, `IDENTITY_UPDATED` (required) |
-| `proofMethod` | enum `did-web-sig` \| `did-key-sig` \| `lei-vlei-acdc` | proof events |
+| `proofMethod` | enum `did-web-sig` \| `did-key-sig` \| `lei-vlei-acdc` \| `ens-account-sig` | proof events |
 | `previousValue` | string (pre-rotation identifier) | `IDENTITY_UPDATED` |
 | `revokedAt` | string (RFC 3339) | `IDENTITY_REVOKED` (required) |
 | `ansIds[]` | array of agent ids (the whole batch) | `IDENTITY_LINKED`, `IDENTITY_UNLINKED` (required, non-empty) |
@@ -591,6 +591,7 @@ enums it feeds (§10.3).
 | `did:plc` | [did-plc](identity-profiles/did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `did:ethr` / `did:pkh` | [did-ethr](identity-profiles/did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion](identity-profiles/did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
+| `ens` | [ens](identity-profiles/ens.md) | Optional | key only (EIP-712 / ERC-1271, name-owner signature) | derived account method (CAIP-10) | Postponed |
 
 > `fqdn` is the agent's primary anchor proven on the ANS-1 registration path — it is **not** a
 > `/v2/ans/identities` dispatch kind. It sits in this registry only as the archetype the

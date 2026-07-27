@@ -17,7 +17,7 @@ ANS-5 specifies:
 - The verification procedure: the cryptographic-verification-path checks a verifier runs to confirm an agent.
 - The integrity-reporting principles: monitors report, the RA acts; reports are public and signed; quorum before action; evidence MUST be verifiable.
 - The transient-vs-mismatch distinction the AIM MUST observe.
-- The principal-binding verification procedures for DID_WEB, LEI, BIOMETRIC_HASH, and ENS_ENSIP25 binding types.
+- The principal-binding verification procedures for DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25, and ENS_ENSIP26 binding types.
 
 ANS-5 is **profile-agnostic and DNS-profile-agnostic by construction**. The same worker runs
 across registrations regardless of anchor profile; against the `ANS_TXT` `_ans` TXT family, against
@@ -57,6 +57,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | **Identity Certificate match** | Verify identity certificate fingerprint against TL-sealed value (see §4 note below) | Fingerprint matches | Only when ANS-2 versioned registration |
 | **Schema integrity** | Fetch each endpoint's `metaDataUrl`, hash the document | Hash matches the protocol-keyed entry in the TL `attestations.metadataHashes` map (e.g. `metadataHashes["A2A"]`) | Only when per-endpoint `metaDataHash` values were submitted at registration |
 | **Principal binding (ENS_ENSIP25)** | Resolve ENS name; verify `agent-registration[<registry>][<tokenId>]` text record; verify ERC-8004 registration file lists the ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
+| **Principal binding (ENS_ENSIP26)** | Resolve the ENS name from the agent's principal binding; verify its `agent-endpoint[ans]` text record (ENSIP-26) names one of the agent's ANSNames | Record matches the ANSName of an ACTIVE version of the agent | Only when `principalBinding.type` is `ENS_ENSIP26` |
 | **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID document exists with a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
 | **Principal binding (LEI)** | Verify vLEI credential signature against the issuing entity's registered key (Option A) or against the LOU's custom field signature (Option B) per the [lei profile](identity-profiles/lei.md) | Signature valid and LEI ACTIVE in GLEIF database | Only when `principalBinding.type` is `LEI` |
 | **Principal binding (BIOMETRIC_HASH)** | Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or zero-knowledge proof | Credential verifies and matches the registered binding | Only when `principalBinding.type` is `BIOMETRIC_HASH` |
