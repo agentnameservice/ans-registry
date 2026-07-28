@@ -23,15 +23,15 @@ kind.
 
 ## 1. Identifier form, canonicalization, selection
 
-- **Form**: an ENS name under `.eth` with at least two labels (e.g. `acme-corp.eth`,
-  `agents.acme-corp.eth`).
+- **Form**: an ENS name under the `.eth` TLD, at any depth (e.g. `acme-corp.eth`,
+  `agents.acme-corp.eth`, `eu.agents.acme-corp.eth`).
 - **Selection**: **lexical** — a dot-separated name whose final label is `eth`. (Other TLDs
   reachable through the ENS root are not lexically distinguishable from plain FQDNs; admitting
   them is a future amendment of this profile's selection rule, not a change to the gate.)
 - **Canonicalization** (each violation → `ENS_BAD_FORMAT`):
   - the name normalizes under [ENSIP-15](https://docs.ens.domains/ensip/15) (ENS Name
     Normalization); the canonical value is the normalized name;
-  - at least two labels; no empty labels.
+  - the name has at least one label under `.eth` (the bare TLD is not a registrable identity).
 - **Scope rule (mechanical)**: the name MUST resolve to a non-zero owner through the on-chain
   registry walk (§2). Names whose ENS presence is resolver-only — for example DNS domains
   resolved through ENS via DNSSEC-gated resolution — have **no on-chain owner**: their control
@@ -49,10 +49,12 @@ checks, **in order** — every check clean before any seal:
 1. **Envelope**: exactly one Ethereum-signature proof is present (this kind is single-key — the
    owner; there is no multi-key submission). A malformed envelope →
    `IDENTIFIER_PROOF_INVALID`.
-2. **Payload equality** (before any signature work): the signed content **equals** the served
-   `signingInput` verbatim — for EIP-712, the `signingInput` field of the typed struct below; for
-   EIP-191, the signed message string. Mismatch → `PRICC_SIGNATURE_INVALID`. Clients never
-   canonicalize.
+2. **Signing input construction**: the RA builds the message to verify **solely from the served
+   `signingInput`** — for EIP-712, as the `signingInput` field of the typed struct below; for
+   EIP-191, as the signed message string. The client transmits only the signature (§10), so there
+   is no client-supplied payload to compare and no separate payload-mismatch failure; a signature
+   over anything other than the served input simply fails signature verification (check 4).
+   Clients never canonicalize.
 3. **Authoritative owner resolution** (verify time): the RA resolves the name's owner by the
    top-down registry walk — from the configured ENS root registry, descend one label at a time
    via `IRegistry.getSubregistry(label)` to the name's parent registry, confirm it supports
@@ -60,16 +62,19 @@ checks, **in order** — every check clean before any seal:
    (DNS-encoded name) implements exactly this walk and is the RECOMMENDED entry point. The walk
    starts from the deployment-configured root, so no registrant-supplied registry or resolver
    address is ever consulted, and a registry mounted outside the canonical hierarchy can never
-   answer. A zero owner — never registered, expired, or resolver-only ENS presence —
-   → `ENS_NAME_UNOWNED` (the RA MAY refine to `ENS_NAME_EXPIRED` by reading the parent
-   registry's `getExpiry`). Advisory resolution at challenge time seeds the challenge entry;
+   answer. A zero owner — never registered, reserved, expired, or resolver-only ENS presence —
+   → `ENS_NAME_UNOWNED`. When the name's own parent registry is still reachable, the RA MAY
+   refine a lapsed leaf to `ENS_NAME_EXPIRED` via that registry's `findExpiry(label)`
+   (`ITemporalRegistry`, ERC-165-checkable — the expiry sibling of `findOwner`); an expired
+   *ancestor* instead zeroes the walk higher up, leaving no registry to query, so it stays
+   `ENS_NAME_UNOWNED`. Advisory resolution at challenge time seeds the challenge entry;
    the verify-time resolution is binding.
 4. **Signature verification** against the resolved owner:
    - **EOA**: recover the signer per **EIP-712** (preferred) or EIP-191 and require it to equal
      the resolved owner.
    - **Contract account**: **ERC-1271** `isValidSignature(hash, signature)` via `eth_call`
-     against the owner contract — this is what lets multisig and smart-account owners prove
-     control.
+     against the owner contract — the path by which multisig and smart-account owners (e.g.
+     Safes) prove control.
    - An ERC-6492-style universal validator (`isValidSig(signer, hash, signature)`) covers both
      paths in one call and is the RECOMMENDED verification primitive; the ENS contracts
      repository vendors this interface (`IUniversalSignatureValidator`).
@@ -100,11 +105,11 @@ single-key; there is no JWS `kid` selector (the one signer is fully determined b
 identifier, as with `lei`). The challenge entry advisorily names the resolved owner as a CAIP-10
 account (`eip155:<chain>:<address>`) so the client can confirm which account must sign.
 
-## 4. Seal tier — derived account method (CAIP-10)
+## 4. Seal tier — verbatim verification method
 
-The sealed verification method is **derived deterministically from on-chain state at proof
-time** (the same posture as `did:key`'s derived Multikey): the owner account as a CAIP-10
-`blockchainAccountId`, alongside the submitted signature.
+The sealed verification method is the resolved owner account as a CAIP-10 `blockchainAccountId`,
+sealed as resolved — the same account-based `blockchainAccountId` seal the
+[`did:ethr`](did-ethr.md) profile uses — alongside the submitted signature.
 
 ```json
 {
@@ -117,13 +122,16 @@ time** (the same posture as `did:key`'s derived Multikey): the owner account as 
 
 Registry state — records, expiry, roles, resolver configuration — is **referenced, never
 copied** into the seal: the ENS registry is the authoritative, externally-resolvable source, and
-a sealed copy would be one more thing that can drift from it (the same argument the
-[lei profile](lei.md) makes for KERI's KEL). Verifiability from the badge alone differs by
+a sealed copy would be one more thing that can disagree with it. Per ANS-0 §8.4's verbatim rule,
+the seal carries the verification method as resolved plus the proof — nothing re-encoded or
+derived. Verifiability from the badge alone differs by
 account type: an **EOA** proof re-verifies offline by signature recovery against the sealed
-`blockchainAccountId`; a **contract-account** proof (ERC-1271) verifies against chain state as
-of proof time — the seal attests the RA's verification, and a third party re-checks it with one
-`eth_call`. For contract accounts the `type` member is nominal; the operative verification path
-is ERC-1271.
+`blockchainAccountId`, with no chain read. A **contract-account** proof (ERC-1271) was verified
+by the RA at proof time against then-current chain state, and the seal attests that verification;
+a third party re-checking via `eth_call` reads *current* state, so a later change to the account's
+signer set can make the re-check differ — that is a drift signal (§5), not evidence the original
+proof was invalid. For contract accounts the `type` member is nominal; the operative verification
+path is ERC-1271.
 
 ## 5. Freshness and monitoring
 
@@ -134,65 +142,83 @@ project to every linked agent with zero write fan-out. Because ENS token IDs are
 re-read state, never track token IDs. Signals, from one state re-read per cycle:
 
 - **Owner change**: re-run the §2 owner resolution; sealed account ≠ current owner is the
-  integrity signal. ENS names are transferable assets, so a transfer is a
-  reputation-continuity event: surfaced as a finding, never an automatic revocation; the new
-  owner re-proves through rotation (§6). Event hints for push-based detection:
-  `LabelRegistered`, `LabelUnregistered`, ERC-1155 `TransferSingle`.
-- **Expiry**: read `getExpiry` on the parent registry. Approaching expiry is an advisory
+  integrity signal. ENS names are transferable assets, so an owner change is a continuity
+  event: surfaced as a finding, never an automatic revocation. Lifecycle handling follows §6 —
+  same-provider re-proof, or revoke-and-re-register when the controlling party changes. Event
+  hints for push-based detection: `LabelRegistered`, `LabelUnregistered`, ERC-1155
+  `TransferSingle`/`TransferBatch`.
+- **Expiry**: read the name's `findExpiry(label)` on its parent registry (`ITemporalRegistry`). Approaching expiry is an advisory
   finding. After expiry the owner resolves to zero (ownership is time-bounded), and after the
-  `.eth` registrar's grace period (28 days) the name is **re-registerable by anyone** — a
-  re-registration under a new owner MUST NOT inherit the identity (re-registration mints a new
-  identity object; read-side terminality, ANS-0 §8.3). During the grace window any account can
-  renew (`ETHRegistrar.renew`), so a lapsed-but-renewed name resumes cleanly. Event hint:
+  `.eth` registrar's grace period (28 days) the name is **re-registerable by anyone**. A name
+  that lapses and is re-registered by a different party is an owner change handled per §6: the
+  prior identity does not pass to the new holder, and the value binds to a new identity only
+  once the prior one is revoked. During the grace window any account can renew
+  (`ETHRegistrar.renew`), so a lapsed-but-renewed name resumes cleanly. Event hint:
   `ExpiryUpdated`.
-- **Hierarchy integrity**: `SubregistryUpdated` / `ResolverUpdated` / `ParentUpdated` along the
-  name's chain. For names deeper than second-level, an ancestor registry in which dangerous
-  roles remain granted on `ROOT_RESOURCE` can replace or unregister the subtree; the owner walk
-  detects the effect (the resolved owner changes or vanishes), and deployments MAY additionally
-  verify ancestor emancipation (`roleCount(ROOT_RESOURCE)` shows no assignees for the dangerous
-  roles) as policy.
 - **Optional cross-attestation**: an [ENSIP-26](https://docs.ens.domains/ensip/26)
-  `agent-endpoint[ans]` text record on the name, naming a linked agent's ANSName — a public,
+  `agent-endpoint[ans]` text record on the name, naming a linked agent's ANSName in URI form
+  (`ans://…`) — a public,
   name-side declaration that complements the sealed link (the ANS-5 principal-binding check
   set includes it).
 
 ## 6. Lifecycle specifics
 
-- **Rotation = ownership change.** The identifier's value survives an owner change, so this is
-  a value-stable-rotation kind: after a name transfer, the new owner re-proves via `PUT` +
-  `verify-control`, sealing `IDENTITY_UPDATED`; the audit stream preserves the owner succession.
-  An owner change **without** re-proof is surfaced by ANS-5 as drift and does not auto-revoke
-  (the lei posture for credential expiry); consumers see the finding and act per policy.
+- **Owner change within the same provider (rotation).** When the controlling account moves
+  between wallets of the **same** `providerId` (the ANS account that owns the identity is
+  unchanged), the identifier's value survives, so this is a value-stable rotation: the new
+  controlling account re-proves via `PUT` + `verify-control`, sealing `IDENTITY_UPDATED`, and
+  the audit stream preserves the owner succession. An owner change **without** re-proof is
+  surfaced by ANS-5 as drift and does not auto-revoke; findings are reports, never automatic
+  state changes (ANS-5 §1), and consumers act per policy.
+- **Transfer to a different party.** A `providerId` owns the ANS identity; the ENS name is owned
+  by an Ethereum account, and the two need not be the same party. When the name moves to an
+  account controlled by a **different** party, `PUT` rotation does not apply — identity routes
+  are owner-scoped to the `providerId` (ANS-0 §7) and one `(kind, value)` is `VERIFIED` by at
+  most one owner (ANS-0 §11). The outgoing party **revokes** the identity (`POST …/revoke`,
+  owner-initiated; still possible after handing over the name, since revoke is credential-gated
+  to the `providerId`, not key-gated — ANS-0 §6), and the acquirer registers the name as a new
+  identity under their own `providerId`. Until the outgoing party revokes, the value stays bound
+  to their now-stale identity: the ANS-5 owner-change finding surfaces this, but the identity
+  layer does not auto-remediate it.
 - **Name expiry** is likewise surfaced by ANS-5 and does not auto-revoke the identity object;
-  revocation is the owner's (or RA policy's) explicit act.
+  revocation is the owner's explicit act. A name that fully lapses and is re-registered by a
+  different party is the transfer case above.
 - **Revocation**: `POST …/revoke`; read-side terminality keeps it revoked (ANS-0 §8.3).
 - **Re-proof after nonce expiry**: idempotent re-add (ANS-0 §5).
 
 ## 7. Outbound-fetch safety
 
 The verification I/O is **chain reads only**: the registry walk (pure `view` calls — the
-navigation path performs no CCIP-Read) and, for contract accounts, one ERC-1271 `eth_call`. All
-reads go through **configured, pinned JSON-RPC endpoints** — never registrant-supplied URLs —
-with bounded call budgets, and RPC failures surface as a generic retryable error
-(`ENS_CHAIN_UNAVAILABLE`) that never echoes endpoint details (no oracle). There is no
-registrant-steered HTTP fetch on the control path. A deployment that additionally reads ENS
-*records* (the §5 ENSIP-26 cross-check) may traverse wildcard/offchain resolution (CCIP-Read),
-which **is** registrant-steered and MUST be hardened exactly like the did:web fetcher
-(ANS-0 §13).
+canonical navigation contracts perform no CCIP-Read) and, for contract accounts, one ERC-1271
+`eth_call`. All reads go through **configured, pinned JSON-RPC endpoints** — never
+registrant-supplied URLs — with bounded call budgets, and RPC failures surface as a generic
+retryable error (`ENS_CHAIN_UNAVAILABLE`) that never echoes endpoint details (no oracle).
+
+Owner resolution is onchain by construction: `findOwner` is a pure view walk over the canonical
+registries, which perform no offchain lookups, so a legitimate walk never produces an ERC-3668
+`OffchainLookup`. All control-path `eth_call`s (the registry walk and any ERC-1271 verification)
+therefore MUST run with client-side CCIP-Read (ERC-3668) resolution **disabled**: a control-path
+`OffchainLookup` can only originate from a registrant-controlled contract in the path, so it MUST
+be treated as a hard failure (`ENS_CHAIN_UNAVAILABLE`), never followed.
+
+A deployment that additionally reads ENS *records* (the §5 ENSIP-26 cross-check) may traverse
+wildcard/offchain resolution (CCIP-Read), which **is** registrant-steered and MUST be hardened
+exactly like the did:web fetcher (ANS-0 §13).
 
 ## 8. Error codes
 
 | Code | Meaning |
 | --- | --- |
-| `ENS_BAD_FORMAT` | not ENSIP-15-normalizable, fewer than two labels, or not a `.eth` name |
-| `ENS_NAME_UNOWNED` | the registry walk resolves no current owner (never registered, expired, or resolver-only ENS presence) |
+| `ENS_BAD_FORMAT` | not ENSIP-15-normalizable, not a `.eth` name, or the bare `.eth` TLD (no label under it) |
+| `ENS_NAME_UNOWNED` | the registry walk resolves no current owner (never registered, reserved, expired, or resolver-only ENS presence) |
 | `ENS_NAME_EXPIRED` | refinement of `ENS_NAME_UNOWNED` when the parent registry's expiry shows a lapsed registration |
 | `ENS_SIGNATURE_INVALID` | signature fails validation against the resolved owner, or the signer is not the owner (role holders and operators are rejected) |
 | `ENS_CHAIN_UNAVAILABLE` | chain read failed (retryable; no endpoint detail echoed) |
+| `IDENTIFIER_KIND_UNSUPPORTED` | returned while the profile is Postponed (no verifier enabled) |
 
 (Generic identity codes — `IDENTIFIER_KIND_UNSUPPORTED`, `IDENTIFIER_DUPLICATE`,
-`IDENTIFIER_CHALLENGE_EXPIRED`, `IDENTIFIER_PROOF_INVALID`, `PRICC_SIGNATURE_INVALID`,
-`TL_UNAVAILABLE`, `VERIFICATION_IN_FLIGHT`, … — are defined in ANS-0 / the API spec.)
+`IDENTIFIER_CHALLENGE_EXPIRED`, `IDENTIFIER_PROOF_INVALID`, `TL_UNAVAILABLE`,
+`VERIFICATION_IN_FLIGHT`, … — are defined in ANS-0 / the API spec.)
 
 ## 9. Status and requirement
 
@@ -202,12 +228,14 @@ supporting `ens` is optional, but an RA that enables it MUST perform every check
 
 **Status: Postponed (design of record).** The flow above is settled and its external surface is
 live (the ENS registry hierarchy, `UniversalResolverV2.findOwner`, and the universal
-signature-validation interface are deployed); the kind is disabled until its plumbing is wired,
-returning `IDENTIFIER_KIND_UNSUPPORTED`. Promotion to Active requires: a pinned-RPC registry
+signature-validation interface are deployed); the kind is disabled until an ENS owner-resolver
+and an Ethereum-signature verifier are wired and tested in the RA implementation, returning
+`IDENTIFIER_KIND_UNSUPPORTED` until then. Promotion to Active requires: a pinned-RPC registry
 navigator behind the port, an Ethereum-signature verifier (EIP-712 + EIP-191 + ERC-1271;
-ERC-6492-style universal validation), an ENSIP-15 normalizer, tests against live chain reads
-(the `scripts/poc/ethid` proof-of-concept established live-Ethereum feasibility for the
-signature path), and the wire shapes below fixed in `api/api-spec-v2.yaml`. The Ethereum
+ERC-6492-style universal validation), an ENSIP-15 normalizer, tests against live chain reads,
+the request/challenge/verify shapes below fixed in `api/api-spec-v2.yaml`, and
+the account-based seal shape fixed in `api/api-spec-tl-v2.yaml` /
+`api/identity-event-schema-v2.json`. The Ethereum
 signature verifier is shared with the deferred [`did:ethr`/`did:pkh`](did-ethr.md) kinds —
 promoting either substantially promotes both.
 
@@ -218,7 +246,7 @@ implemented `VerifyControlRequest` is JWS-only and the machine schema
 [`api/identity-event-schema-v2.json`](../../api/identity-event-schema-v2.json) models the
 JWS-scheme verbatim-VM seal (`publicKeyJwk`/`publicKeyMultibase`); the Ethereum-signature
 request and the CAIP-10 account seal below are a **future amendment**, recorded here so the
-contract is settled before the kind ships (the lei precedent).
+contract is settled before the kind ships.
 
 **Register** — `POST /v2/ans/identities` with the bare identifier:
 

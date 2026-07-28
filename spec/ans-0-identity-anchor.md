@@ -122,9 +122,10 @@ Every identity seals only after **both** applicable axes pass:
 | **Key control** | "Do you hold the key you will sign as?" | CSR self-signature, bound to the FQDN by the issued certificate | A *challenge-bound signature* over the canonical proof input (§3.2). |
 
 A profile names which axes apply. The FQDN primary applies both on the ANS-1 registration path.
-Today's Verified-Identity profiles (`did:web`, `did:key`, `lei`) are **key-control only**:
-control of a DID *is* possession of its listed keys per DID Core, and an LEI is proven by a vLEI
-credential chain plus a possession signature. A location challenge is introduced only when a kind
+Today's Verified-Identity profiles (`did:web`, `did:key`, `lei`, `ens`) are **key-control only**:
+control of a DID *is* possession of its listed keys per DID Core, an LEI is proven by a vLEI
+credential chain plus a possession signature, and an ENS name by a signature from its resolved
+owner account. A location challenge is introduced only when a kind
 arrives that has a writable location and needs one — the seam exists (§3.3) but no interface
 ships before a second real implementer does.
 
@@ -368,7 +369,8 @@ additionally require owning the agent (§6). A read for an identity the caller d
   challenges:[{kid, signingInput}]}` — one challenge entry per eligible key, all over the one
   shared nonce.
 - Verify-control request: JWS schemes `{signedProofs:[<compact JWS>, …]}`; `lei`
-  `{cesrSignature}` (the presentation rides register; see the [lei profile](identity-profiles/lei.md)).
+  `{cesrSignature}` (the presentation rides register; see the [lei profile](identity-profiles/lei.md));
+  `ens` `{ethSignature}` (Ethereum account signature; see the [ens profile](identity-profiles/ens.md)).
 - Link request: `{agentIds:[…]}`; response `200 {linked: N}`.
 - List response: the standard cursor-paginated envelope shared with the agent list —
   `{items:[IdentityDetails], returnedCount, limit, nextCursor, hasMore}`.
@@ -591,7 +593,7 @@ enums it feeds (§10.3).
 | `did:plc` | [did-plc](identity-profiles/did-plc.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
 | `did:ethr` / `did:pkh` | [did-ethr](identity-profiles/did-ethr.md) | Optional | key only (EIP-712 / ERC-1271) | verbatim verification method | Deferred (sketch) |
 | `did:ion` | [did-ion](identity-profiles/did-ion.md) | Optional | key only (multi-key) | verbatim verification method | Deferred (sketch) |
-| `ens` | [ens](identity-profiles/ens.md) | Optional | key only (EIP-712 / ERC-1271, name-owner signature) | derived account method (CAIP-10) | Postponed |
+| `ens` | [ens](identity-profiles/ens.md) | Optional | key only (EIP-712 / ERC-1271, name-owner signature) | verbatim verification method | Postponed |
 
 > `fqdn` is the agent's primary anchor proven on the ANS-1 registration path — it is **not** a
 > `/v2/ans/identities` dispatch kind. It sits in this registry only as the archetype the
@@ -638,7 +640,7 @@ Every profile document MUST specify, in this order:
 A new kind is added by writing a profile document and adding a row to the §10.1 registry table —
 an ANS-0 amendment. The core sections (§3–§9) do not change. Generic control failures use the
 `IDENTIFIER_*` / `PRICC_*` codes defined here; kind-specific failures use the scheme-prefixed
-codes the profile defines (`FQDN_*`, `DID_*`, `LEI_*`). The `PRICC_*` family
+codes the profile defines (`FQDN_*`, `DID_*`, `LEI_*`, `ENS_*`). The `PRICC_*` family
 (`PRICC_SIGNATURE_INVALID`, `PRICC_TOKEN_EXPIRED`, `PRICC_TOKEN_ALREADY_USED`) names §3.2
 proof-of-control failures shared by every key-control profile (PriCC: Private-key Confirmation
 Challenge, the challenge-bound proof of key possession).
@@ -738,7 +740,7 @@ treats a `REVOKED` identity as revoked regardless of any later stream entry (§8
 ## 14. References
 
 - Identity profiles: [`identity-profiles/`](identity-profiles/) (fqdn, did-web, did-key, lei,
-  and deferred sketches).
+  ens, and deferred sketches).
 - [ANS-1: Registration & Lifecycle](ans-1-registration.md) — the agent (the what) and the event
   set.
 - [ANS-4: Transparency](ans-4-transparency.md) — the single Merkle log, identity ingest and read
