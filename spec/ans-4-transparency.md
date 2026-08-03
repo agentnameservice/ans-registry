@@ -33,7 +33,7 @@ ANS-4 does **not** specify:
 ## 2. Terminology
 
 - **SCITT statement**: the unit the TL accepts and seals — the JCS-canonical inner-event payload plus a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
-- **Sealed envelope**: the record the TL appends — `{payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status}`, where the outer `signature` is the TL's own attestation. The leaf hash covers the fully signed envelope (§3).
+- **Sealed envelope**: the record the TL appends — `{payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status}`, where the outer `signature` is the TL's own attestation.
 - **SCITT receipt**: the proof of inclusion the TL returns — a binary COSE_Sign1 carrying the inclusion proof (§5.2).
 - **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing key (which signs checkpoints, receipts, attestations, and status tokens).
 - **Checkpoint**: a C2SP signed note recording the log's size and root hash at a point in time. Produced as batches seal; consumed by consistency-proof verifiers.
@@ -42,12 +42,12 @@ ANS-4 does **not** specify:
 
 | Requirement | Standard | Rule |
 | --- | --- | --- |
-| Canonicalization | [JCS (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) | All JSON payloads MUST be canonicalized before signing or hashing. Without deterministic serialization, two implementations hashing the same logical object produce different results |
+| Canonicalization | [JCS (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) | All JSON payloads MUST be canonicalized before signing or hashing. Without deterministic serialization, two implementations disagree on bytes. |
 | Signature format | [JWS Detached (RFC 7515 Appendix F)](https://www.rfc-editor.org/rfc/rfc7515) | Payload is not embedded. Signatures are stored in separate fields from the data they sign |
-| Co-located signatures | JWS Detached | When a signature resides in the same JSON object as its data, the signature fields MUST be excluded from the signed payload. The exclusion scope MUST be explicit |
+| Co-located signatures | JWS Detached | When a signature resides in the same JSON object as its data, the signature fields MUST be excluded from the signed payload. The exclusion scope MUST be explicit. |
 | Signature wire format | JWS Compact | `<protected_header>..<signature>` (two dots; empty middle section is the detached payload) |
-| Algorithms | ES256 (ECDSA P-256/SHA-256) | Every TL-produced signature — checkpoint, attestation, receipt, status token — and every producer key is ES256. The JWS layer additionally recognizes RS256 for interoperability (verified if presented, never emitted) and EdDSA on the ANS-0 identity-proof surface |
-| Leaf hash | [RFC 6962 §2.1](https://www.rfc-editor.org/rfc/rfc6962) | `SHA-256(0x00 ‖ JCS(envelope))` over the **fully signed envelope** — including the TL's outer attestation signature. This is the leaf Tessera appends and the hash an offline verifier recomputes when walking an inclusion proof |
+| Algorithms | ES256 (ECDSA P-256/SHA-256) | Every TL-produced signature — checkpoint, attestation, receipt, status token — and every producer key is ES256. The JWS layer additionally recognizes the pinned algorithm. |
+| Leaf hash | [RFC 6962 §2.1](https://www.rfc-editor.org/rfc/rfc6962) | `SHA-256(0x00 ‖ JCS(envelope))` over the **fully signed envelope** — including the TL's outer attestation signature. |
 
 JWS protected headers: `alg` and `kid` are REQUIRED on every signature; `typ`, `timestamp` (unix
 seconds at signing), and `raid` (RA instance identifier, producer signatures only) are OPTIONAL.
@@ -72,7 +72,7 @@ covering the new tree root as each batch seals. The append response is `200` wit
 **dedupes by content hash**, so a retried submission of the exact same signed bytes lands on the same leaf
 rather than a duplicate. Receipts are retrieved afterward from the per-object receipt endpoints.
 
-Per-object reads serve one agent's or identity's sealed state: the badge (latest sealed event plus inclusion proof and computed status), the audit history (every event on the object's stream, each with its own proof), the COSE receipt, and — for agents — a status token (§5.2).
+Per-object reads serve one agent's or identity's sealed state: the badge (latest sealed event plus inclusion proof and computed status), the audit history (every event on the object's stream, each with its own proof), and the SCITT receipt.
 
 Bulk reads are the checkpoint endpoints plus the static C2SP tile surface (§5.2): consumers that want the whole log walk the tiles; there is no separate paginated range API.
 
@@ -93,7 +93,30 @@ A conforming TL MUST expose the following REST API surface (HTTPS; JSON unless n
 | `GET /checkpoint` | The raw C2SP signed checkpoint note (static tile surface) |
 | `GET /tile/*` | C2SP tlog-tiles: Merkle tree tiles and entry bundles for bulk verification |
 
-Read-only endpoints require no authentication. Verification MUST NOT require access to producer public keys or knowledge of RA implementation details: every proof verifies against the TL's own published key.
+Read-only endpoints require no authentication. Verification MUST NOT require access to producer public keys or knowledge of RA implementation details: every proof verifies against the TL's own public key advertised at `/root-keys`.
+
+### 5.0 Anonymous-read abuse controls (normative)
+
+The read surface above is served without authentication under the deployment's public-read
+policy. Because it is anonymous, it is also a free enumeration and resource-exhaustion surface: the
+per-object badge/audit/receipt routes expose object existence and full event chains by identifier,
+the identity reverse-join routes (§5.3) expose operator↔fleet relationships, and the tile surface
+returns bulk Merkle data. A conforming, externally-facing TL MUST therefore:
+
+1. **Rate-limit every anonymous read.** Enforce per-source (per-IP and/or per-token) request
+   quotas on all read endpoints, and respond to an exceeded quota with `429 Too Many Requests`
+   carrying a `Retry-After` header. The specific limits are operator policy; the presence of a
+   limit is normative.
+2. **Bound response cost.** Cap page sizes on every paginated read and reject oversized cursors;
+   bulk tile reads MUST be range-bounded per request.
+3. **Gate relationship-revealing reads behind per-object opt-in.** The identity **audit** and
+   **reverse-join** endpoints — `GET /v1/identities/{identityId}/audit`,
+   `GET /v1/identities/{identityId}/agents`, `GET /v1/agents/{agentId}/identities`, and
+   `GET /v1/agents/{agentId}/identities/history` — MUST default to **closed**. The owner of the
+   identity (resp. agent) opts each object into public exposure of its audit/reverse-join surface.
+   For an object that has not opted in, the TL returns `404` (existence hidden), never a partial
+   result. The single-object badge and receipt remain public (they are the verifier's core
+   offline-evidence hop); it is the *history* and *join* surfaces that are opt-in.
 
 ### 5.1 Key distribution
 
@@ -142,14 +165,14 @@ which a sealed identity log entry MUST validate against. Proof, rotation, and re
 are indexed under `identityId`; link/unlink events are additionally indexed under each named
 `ansId` for the read-time join. The TL public read surface gains:
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /v1/identities/{identityId}` | Latest sealed event + proof + computed `{status, keys[], keysLogId}` for one identity |
-| `GET /v1/identities/{identityId}/audit` | Paginated history of the identity's event chain, each with its own proof |
-| `GET /v1/identities/{identityId}/receipt` | SCITT COSE receipt for the identity leaf |
-| `GET /v1/identities/{identityId}/agents` | Reverse join — currently-linked agents (paginated) |
-| `GET /v1/agents/{agentId}/identities` | The computed who-identities list for one agent (paginated) |
-| `GET /v1/agents/{agentId}/identities/history` | Link/unlink events naming this agent (audit envelope) |
+| Endpoint | Purpose | Exposure |
+| --- | --- | --- |
+| `GET /v1/identities/{identityId}` | Latest sealed event + proof + computed `{status, keys[], keysLogId}` for one identity | Public |
+| `GET /v1/identities/{identityId}/audit` | Paginated history of the identity's event chain, each with its own proof | Opt-in (§5.0) |
+| `GET /v1/identities/{identityId}/receipt` | SCITT COSE receipt for the identity leaf | Public |
+| `GET /v1/identities/{identityId}/agents` | Reverse join — currently-linked agents (paginated) | Opt-in (§5.0) |
+| `GET /v1/agents/{agentId}/identities` | The computed who-identities list for one agent (paginated) | Opt-in (§5.0) |
+| `GET /v1/agents/{agentId}/identities/history` | Link/unlink events naming this agent (audit envelope) | Opt-in (§5.0) |
 
 The agent badge (`GET /v1/agents/{agentId}`) additionally carries a computed `identities[]` array
 joining the agent's live who-identities, governed by the visibility predicate and read-side
@@ -161,12 +184,12 @@ offline-evidence hop); only the ingest lane (§6) requires the producer credenti
 
 ## 6. Producer authentication
 
-The TL MUST verify that each event came from an authorized RA instance before sealing it. Every submitted event carries a detached-JWS producer signature in the `X-Signature` header; the TL resolves the `(raid, kid)` pair from the signature's protected header against its producer-key registry and rejects an unknown, expired, or revoked key.
+The TL MUST verify that each event came from an authorized RA instance before sealing it. Every submitted event carries a detached-JWS producer signature in the `X-Signature` header; the TL resolves the producer key from the registry and validates the signature before sealing.
 
 Producer-key registration:
 
 1. The operator generates the producer key pair under the RA's key manager; the private key never leaves the RA instance.
-2. The operator registers the public key with the TL (`POST /internal/v1/producer-keys`, admin-gated), supplying the client-chosen `key_id`, the `ra_id`, `public_key_pem` (SPKI), `algorithm` (`ES256`), and the required `valid_from` and `expires_at` window (`valid_from` must precede `expires_at`). A duplicate `key_id` is rejected (409). Bootstrap seeding via configuration is equivalent.
+2. The operator registers the public key with the TL (`POST /internal/v1/producer-keys`, admin-gated), supplying the client-chosen `key_id`, the `ra_id`, `public_key_pem` (SPKI), `algorithm` (`ES256`), `valid_from`, and `expires_at`.
 3. The TL stores the key under `(ra_id, key_id)` and returns the `key_id`, `status`, and a `fingerprint` of the registered key.
 4. The RA carries the `kid` and `raid` in the protected header of every statement signature.
 
@@ -182,6 +205,37 @@ signature check) through **separate** ingest routes: `POST /v1/internal/agents/e
 for the identity event family. The TL rejects a cross-lane body — an `IDENTITY_*` payload on an
 agent route, or an `AGENT_*` payload on the identity route — with `422 INVALID_EVENT`, so the two
 object types never interleave at ingest.
+
+### 6.1 Producer authorization (normative)
+
+Verifying the producer **signature** is necessary but not sufficient. The JWS proves only that the
+caller holds a key registered under some `(ra_id, key_id)` — and both of those are attacker-supplied
+inputs on the wire (the header `kid`/`raid` and the body `raId`). Nothing in a bare signature check
+establishes that the caller is *entitled to act as* that `ra_id`. Absent an authorization step, a
+caller who can register a key under a victim's `ra_id` (or reuse a shared ingest credential) can
+seal events that attribute to another RA's producer — cross-RA impersonation.
+
+The TL MUST therefore authenticate **and** authorize the caller before sealing, in this order, and
+MUST fail closed at the first step that does not pass:
+
+1. **Authenticate the caller.** The ingest credential MUST be a per-RA identity — an mTLS client
+   certificate or an OIDC bearer token whose validated `sub`/`aud` identify one RA instance. A
+   shared or static admin key MUST NOT satisfy an ingest route in any deployment reachable by more
+   than one RA.
+2. **Authorize the caller for `raid`.** The TL MUST bind the authenticated identity to the set of
+   `ra_id`s it is permitted to produce for, and MUST reject an event whose header/body `raid` is
+   not in that authorized set with `403 RAID_NOT_AUTHORIZED` — **before and independently of** the
+   JWS signature check. A producer key registered under a different `ra_id` is therefore useless to
+   an unauthorized caller.
+3. **Verify the JWS** against the resolved `(ra_id, key_id)` producer key (`NOT_FOUND_PRODUCER_KEY`
+   / `INVALID_PRODUCER_KEY` / `MISMATCH_SIGNATURE` on failure).
+4. **Match `raid`** in the protected header against `raId` in the body (`RAID_MISMATCH`).
+
+**Producer-key administration is likewise scoped.** An admin principal MUST be authorized to
+register, list, or revoke producer keys only for the `ra_id`s it owns; a request to manage a key
+under another operator's `ra_id` is rejected `403 RA_NOT_OWNED`. The quickstart "a static key is
+always admin" behavior is **development-only** and MUST be disabled for any externally reachable
+deployment; production admin access MUST be a per-principal credential (OIDC admin group or mTLS).
 
 ## 7. Checkpoint anchoring to Hedera (HCS)
 
@@ -218,12 +272,12 @@ A conformant ANS-4 implementation:
 1. Accepts statements only with verified producer signatures (§6) and seals each into a leaf per the leaf-hash rule (§3).
 2. Dedupes appends by content hash, so byte-identical retries land on the same leaf.
 3. Returns SCITT receipts matching the COSE profile in §5.2.
-4. Exposes the verification API (§5) over HTTPS with no authentication on read-only endpoints.
-5. Implements producer authentication with overlap-window key rotation (§6).
+4. Exposes the verification API (§5) over HTTPS with no authentication on read-only endpoints, rate-limits every anonymous read, and gates the identity audit/reverse-join surfaces behind per-object opt-in (§5.0).
+5. Implements producer authentication with overlap-window key rotation (§6), and authorizes each ingest caller for the `raid` it submits (§6.1) before verifying the signature.
 6. Distributes its verification key via `/root-keys` (§5.1).
 7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header rules of §3.
 
-**Operator policy** (rotation cadence, checkpoint batching window, status-token TTL, HCS anchoring cadence) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's cadence differs from another deployment's.
+**Operator policy** (rotation cadence, checkpoint batching window, status-token TTL, HCS anchoring cadence, and read rate-limit thresholds) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's policy differs from its own.
 
 ## 9. Security considerations
 
@@ -256,6 +310,28 @@ Verified-Identity event family — `IDENTITY_VERIFIED`, `IDENTITY_UPDATED`, `IDE
 that the TL accepts these event types, seals each with the same receipt format, and preserves
 them. All of them are appended to the one Merkle tree (§5.3); the per-object "streams" are read
 indexes, not separate logs.
+
+### 9.4 Producer impersonation
+
+Because `ra_id` and `key_id` are attacker-controlled wire inputs (the header `kid`/`raid` and the
+body `raId`), signature validity alone does not establish *which* RA an event came from: a key
+registered under a victim's `ra_id`, or a reused shared ingest credential, would otherwise let a
+caller seal events that attribute to another RA's producer. The TL closes this by binding the
+authenticated ingest credential to its authorized `ra_id` set and rejecting any unauthorized `raid`
+with `403 RAID_NOT_AUTHORIZED` **before** the signature check (§6.1), and by scoping producer-key
+administration to the `ra_id`s an admin owns (`403 RA_NOT_OWNED`). Static/always-admin credentials
+are development-only and MUST NOT gate ingest or key administration in an externally reachable
+deployment.
+
+### 9.5 Anonymous-read abuse (enumeration & DoS)
+
+The unauthenticated read surface (§5, §5.3) exposes object existence, full event chains, and
+operator↔fleet relationships by identifier, plus bulk Merkle tiles — all without a cost gate unless
+one is imposed. A TL MUST rate-limit every anonymous read (per-IP/per-token, `429` + `Retry-After`),
+bound page and tile sizes, and default the identity audit and reverse-join surfaces to **closed**,
+exposing them only where the object's owner has opted in (§5.0). This prevents an anonymous party
+from enumerating the registry or mapping operators to their agent fleets, and bounds the read-side
+resource-exhaustion surface.
 
 ## Appendix A: Worked examples
 
