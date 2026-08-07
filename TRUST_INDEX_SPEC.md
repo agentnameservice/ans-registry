@@ -288,6 +288,11 @@ The TI MUST NOT carry forward behavioral reputation from a revoked registration 
 Negative reputation is not cooled.
 An operator MAY present a succession attestation, signed by the transferring key and endorsing the receiving key, to reduce the cooling; the attestation MUST NOT eliminate it, because reputation cannot be proven to transfer at full fidelity between distinct signing parties.
 
+**Recovery after a confirmed negative.** A confirmed negative reputation entry (Section 8.3) suppresses the dimension it bears on until the agent both outlives the entry and demonstrates changed behavior.
+Recovery SHOULD depend on fresh positive evidence rather than elapsed time alone: the suppression lifts as new settled interactions (Section 2.1) accrue without the fault repeating.
+Recovery MUST be monotonic and MUST NOT exceed what current evidence supports.
+A remediation accepted by the governance body, or a superseding entry under Section 8.3, MAY shorten the path but MUST NOT restore the score instantly.
+
 ### 2.6 Environment adjustments
 
 The agent's score also depends on the infrastructure around it.
