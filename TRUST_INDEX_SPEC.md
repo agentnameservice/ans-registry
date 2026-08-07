@@ -349,6 +349,12 @@ Each signal category (integrity, identity, solvency, behavior, safety) occupies 
 
 A TI MUST validate the `schemaVersion` of each signal block against its published version manifest before scoring. Signals at the current version score normally. Signals at a deprecated version receive reduced weight. Signals at a rejected version are treated as absent.
 
+**Signal provenance MUST be verifiable.** Every signal block that does not come from the TL MUST name the accredited source that asserted it and carry that source's signature over the block.
+A TI MUST verify that signature and confirm the source is accredited for the signal's category (Section 8.5) before the signal raises any dimension score.
+A signal whose provenance is absent, unsigned, or from an unaccredited source MUST NOT raise a score.
+The TI MAY record it as unattested and lower the dimension's coverage.
+The evaluation response names the source and its accreditation alongside the signal, so a reader can see who asserted the underlying evidence.
+
 ### 3.4 Signal versioning lifecycle
 
 Signal schemas evolve as new signal types are added or existing ones are refined. The lifecycle follows three stages:
@@ -734,6 +740,11 @@ The response MAY include:
 - `compositeScore`: Deprecated single integer 0-100
 - `evaluationChanged`: Boolean. True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score changes without caching and comparing vectors themselves. The TI tracks each client's last-seen evaluation via client identity or session token.
 
+The signed credential MUST carry a `validUntil` no later than the point at which its most volatile scored signal goes stale.
+A verifier MUST reject an evaluation whose `validUntil` has passed, so a stale verdict cannot be replayed as current.
+The signed `credentialSubject` includes `agentId` and `evaluationTime`, so the signature binds the verdict to one agent at one moment.
+A verifier MUST reject a credential presented for a different agent.
+
 ### 7.3 Trust Vector, recommended profile, and risk factors
 
 The response serves three audiences:
@@ -887,6 +898,7 @@ A Trust Index concentrates trust decisions. TI providers MUST secure their infra
 | :--- | :--- | :--- | :--- |
 | **TI compromise** | Attacker inflates or deflates scores | CA-grade infrastructure security | MUST |
 | **Signing key compromise** | Forged evaluation VCs | Key rotation, client key pinning, transparency logging of signed evaluations. Publish key fingerprint at `/.well-known/trust-index-keys.json`. | SHOULD |
+| **Selective serving** | Provider serves a flattering evaluation to one caller and the truth to others | Publish each issued evaluation, or its hash, to a public transparency log so callers can detect divergent verdicts for the same agent and `evaluationTime` | SHOULD |
 | **Insecure TI connection** | Man-in-the-middle on trust queries | HTTPS with valid certificate (MUST). DANE TLSA for the TI's endpoint (SHOULD). Signed VC responses (SHOULD). mTLS for `FIDUCIARY` queries (SHOULD). | MUST |
 | **Oracle failure** | Stale or missing solvency, insurance, or credential data | Cached fallback with freshness penalty. Aggregate from multiple independent sources. Circuit breakers when one source diverges. | SHOULD |
 | **Sybil attack** | Fake agents manipulate reviews and endorsements | Weight reviews by identity grade and principal binding type. Analyze the review graph for isolated clusters. Weight on-chain feedback higher than unsigned reviews, scaled by transaction cost. | SHOULD |
