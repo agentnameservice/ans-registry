@@ -271,6 +271,9 @@ A dimension is *evaluated* only when the TI scored it against at least one signa
 An unevaluated gating dimension MUST cap the recommendation at `READ_ONLY`, and the TI MUST NOT skip it as though it had passed.
 For `FIDUCIARY`, the gating dimensions are identity, solvency, and safety; each MUST be evaluated and passing before a TI returns `FIDUCIARY`.
 
+**Fiduciary requires cryptographic consent.** An agent reaches `FIDUCIARY` only if it can sign a high-stakes transaction payload with an Identity Certificate private key, which an agent holds only while it has an active Identity Certificate.
+An agent with no active Identity Certificate is capped at `READ_ONLY` for fiduciary-grade decisions, and a TI returns `UNTRUSTED` when a caller explicitly requests a fiduciary-grade evaluation of such an agent.
+
 When interaction context is provided, the TI SHOULD adjust the recommended profile based on authentication strength. The `FIDUCIARY` profile SHOULD require transport-layer authentication (mTLS or equivalent).
 
 A client receiving an `UNTRUSTED` profile SHOULD treat it as a discovery-suppression signal, not a certificate-revocation trigger. The distinction matters: suppression hides the agent from search results and recommendations; revocation breaks the agent's TLS connections and requires RA action. Only the RA controls certificate revocation.
