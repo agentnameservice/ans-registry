@@ -795,6 +795,12 @@ A conforming TI MUST implement caching. Solvency signals, which can change withi
 
 When a cached signal expires and the source is unreachable, the TI applies the freshness penalty. The `evaluationTime` in the response MUST reflect when the TI last fully computed the score, not when the cached result was served.
 
+**Behavioral-anomaly circuit breaker.** A TI SHOULD watch each agent's live signals for abnormal variance, a sudden spike in failed interactions or disputes, or a sharp departure from the agent's established baseline.
+On a threshold breach, the TI SHOULD immediately suppress the agent's `recommendedProfile` toward `READ_ONLY` and emit a risk factor, rather than serve the cached score until the next scheduled recomputation.
+This is a discovery-suppression override, not a certificate revocation.
+It clears when the anomaly resolves or a fresh evaluation confirms the agent, and only the RA revokes certificates (Section 2.3).
+A TI MUST document its anomaly triggers, because a false trigger suppresses a healthy agent.
+
 ---
 
 ## 8. Federation
@@ -899,6 +905,7 @@ A Trust Index concentrates trust decisions. TI providers MUST secure their infra
 | **TI compromise** | Attacker inflates or deflates scores | CA-grade infrastructure security | MUST |
 | **Signing key compromise** | Forged evaluation VCs | Key rotation, client key pinning, transparency logging of signed evaluations. Publish key fingerprint at `/.well-known/trust-index-keys.json`. | SHOULD |
 | **Selective serving** | Provider serves a flattering evaluation to one caller and the truth to others | Publish each issued evaluation, or its hash, to a public transparency log so callers can detect divergent verdicts for the same agent and `evaluationTime` | SHOULD |
+| **Cache-window abuse** | A hijacked agent is exploited against its stale high score before the next recomputation | Behavioral-anomaly circuit breaker (Section 7.5), bounded by the short verdict `validUntil` | SHOULD |
 | **Insecure TI connection** | Man-in-the-middle on trust queries | HTTPS with valid certificate (MUST). DANE TLSA for the TI's endpoint (SHOULD). Signed VC responses (SHOULD). mTLS for `FIDUCIARY` queries (SHOULD). | MUST |
 | **Oracle failure** | Stale or missing solvency, insurance, or credential data | Cached fallback with freshness penalty. Aggregate from multiple independent sources. Circuit breakers when one source diverges. | SHOULD |
 | **Sybil attack** | Fake agents manipulate reviews and endorsements | Weight reviews by identity grade and principal binding type. Analyze the review graph for isolated clusters. Weight on-chain feedback higher than unsigned reviews, scaled by transaction cost. | SHOULD |
