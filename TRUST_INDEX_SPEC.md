@@ -145,7 +145,7 @@ Features from companion proposals that are not yet part of the core ANS architec
 
 ### 2.1 Five signal categories
 
-The specification defines five signal categories, ordered from cryptographic facts to behavioral observations. A conforming TI MUST evaluate all dimensions defined in its declared schema version and MUST NOT collapse them into fewer dimensions.
+The specification defines five signal categories, ordered from cryptographic facts to behavioral observations. A conforming TI MUST evaluate all dimensions defined in its declared schema version and MUST NOT collapse them into fewer dimensions. Each signal contributes to exactly one dimension. Where a single piece of evidence could inform more than one dimension (a TEE attestation speaks to both mechanical integrity and safety), the specification assigns it to the one dimension whose question it best answers, so the dimensions stay independent and no evidence is counted twice.
 
 **Integrity: Is this agent mechanically sound?**
 
@@ -202,6 +202,8 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Enclave attestation | TEE hardware details: provider, hardware version, SVN. Known-vulnerable generations are penalized. |
 | Compliance certifications | Third-party audit results: SOC 2 Type II, HIPAA, ISO 27001 |
 
+**Critical signals cap their dimension.** Within a dimension, most signals combine into a weighted score, but some findings are disqualifying and MUST NOT be averaged away. A signal MAY be marked *critical*; when a critical signal is failing, the dimension score is capped at that signal's low value regardless of healthier signals in the same dimension. An open data-egress policy, a failed adversarial-safety test, and an expired compliance certification are critical safety signals: an agent that leaks data to anyone does not become safe by also holding a guardrail certificate.
+
 ### 2.2 Trust Vector
 
 The Trust Vector has this JSON representation:
@@ -235,6 +237,10 @@ Two agents score within seven composite points but qualify for different profile
 In schema version 1.0, the Trust Vector contains the five dimensions defined above. The consortium governance body MAY add dimensions in future schema versions. A conforming TI MUST support the dimensions defined in its declared schema version and MUST NOT drop or rename any.
 Additional signal categories (such as sustainability) MAY be returned as supplementary fields outside the `trustVector` object.
 
+**Per-dimension coverage.** Each dimension score is accompanied by a coverage value reporting how much evidence supports the score. Coverage separates "evaluated and low" from "not enough data to evaluate." A solvency score of 0 with full coverage means the agent proved it cannot pay; a solvency score of 0 with zero coverage means the agent supplied no solvency evidence at all. A caller MUST be able to tell these apart, because the first says "walk away" and the second says "ask for more proof first." A dimension with zero coverage is unevaluated and is subject to the gating rule in Section 2.3. Appendix B carries a `coverage` value alongside each dimension score.
+
+**Lead with the band.** The `recommendedProfile` in Section 2.3 is the primary output of an evaluation; the per-dimension 0-100 scores are supporting detail. A caller SHOULD decide whether to proceed from the profile band and consult the numeric scores for nuance, not the reverse. Numeric scores SHOULD be calibrated so a given value carries a consistent operational meaning, for example against an observed rate of no incident within a defined window, rather than being derived from hand-picked signal-to-score mappings. A TI MUST document its calibration basis.
+
 ### 2.3 Recommended profiles
 
 The Trust Evaluation API response includes a `recommendedProfile` field classifying agents into operating categories:
@@ -243,10 +249,12 @@ The Trust Evaluation API response includes a `recommendedProfile` field classify
 | --------- | ------------ | -------------- |
 | `READ_ONLY` | Low solvency or identity | Information queries, read-only data access |
 | `TRANSACTIONAL` | Moderate scores across all dimensions | Small purchases, reversible transactions |
-| `FIDUCIARY` | High identity and solvency | Financial delegation, legal contracts |
+| `FIDUCIARY` | Identity, solvency, and safety all evaluated and passing | Financial delegation, legal contracts |
 | `UNTRUSTED` | Any dimension below a critical threshold | No delegation; the client SHOULD NOT proceed |
 
 A conforming TI MUST support these four profiles. A TI MAY define additional profiles and MUST document their assignment criteria.
+
+**Gating dimensions MUST be evaluated, not assumed.** A profile that authorizes financial or legal exposure (`FIDUCIARY`, and any provider-defined profile above `TRANSACTIONAL`) MUST require its gating dimensions to be present and passing, not merely turned off so they cannot lower the score. A dimension is *evaluated* only when the TI scored it against at least one signal; a dimension with no signals is *unevaluated*, which is not the same as a low score. An unevaluated gating dimension MUST cap the recommendation at `READ_ONLY`, and the TI MUST NOT skip it as though it had passed. For `FIDUCIARY`, the gating dimensions are identity, solvency, and safety; each MUST be evaluated and passing before a TI returns `FIDUCIARY`.
 
 When interaction context is provided, the TI SHOULD adjust the recommended profile based on authentication strength. The `FIDUCIARY` profile SHOULD require transport-layer authentication (mTLS or equivalent).
 
@@ -1255,6 +1263,17 @@ This is the canonical schema. Where inline descriptions in the specification bod
         "solvency": { "type": "integer", "minimum": 0, "maximum": 100 },
         "behavior": { "type": "integer", "minimum": 0, "maximum": 100 },
         "safety": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Per-dimension evidence coverage, 0.0 (unevaluated) to 1.0 (fully evidenced). A dimension score MUST be read together with its coverage: zero coverage means unevaluated, not low. A TI SHOULD populate coverage for every dimension it returns. See Section 2.2.",
+      "properties": {
+        "integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "identity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "solvency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "behavior": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "compositeScore": {
