@@ -103,13 +103,18 @@ The one authoritative key-holder is the name's **current owner account**, resolv
 registry hierarchy at verify time (§2 check 3) — never presented in the request. This kind is
 single-key; there is no JWS `kid` selector (the one signer is fully determined by the
 identifier, as with `lei`). The challenge entry advisorily names the resolved owner as a CAIP-10
-account (`eip155:<chain>:<address>`) so the client can confirm which account must sign.
+account (`eip155:<chain>:<address>`, the address in EIP-55 checksummed form) so the client can
+confirm which account must sign.
 
 ## 4. Seal tier — verbatim verification method
 
 The sealed verification method is the resolved owner account as a CAIP-10 `blockchainAccountId`,
 sealed as resolved — the same account-based `blockchainAccountId` seal the
-[`did:ethr`](did-ethr.md) profile uses — alongside the submitted signature.
+[`did:ethr`](did-ethr.md) profile uses — alongside the submitted signature. The address component
+of the `blockchainAccountId` is the **EIP-55 checksummed** form, so a given owner yields one
+canonical account string across RAs. Address equality during verification (EOA recovery,
+ERC-1271) is compared on the 20-byte value; the string that is sealed and advertised is always
+the EIP-55 form.
 
 ```json
 {
@@ -122,9 +127,8 @@ sealed as resolved — the same account-based `blockchainAccountId` seal the
 
 Registry state — records, expiry, roles, resolver configuration — is **referenced, never
 copied** into the seal: the ENS registry is the authoritative, externally-resolvable source, and
-a sealed copy would be one more thing that can disagree with it. Per ANS-0 §8.4's verbatim rule,
-the seal carries the verification method as resolved plus the proof — nothing re-encoded or
-derived. Verifiability from the badge alone differs by
+a sealed copy would be one more thing that can disagree with it. The seal stores this verification method in
+full, alongside the proof; it is constructed from the resolved owner account. Verifiability from the badge alone differs by
 account type: an **EOA** proof re-verifies offline by signature recovery against the sealed
 `blockchainAccountId`, with no chain read. A **contract-account** proof (ERC-1271) was verified
 by the RA at proof time against then-current chain state, and the seal attests that verification;
@@ -199,7 +203,7 @@ registries, which perform no offchain lookups, so a legitimate walk never produc
 `OffchainLookup`. All control-path `eth_call`s (the registry walk and any ERC-1271 verification)
 therefore MUST run with client-side CCIP-Read (ERC-3668) resolution **disabled**: a control-path
 `OffchainLookup` can only originate from a registrant-controlled contract in the path, so it MUST
-be treated as a hard failure (`ENS_CHAIN_UNAVAILABLE`), never followed.
+be treated as a hard failure (`ENS_OFFCHAIN_LOOKUP_BLOCKED`), never followed.
 
 A deployment that additionally reads ENS *records* (the §5 ENSIP-26 cross-check) may traverse
 wildcard/offchain resolution (CCIP-Read), which **is** registrant-steered and MUST be hardened
@@ -212,8 +216,9 @@ exactly like the did:web fetcher (ANS-0 §13).
 | `ENS_BAD_FORMAT` | not ENSIP-15-normalizable, not a `.eth` name, or the bare `.eth` TLD (no label under it) |
 | `ENS_NAME_UNOWNED` | the registry walk resolves no current owner (never registered, reserved, expired, or resolver-only ENS presence) |
 | `ENS_NAME_EXPIRED` | refinement of `ENS_NAME_UNOWNED` when the parent registry's expiry shows a lapsed registration |
-| `ENS_SIGNATURE_INVALID` | signature fails validation against the resolved owner, or the signer is not the owner (role holders and operators are rejected) |
-| `ENS_CHAIN_UNAVAILABLE` | chain read failed (retryable; no endpoint detail echoed) |
+| `ENS_SIGNATURE_INVALID` | signature fails validation against the resolved owner, or the signer is not the owner (role holders and operators are rejected); an owner contract that reverts or returns a non-affirming value under ERC-1271 is treated as invalid |
+| `ENS_CHAIN_UNAVAILABLE` | a chain read failed at the transport level (RPC error or timeout); retryable; no endpoint detail echoed |
+| `ENS_OFFCHAIN_LOOKUP_BLOCKED` | a control-path call attempted an ERC-3668 offchain lookup; non-retryable (§7) |
 | `IDENTIFIER_KIND_UNSUPPORTED` | returned while the profile is Postponed (no verifier enabled) |
 
 (Generic identity codes — `IDENTIFIER_KIND_UNSUPPORTED`, `IDENTIFIER_DUPLICATE`,
@@ -230,8 +235,8 @@ supporting `ens` is optional, but an RA that enables it MUST perform every check
 live (the ENS registry hierarchy, `UniversalResolverV2.findOwner`, and the universal
 signature-validation interface are deployed); the kind is disabled until an ENS owner-resolver
 and an Ethereum-signature verifier are wired and tested in the RA implementation, returning
-`IDENTIFIER_KIND_UNSUPPORTED` until then. Promotion to Active requires: a pinned-RPC registry
-navigator behind the port, an Ethereum-signature verifier (EIP-712 + EIP-191 + ERC-1271;
+`IDENTIFIER_KIND_UNSUPPORTED` until then. Promotion to Active requires: ENSv2 live on the RA's
+configured chain, a pinned-RPC registry navigator behind the port, an Ethereum-signature verifier (EIP-712 + EIP-191 + ERC-1271;
 ERC-6492-style universal validation), an ENSIP-15 normalizer, tests against live chain reads,
 the request/challenge/verify shapes below fixed in `api/api-spec-v2.yaml`, and
 the account-based seal shape fixed in `api/api-spec-tl-v2.yaml` /
