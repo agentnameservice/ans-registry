@@ -180,6 +180,11 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Insurance | Active liability policy from a recognized insurer |
 | Escrow history | Track record of successful fund releases and disputes |
 
+**Solvency scores recoverable capital.** A one-time proof that a wallet held funds says little about whether those funds remain when a dispute lands, so a TI MUST weight capital committed to this agent's obligations, escrow, a posted bond, or a liability policy naming the agent, far above a floating wallet balance.
+Solvency measures the amount recoverable if the agent causes damage.
+A reserve offered as solvency evidence MUST be exclusive to the obligations it backs.
+A TI MUST NOT credit the same funds to more than one agent, so a proof aggregating balances across chains or wallets without proving exclusivity carries no more weight than a single balance snapshot.
+
 **Behavior: How does this agent treat others?**
 
 | Signal | What the TI checks |
@@ -191,6 +196,10 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Interop compliance | Handshake success rates, async response rates, credential grant honoring |
 | On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. A conforming TI SHOULD weight each review by its transaction cost (`gasUsed * effectiveGasPrice`), not by count. L2 feedback costs orders of magnitude less than mainnet and carries proportionally less weight. Feedback persists across token transfers (keyed to agentId, not owner). |
 | License adherence | Whether the agent operates within machine-readable license terms. A recorded violation is a negative signal. |
+
+**Endorsements count only when backed by a settled interaction.** A peer endorsement or rating raises the behavior score only when it references a settled economic interaction between the parties, an escrow release or a completed payment, so reputation cannot be minted by agents that never transacted.
+A TI MUST cap the total behavior contribution any single principal-cluster (agents sharing an operator or principal binding) can make to one agent, so a ring of related agents cannot endorse each other into a high score.
+Section 9.1 covers the graph analysis that detects such rings.
 
 **Safety: Will this agent leak data or cause harm?**
 
@@ -275,6 +284,10 @@ A conforming TI SHOULD discount behavioral signals when the most recent TL event
 A domain transfer detected by the RA (via ACME failure, RDAP registrant handle change, or ProviderID mismatch) produces an `AGENT_REVOKED` event in the TL.
 The TI MUST NOT carry forward behavioral reputation from a revoked registration to a new one on the same FQDN.
 
+**Post-transfer reputation cooling.** When a TI detects a change of the party behind an agent, an on-chain token transfer, a principal-binding refresh, or an operator-change attestation, it SHOULD multiply the agent's accumulated positive reputation by a cooling factor for a defined window, recovering as fresh interactions under the new owner confirm the prior pattern.
+Negative reputation is not cooled.
+An operator MAY present a succession attestation, signed by the transferring key and endorsing the receiving key, to reduce the cooling; the attestation MUST NOT eliminate it, because reputation cannot be proven to transfer at full fidelity between distinct signing parties.
+
 ### 2.6 Environment adjustments
 
 The agent's score also depends on the infrastructure around it.
@@ -287,6 +300,13 @@ The agent's score also depends on the infrastructure around it.
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
 | **Domain registrar reputation** | Identity | The domain name registrar's public track record of abuse-rate compliance (not the ANS Registration Authority) | MAY |
+
+### 2.7 Bootstrapping a new agent
+
+A new agent with no behavioral history looks the same as an abandoned or malicious one, so nothing delegates to it and it never earns the history that would raise its score.
+To break that deadlock, a TI MAY let an agent reach `TRANSACTIONAL` without behavioral history when it posts a refundable stake, holds a strong identity grade, and passes a safety certification.
+The stake is forfeited on confirmed misconduct and refundable otherwise, so the agent buys a starting line rather than a score.
+This path MUST NOT reach `FIDUCIARY`; fiduciary standing still requires the gating dimensions and cryptographic consent of Section 2.3.
 
 ---
 
@@ -629,6 +649,10 @@ Positive reviews travel with the agent as signed Verifiable Credentials. Negativ
 An agent that defrauds users at one RA, abandons its identity, and registers fresh at another RA should not start with a clean record. When a principal registers a new agent, the TI SHOULD check the principal binding against federated negative reputation entries.
 
 If the principal binding matches a previous entry, the TI SHOULD factor that history into the new agent's Trust Vector as a strong negative signal. The weight depends on the entry's severity and the issuing authority's track record.
+
+Negative reputation MUST attach to every identifier the misconduct is observable through, not only the principal binding: the FQDN, any wallet or on-chain address the agent transacted through, and the fingerprints of its certificates and signing keys.
+An agent that registers with only a domain-validated certificate and no principal binding therefore cannot shed a bad record by re-registering under a fresh name.
+A cheap identity is cheap to discard, so a TI MUST cap the trust an agent can reach by the cost of replacing its strongest identifier: an agent bound only to a low-cost identifier cannot reach a profile that assumes the identifier is expensive to abandon.
 
 ### 5.6 Inherited trust (BIMI, VMC, DMARC)
 
