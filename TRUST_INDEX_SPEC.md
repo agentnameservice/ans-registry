@@ -202,6 +202,12 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Enclave attestation | TEE hardware details: provider, hardware version, SVN. Known-vulnerable generations are penalized. |
 | Compliance certifications | Third-party audit results: SOC 2 Type II, HIPAA, ISO 27001 |
 
+**Safety findings SHOULD use an established taxonomy.** For guardrail and adversarial-test results to be comparable across auditors, the findings SHOULD carry codes from a published agent-security taxonomy, such as CSA MAESTRO, OWASP's AIVSS, MITRE ATLAS, or the NIST AI Risk Management Framework, rather than an ad-hoc code list.
+A TI scores a finding at finer granularity when it recognizes the taxonomy and severity; a finding in an unrecognized or ad-hoc scheme scores at pass or fail only.
+
+**Reuse ERC-8004 registries instead of parallel signals.** Where an agent has an ERC-8004 registration, a conforming TI SHOULD source its behavior signal from the ERC-8004 reputation registry (the on-chain feedback signal above) and its safety signal from the ERC-8004 validation registry (Section 4.2), rather than maintaining a separate set of behavior and safety signals.
+Validation-registry responses are independent attestations of the agent, so they feed the safety dimension; reputation-registry feedback records how the agent treated its counterparties, so it feeds behavior.
+
 ### 2.2 Trust Vector
 
 The Trust Vector has this JSON representation:
@@ -1170,7 +1176,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
         "guardrailCertification": {
           "type": "object",
           "properties": {
-            "standard": { "enum": ["OWASP_LLM_TOP10", "AISI_2026_SAFE", "CUSTOM"] },
+            "standard": { "enum": ["OWASP_LLM_TOP10", "OWASP_AIVSS", "MITRE_ATLAS", "CSA_MAESTRO", "NIST_AI_RMF", "AISI_2026_SAFE", "CUSTOM"] },
             "version": { "type": "string" },
             "standardUri": {
               "type": "string",
