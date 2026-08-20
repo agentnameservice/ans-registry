@@ -2034,8 +2034,8 @@ components:
       description: |
         Registers (POST) or rotates (PUT) an identifier. The kind is
         inferred from the value's lexical form — `did:web:` prefix,
-        `did:key:` prefix, or a 20-character LEI (recognized but
-        postponed) — never caller-asserted.
+        `did:key:` prefix, a 20-character LEI, or a `.eth` name (the last
+        two recognized but postponed) — never caller-asserted.
       properties:
         value:
           type: string
@@ -2058,7 +2058,7 @@ components:
           description: RA-assigned UUIDv7 — the TL stream key
         kind:
           type: string
-          enum: ['did:web', 'did:key', 'lei']
+          enum: ['did:web', 'did:key', 'lei', 'ens']
         value:
           type: string
           description: The canonical identifier this round proves
@@ -2177,7 +2177,7 @@ components:
           type: string
         kind:
           type: string
-          enum: ['did:web', 'did:key', 'lei']
+          enum: ['did:web', 'did:key', 'lei', 'ens']
         value:
           type: string
         status:
@@ -2185,7 +2185,7 @@ components:
         proofMethod:
           type: string
           description: Control proof that verified this identity
-          enum: [did-web-sig, did-key-sig, lei-vlei-acdc]
+          enum: [did-web-sig, did-key-sig, lei-vlei-acdc, ens-account-sig]
         pendingValue:
           type: string
           description: Staged rotation replacement (empty unless rotating)
@@ -2250,7 +2250,7 @@ components:
           type: string
         kind:
           type: string
-          enum: ['did:web', 'did:key', 'lei']
+          enum: ['did:web', 'did:key', 'lei', 'ens']
         value:
           type: string
         identityStatus:

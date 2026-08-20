@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ANS sealed identity event (V2)",
-  "description": "Conformance schema for a sealed Verified-Identity Transparency-Log entry (the IDENTITY_* event family). Mirrors ANS-0 §8.1 and the producer payload the RA POSTs to POST /v1/internal/identities/event. Sealed shapes are append-only-forever: the five eventType tokens, the field set, and the per-type required-field matrix are the wire contract. The strict, conformance-critical constraints live on IdentityEvent (the producer-authored, JCS-canonicalized inner event); the envelope status is TL-assigned and intentionally permissive here. NOTE: the keys[]/ProvenKey shape below is the verbatim-verification-method seal used by the JWS-scheme kinds (did:web, did:key). The postponed `lei` kind will seal a thumbprint-only variant (subject AID + key thumbprint, no verificationMethod) — that is a future schema amendment, not covered by this revision.",
+  "description": "Conformance schema for a sealed Verified-Identity Transparency-Log entry (the IDENTITY_* event family). Mirrors ANS-0 §8.1 and the producer payload the RA POSTs to POST /v1/internal/identities/event. Sealed shapes are append-only-forever: the five eventType tokens, the field set, and the per-type required-field matrix are the wire contract. The strict, conformance-critical constraints live on IdentityEvent (the producer-authored, JCS-canonicalized inner event); the envelope status is TL-assigned and intentionally permissive here. NOTE: the keys[]/ProvenKey shape below is the verbatim-verification-method seal used by the JWS-scheme kinds (did:web, did:key). The postponed `lei` kind will seal a thumbprint-only variant (subject AID + key thumbprint, no verificationMethod) — that is a future schema amendment, not covered by this revision. Likewise, the postponed `ens` kind will seal an account-based variant (a blockchainAccountId verification method plus an Ethereum signedProof/proofEncoding, no JWK/multibase key) — also a future schema amendment, not covered by this revision.",
   "type": "object",
   "required": ["payload", "schemaVersion", "signature", "status"],
   "additionalProperties": false,
@@ -51,10 +51,10 @@
           "enum": ["IDENTITY_VERIFIED", "IDENTITY_UPDATED", "IDENTITY_REVOKED", "IDENTITY_LINKED", "IDENTITY_UNLINKED"]
         },
         "identityId": { "type": "string", "minLength": 1, "description": "UUIDv7 — the identity stream key." },
-        "kind": { "type": "string", "enum": ["did:web", "did:key", "lei"] },
+        "kind": { "type": "string", "enum": ["did:web", "did:key", "lei", "ens"] },
         "value": { "type": "string", "minLength": 1, "description": "Canonical identifier, e.g. did:web:identity.acme-corp.com." },
         "timestamp": { "type": "string", "format": "date-time", "description": "RFC 3339." },
-        "proofMethod": { "type": "string", "enum": ["did-web-sig", "did-key-sig", "lei-vlei-acdc"] },
+        "proofMethod": { "type": "string", "enum": ["did-web-sig", "did-key-sig", "lei-vlei-acdc", "ens-account-sig"] },
         "providerId": { "type": "string", "description": "The owning principal — the who's owner." },
         "keys": {
           "type": "array",
