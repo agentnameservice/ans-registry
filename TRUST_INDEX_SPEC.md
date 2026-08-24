@@ -202,10 +202,13 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Enclave attestation | TEE hardware details: provider, hardware version, SVN. Known-vulnerable generations are penalized. |
 | Compliance certifications | Third-party audit results: SOC 2 Type II, HIPAA, ISO 27001 |
 
-**Safety findings SHOULD use an established taxonomy.** For guardrail and adversarial-test results to be comparable across auditors, the findings SHOULD carry codes from a published agent-security taxonomy, such as CSA MAESTRO, OWASP's AIVSS, MITRE ATLAS, or the NIST AI Risk Management Framework, rather than an ad-hoc code list.
+**Safety findings SHOULD use an established taxonomy.** For guardrail and adversarial-test results to be comparable across auditors, the findings SHOULD carry codes from a published agent-security taxonomy that defines codes and severities, such as OWASP's AIVSS or MITRE ATLAS, rather than an ad-hoc code list.
+(The NIST AI Risk Management Framework defines no finding codes and no certification regime, so it is recorded under compliance certifications, not here.)
 A TI scores a finding at finer granularity when it recognizes the taxonomy and severity; a finding in an unrecognized or ad-hoc scheme scores at pass or fail only.
 
-**Reuse ERC-8004 registries instead of parallel signals.** Where an agent has an ERC-8004 registration, a conforming TI SHOULD source its behavior signal from the ERC-8004 reputation registry (the on-chain feedback signal above) and its safety signal from the ERC-8004 validation registry (Section 4.2), rather than maintaining a separate set of behavior and safety signals.
+**Reuse ERC-8004 registries as signals, not as a replacement.** Where an agent has an ERC-8004 registration, a conforming TI SHOULD read the ERC-8004 reputation registry (the on-chain feedback signal above) into the behavior dimension and the ERC-8004 validation registry (Section 4.2) into the safety dimension, rather than building a parallel on-chain registry of its own.
+These registries feed their dimensions in addition to, not in place of, the other signals in each category, and subject to the Section 9.1 Sybil weighting and Section 2.5 decay.
+ERC-8004 reputation feedback is permissionless and inflatable, and its validation responses are agent-initiated with agent-chosen validators, so neither may displace the dispute-rate, protocol-adherence, egress, and attestation signals the rated party cannot curate.
 Validation-registry responses are independent attestations of the agent, so they feed the safety dimension; reputation-registry feedback records how the agent treated its counterparties, so it feeds behavior.
 
 ### 2.2 Trust Vector
@@ -671,7 +674,8 @@ A TI MUST verify that anchor domains match the agent's registered domain. A TI S
 | DMARC `p=reject` | Moderate | Domain enforces strict email authentication |
 | Code signing certificate | Moderate | Publisher identity verified by CA |
 | ENS_ENSIP25 | Strong | DNS domain resolves via ENS (Gasless DNS Resolution, ENSIP-17) with full DNSSEC proof chain verified by ENS contracts. |
-| ERC8004_VALIDATION | Moderate | Agent has validation responses from accredited validators in the ERC-8004 Validation Registry, with the validator's contract address confirmed by the governance body. Signal quality depends on the validator's methodology (stake-secured re-execution, zkML, TEE attestation). |
+
+ERC-8004 Validation Registry responses are not listed here: they attest the quality of the agent's work (stake-secured re-execution, zkML, or TEE attestation), so they feed the safety dimension (Section 2.1), not identity. One-signal-one-dimension scores that evidence once, under safety, rather than crediting it here as an identity anchor.
 
 ---
 
@@ -1058,8 +1062,8 @@ This is the canonical schema. Where inline descriptions in the specification bod
             "required": ["type"],
             "properties": {
               "type": {
-                "enum": ["BIMI_VMC", "BIMI_CMC", "BIMI_SELF_ASSERTED", "CODE_SIGNING", "CORPORATE_PKI", "ENS_ENSIP25", "ERC8004_VALIDATION", "CUSTOM"],
-                "description": "DNS-based types require domain. ENS_ENSIP25 and ERC8004_VALIDATION require identifier instead."
+                "enum": ["BIMI_VMC", "BIMI_CMC", "BIMI_SELF_ASSERTED", "CODE_SIGNING", "CORPORATE_PKI", "ENS_ENSIP25", "CUSTOM"],
+                "description": "DNS-based types require domain. ENS_ENSIP25 requires identifier instead. ERC-8004 Validation Registry responses are a safety signal (Section 2.1), not an identity anchor."
               },
               "domain": { "type": "string", "format": "hostname" },
               "identifier": { "type": "string" },
@@ -1176,7 +1180,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
         "guardrailCertification": {
           "type": "object",
           "properties": {
-            "standard": { "enum": ["OWASP_LLM_TOP10", "OWASP_AIVSS", "MITRE_ATLAS", "CSA_MAESTRO", "NIST_AI_RMF", "AISI_2026_SAFE", "CUSTOM"] },
+            "standard": { "enum": ["OWASP_LLM_TOP10", "OWASP_AIVSS", "MITRE_ATLAS", "CSA_MAESTRO", "AISI_2026_SAFE", "CUSTOM"] },
             "version": { "type": "string" },
             "standardUri": {
               "type": "string",
@@ -1185,6 +1189,23 @@ This is the canonical schema. Where inline descriptions in the specification bod
             },
             "auditorDid": { "type": "string" },
             "reportHash": { "type": "string" },
+            "reportUri": {
+              "type": "string",
+              "format": "uri",
+              "description": "Optional. Location of the full report; its content MUST hash to reportHash."
+            },
+            "findings": {
+              "type": "array",
+              "description": "Per-finding results so a TI can score at finer granularity than pass/fail. Codes come from the taxonomy named in standard.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "scheme": { "type": "string", "description": "Taxonomy the code belongs to, e.g. MITRE_ATLAS or OWASP_AIVSS." },
+                  "code": { "type": "string" },
+                  "severity": { "type": "string" }
+                }
+              }
+            },
             "passedAt": { "type": "string", "format": "date-time" }
           }
         },
@@ -1226,7 +1247,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "items": {
             "type": "object",
             "properties": {
-              "standard": { "enum": ["SOC2_TYPE1", "SOC2_TYPE2", "HIPAA", "ISO27001", "GDPR", "PCI_DSS"] },
+              "standard": { "enum": ["SOC2_TYPE1", "SOC2_TYPE2", "HIPAA", "ISO27001", "GDPR", "PCI_DSS", "NIST_AI_RMF"] },
               "issuer": { "type": "string" },
               "reportHash": { "type": "string" },
               "validUntil": { "type": "string", "format": "date-time" }
