@@ -169,6 +169,15 @@ badge endpoint). Multiple records coexist during version changes; the `version` 
 right one without fetching every badge (§8.1). Absence of the record under `_ans-badge` means the
 host is not a registered ANS agent.
 
+This bootstrap is **discovery-profile-agnostic**. `_ans-badge` is a family trust record: the
+default [`ANS_DNSAID`](discovery-profiles/ans-dnsaid.md) profile (one SVCB row per endpoint at the
+bare FQDN, RFC 9460) and the [`ANS_TXT`](discovery-profiles/ans-txt.md) profile (`_ans` TXT rows)
+both emit it unchanged. How the caller discovered the endpoint in the first place — the SVCB
+SvcParams or the `_ans` TXT rows — is [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)'s
+concern and carries no authentication weight of its own: the discovery hints corroborate
+verification where noted below (§4.4 card digests, §5.3 port selection, §8.1 version selection)
+but never substitute for the badge, receipt, or status token.
+
 **Before fetching any badge URL, the verifier MUST confirm the URL's host is a TL the verifier
 trusts.** Verifiers maintain an explicit allowlist of trusted TL domains. Without this check, a
 spoofed or attacker-published TXT record redirects the lookup to a server returning forged badge
@@ -275,6 +284,14 @@ fingerprints appear during a rotation overlap — a verifier matches against any
 needs the refresh-on-mismatch pattern the badge tier uses (§8.2). `metadataHashes` lets a
 verifier hash a fetched Agent Card and detect post-registration tampering
 ([ANS-5 §4](ans-5-integrity-monitoring.md#4-verification-checks), schema-integrity row).
+
+Under the default `ANS_DNSAID` discovery profile the same card digest also appears in DNS: the
+endpoint's SVCB row carries it as `key65401` (DNS-AID `cap-sha256`, `base64url` of the raw 32
+bytes), while `metadataHashes` carries `SHA256:<hex>` — one hash, two encodings
+([ans-dnsaid §2](discovery-profiles/ans-dnsaid.md#2-record-assembly)). A verifier that checks card
+integrity SHOULD compare both channels where available: the status-token entry is TL-signed, the
+SVCB digest is DNS-anchored where the zone DNSSEC-validates, and disagreement between the two is
+itself a finding even when the fetched card matches one of them.
 
 **Status-token verification algorithm:**
 
@@ -451,7 +468,9 @@ Where the callee's zone is DNSSEC-signed, the caller MAY additionally validate t
 Certificate against the `_{port}._tcp.{agentHost}` TLSA record set (`3 0 1` — DANE-EE, full
 certificate, SHA-256; [ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). Selector 0
 makes the TLSA content the same SHA-256 the badge and status token carry, so no extra hash is
-computed. Check against **all** TLSA records — multiple records coexist during rotations. Per RFC
+computed. The `{port}` label is the port the connection actually uses — under `ANS_DNSAID` the
+SVCB row's `port=` SvcParam, under `ANS_TXT` the endpoint URL's port. Check against **all** TLSA
+records — multiple records coexist during rotations. Per RFC
 6698 §4, a TLSA RRset that does not DNSSEC-validate as "secure" is unusable and MUST be ignored
 rather than trusted. See [ANS-5 §5](ans-5-integrity-monitoring.md#5-verification-procedure-verifier-facing)
 for where DANE sits among the verification channels.
@@ -789,7 +808,10 @@ migration.
 - **Selecting the right badge**: the caller's certificate URI SAN (Flavor A) carries the version;
   match it against the `version` field across the `_ans-badge` TXT records rather than fetching
   every badge. Callers verifying a callee (whose Server Certificate carries no version) prefer an
-  ACTIVE record, or the record for the version they intend to call.
+  ACTIVE record, or the record for the version they intend to call. Discovery records do not help
+  here: `ANS_DNSAID` SVCB rows carry no version discriminator — coexisting versions' rows share
+  one RRset at the bare FQDN — so version selection rides the badge record's `version` field (or
+  the URI SAN) regardless of discovery profile.
 - **SCITT artifacts are per-version**: each version has its own receipt (its own leaf) and its
   own status token (its own `ansName`). Certificate-fingerprint arrays absorb rotations *within*
   a version; version changes produce separate artifacts, never merged arrays.
