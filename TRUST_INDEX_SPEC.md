@@ -182,8 +182,9 @@ The specification defines five signal categories, ordered from cryptographic fac
 
 **Solvency scores recoverable capital.** A one-time proof that a wallet held funds says little about whether those funds remain when a dispute lands, so a TI MUST weight capital committed to this agent's obligations, escrow, a posted bond, or a liability policy naming the agent, far above a floating wallet balance.
 Solvency measures the amount recoverable if the agent causes damage.
-A reserve offered as solvency evidence MUST be exclusive to the obligations it backs.
-A TI MUST NOT credit the same funds to more than one agent, so a proof aggregating balances across chains or wallets without proving exclusivity carries no more weight than a single balance snapshot.
+A reserve earns solvency weight only to the extent its exclusivity to this agent's obligations is verifiable. An escrow, a posted bond, or a liability policy naming the agent can prove that exclusivity; an address-blind balance proof cannot.
+A multi-chain aggregation verifies a total without revealing the wallets (Section 4.3), and a single-chain proof attests control above a threshold; neither shows the same funds do not also back another agent, so both are non-exclusive by construction and earn only the weight of a balance snapshot.
+A TI MUST NOT credit the same funds to more than one agent, and where exclusivity cannot be proven it MUST treat the reserve as non-exclusive rather than assume it. Defining an exclusivity primitive that an otherwise address-blind proof could carry, an on-chain lock or bond naming the agent with the matching Appendix A fields, is a follow-up.
 
 **Behavior: How does this agent treat others?**
 
@@ -655,7 +656,10 @@ An agent that defrauds users at one RA, abandons its identity, and registers fre
 
 If the principal binding matches a previous entry, the TI SHOULD factor that history into the new agent's Trust Vector as a strong negative signal. The weight depends on the entry's severity and the issuing authority's track record.
 
-Negative reputation MUST attach to every identifier the misconduct is observable through, not only the principal binding: the FQDN, any wallet or on-chain address the agent transacted through, and the fingerprints of its certificates and signing keys.
+Negative reputation MUST attach to every identifier the agent demonstrably controls and exclusively uses, not only the principal binding: a single-tenant FQDN, a wallet or on-chain address the agent proved sole control of, and the fingerprints of certificates and signing keys unique to it.
+It MUST NOT attach to an identifier the agent merely transacted through or shares with others, a counterparty or custodial address, an exchange deposit address, or a wildcard-certificate fingerprint shared by every tenant of a platform (Section 4.6),
+because a bad actor could otherwise route fraudulent settlements through a victim's address and smear an identifier the victim also presents, durably, since negatives are never cooled.
+Federated entries SHOULD store address commitments rather than raw addresses, consistent with the address-hiding of Section 4.3.
 An agent that registers with only a domain-validated certificate and no principal binding therefore cannot shed a bad record by re-registering under a fresh name.
 A cheap identity is cheap to discard, so a TI MUST cap the trust an agent can reach by the cost of replacing its strongest identifier: an agent bound only to a low-cost identifier cannot reach a profile that assumes the identifier is expensive to abandon.
 
@@ -851,7 +855,10 @@ The consortium charter defines liveness requirements for members, automated enfo
 
 When a principal defrauds users at one RA, abandons that identity, and registers fresh at another RA, the negative history should follow. Federated TI providers SHOULD share negative reputation signals so that banned principals cannot escape accountability through re-registration.
 
-A negative reputation entry is a signed assertion from an RA or governance body that a principal binding is associated with specified misconduct. The entry contains the principal binding, a reason code, supporting evidence references, the issuing authority's signature, and a jurisdiction scope.
+A negative reputation entry is a signed assertion from an RA or governance body that an agent is associated with specified misconduct.
+The entry names the agent by an identifier list, not the principal binding alone, so an agent that presents only a domain-validated certificate and carries no principal binding can still be named by its FQDN or key fingerprint.
+The list holds each identifier the misconduct is observable through and the agent demonstrably and exclusively controls (Section 5.5), stored as address commitments rather than raw addresses so a federated entry does not leak an address the 4.3 proofs deliberately hide.
+The entry also contains a reason code, supporting evidence references, the issuing authority's signature, and a jurisdiction scope.
 
 #### 8.3.1 Scored signal, not binary block
 
