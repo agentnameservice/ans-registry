@@ -597,10 +597,14 @@ Basic-grade agents MAY use any binding type. Verified-grade agents SHOULD use `L
 
 **Unrecognized and versioned binding types degrade gracefully.** The types above are the ones this specification defines a verification procedure for; the binding-type field is open, not a closed list.
 When an agent presents a binding type a TI does not recognize, including a later version of a known family such as a future ENSIP-numbered ENS binding, the TI MUST treat the binding as present but unverified.
-An unverified binding cannot raise the identity dimension beyond what verified evidence supports, it lowers that dimension's coverage (Section 2.2), and the TI emits an `IDENTITY_BINDING_UNVERIFIED` risk factor.
+An unverified binding cannot raise the identity dimension beyond what verified evidence supports, and the TI MUST emit an `IDENTITY_BINDING_UNVERIFIED` risk factor (naming per Section 7.3). Where a TI reports per-dimension coverage (Section 2.2), an unverified binding also lowers the identity dimension's coverage.
 A TI MUST NOT reject the evaluation or omit the agent because it carries an unrecognized binding type.
 A TI MUST NOT credit an unverified binding as though a procedure had confirmed it.
-ENS bindings are a versioned family keyed by ENSIP number (`ENS_ENSIP25`, `ENS_ENSIP26`, and successors); a TI verifies each against the record its ENSIP version defines, so a new version is added by naming its verification procedure, not by changing this schema.
+A binding the RA's own pipeline verified and sealed is not unverified in this sense: per Section 4.5 the TI MAY credit it on the RA's attestation without re-verifying, even for a binding type the TI has no independent procedure for.
+The present-but-unverified rule applies only where neither the TI nor the RA has confirmed the binding.
+ENS bindings are a versioned family keyed by ENSIP number, and this specification defines a verification procedure for `ENS_ENSIP25` only (above).
+A later version such as `ENS_ENSIP26` belongs to the family but has no procedure defined here yet, so it is the worked case of the rule above: a TI treats it as present but unverified until Section 5.3 gains its procedure.
+A new version becomes verifiable by adding that procedure to Section 5.3, not by changing this schema.
 
 ### 5.4 PriCC chains
 
@@ -958,7 +962,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "type": "object",
           "required": ["type", "identifier"],
           "properties": {
-            "type": { "type": "string", "description": "Recognized types: DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25, ENS_ENSIP26. The field is open; an unrecognized type is scored per Section 5.3 (present but unverified), never rejected." },
+            "type": { "type": "string", "description": "Recognized types, each with a verification procedure in Section 5.3: DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25. The field is open; an unrecognized type, including a later ENS version such as ENS_ENSIP26 until Section 5.3 defines its procedure, is scored per Section 5.3 (present but unverified), never rejected." },
             "identifier": { "type": "string" },
             "proof": { "type": "string" },
             "priccChain": {
