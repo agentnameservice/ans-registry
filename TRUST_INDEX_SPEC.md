@@ -1,8 +1,8 @@
 # Trust Index Open Specification
 
-Version 1.1.0 | 2026-03-20
+Version 1.2.0 | 2026-08-25
 
-*Spec version 1.1.0 defines Trust Manifest schema version 1.0.0.
+*Spec version 1.2.0 defines Trust Manifest schema version 1.0.0.
 Non-breaking spec revisions do not bump the schema version.*
 
 ---
@@ -206,7 +206,10 @@ Where a single piece of evidence could inform more than one dimension (a TEE att
 
 **Critical signals cap their dimension.** Within a dimension, most signals combine into a weighted score, but some findings are disqualifying and MUST NOT be averaged away.
 A signal MAY be marked *critical*; when a critical signal is failing, the dimension score is capped at that signal's low value regardless of healthier signals in the same dimension.
-An open data-egress policy, a failed adversarial-safety test, and an expired compliance certification are critical safety signals: an agent that leaks data to anyone does not become safe by also holding a guardrail certificate.
+The cap fires only on an affirmative failing finding, such as an open data-egress policy or a failed adversarial-safety test: an agent that leaks data to anyone does not become safe by also holding a guardrail certificate.
+Two adjacent cases are handled differently, so the rule never rewards concealment over disclosure.
+For a gated profile, a required critical signal that is absent leaves its dimension unable to pass (Section 2.3 caps an unevaluated gating dimension at `READ_ONLY`) rather than hard-capping it as an affirmative failure.
+An expired certification is a freshness condition (Section 2.5): it lowers the score and MUST emit a risk factor, but it is not a critical failure, so a lapsed certification does not score worse than one that was never claimed.
 
 ### 2.2 Trust Vector
 
@@ -246,7 +249,8 @@ Coverage separates "evaluated and low" from "not enough data to evaluate."
 A solvency score of 0 with full coverage means the agent proved it cannot pay; a solvency score of 0 with zero coverage means the agent supplied no solvency evidence at all.
 A caller MUST be able to tell these apart, because the first says "walk away" and the second says "ask for more proof first."
 A dimension with zero coverage is unevaluated and is subject to the gating rule in Section 2.3.
-Appendix B carries a `coverage` value alongside each dimension score.
+Appendix B carries a `coverage` value alongside each dimension score, but populates it at SHOULD.
+So that a caller reading only the required outputs can still make this distinction, a TI MUST also emit a `{DIMENSION}_UNEVALUATED` risk factor (naming per Section 7.3) for each unevaluated dimension; because `riskFactors` is a required response field, the evaluated-versus-unevaluated signal reaches the caller even when `coverage` is absent.
 
 **Lead with the band.** The `recommendedProfile` in Section 2.3 is the primary output of an evaluation; the per-dimension 0-100 scores are supporting detail.
 A caller SHOULD decide whether to proceed from the profile band and consult the numeric scores for nuance, not the reverse.
@@ -272,7 +276,7 @@ An unevaluated gating dimension MUST cap the recommendation at `READ_ONLY`, and 
 For `FIDUCIARY`, the gating dimensions are identity, solvency, and safety; each MUST be evaluated and passing before a TI returns `FIDUCIARY`.
 
 **Fiduciary requires cryptographic consent.** An agent reaches `FIDUCIARY` only if it can sign a high-stakes transaction payload with an Identity Certificate private key, which an agent holds only while it has an active Identity Certificate.
-An agent with no active Identity Certificate is capped at `READ_ONLY` for fiduciary-grade decisions, and a TI returns `UNTRUSTED` when a caller explicitly requests a fiduciary-grade evaluation of such an agent.
+An agent with no active Identity Certificate is capped at `READ_ONLY` for fiduciary-grade decisions.
 
 When interaction context is provided, the TI SHOULD adjust the recommended profile based on authentication strength. The `FIDUCIARY` profile SHOULD require transport-layer authentication (mTLS or equivalent).
 
