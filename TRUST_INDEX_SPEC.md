@@ -349,11 +349,13 @@ Each signal category (integrity, identity, solvency, behavior, safety) occupies 
 
 A TI MUST validate the `schemaVersion` of each signal block against its published version manifest before scoring. Signals at the current version score normally. Signals at a deprecated version receive reduced weight. Signals at a rejected version are treated as absent.
 
-**Signal provenance MUST be verifiable.** Every signal block that does not come from the TL MUST name the accredited source that asserted it and carry that source's signature over the block.
+**Signal provenance MUST be verifiable.** A non-TL signal is verified one of two ways, by who asserted it or by the TI checking it directly.
+Every signal block asserted by a third party, an audit, insurance attestation, endorsement, or certification, MUST name the accredited source that asserted it and carry that source's signature over the block.
 A TI MUST verify that signature and confirm the source is accredited for the signal's category (Section 8.5) before the signal raises any dimension score.
-A signal whose provenance is absent, unsigned, or from an unaccredited source MUST NOT raise a score.
+A self-verifying signal is checked by the TI directly rather than through an accredited source: a cryptographic proof (Section 4.3) raises a score only when the TI validates the proof, and on-chain data raises a score only when the TI reads it from the referenced chain.
+A third-party signal whose provenance is absent, unsigned, or from an unaccredited source, and a self-verifying signal whose check does not pass, MUST NOT raise a score.
 The TI MAY record it as unattested and lower the dimension's coverage.
-The evaluation response names the source and its accreditation alongside the signal, so a reader can see who asserted the underlying evidence.
+The evaluation response names the source and its accreditation alongside each third-party signal, so a reader can see who asserted the underlying evidence.
 
 ### 3.4 Signal versioning lifecycle
 
@@ -740,8 +742,10 @@ The response MAY include:
 - `compositeScore`: Deprecated single integer 0-100
 - `evaluationChanged`: Boolean. True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score changes without caching and comparing vectors themselves. The TI tracks each client's last-seen evaluation via client identity or session token.
 
-The signed credential MUST carry a `validUntil` no later than the point at which its most volatile scored signal goes stale.
+The signed credential MUST carry a `validUntil` no later than the point at which its most volatile scored signal goes stale, that is, the earliest expiry among the caching TTLs (Section 7.5) of the scored signals that fed the evaluation.
 A verifier MUST reject an evaluation whose `validUntil` has passed, so a stale verdict cannot be replayed as current.
+Because a verifier rejects an expired credential, a TI MUST NOT serve one: when the most volatile scored signal reaches its TTL, the TI recomputes with the freshness penalty (Sections 2.5 and 7.5) and re-signs with a fresh `evaluationTime` and `validUntil`.
+The cached fallback that Section 7.4.2 requires in a fresh-challenge failure is this re-signed, freshness-penalized recompute, not the expired credential, so the property that a client always gets a live Trust Vector holds without serving a stale verdict.
 The signed `credentialSubject` includes `agentId` and `evaluationTime`, so the signature binds the verdict to one agent at one moment.
 A verifier MUST reject a credential presented for a different agent.
 
@@ -796,9 +800,11 @@ A conforming TI MUST implement caching. Solvency signals, which can change withi
 When a cached signal expires and the source is unreachable, the TI applies the freshness penalty. The `evaluationTime` in the response MUST reflect when the TI last fully computed the score, not when the cached result was served.
 
 **Behavioral-anomaly circuit breaker.** A TI SHOULD watch each agent's live signals for abnormal variance, a sudden spike in failed interactions or disputes, or a sharp departure from the agent's established baseline.
-On a threshold breach, the TI SHOULD immediately suppress the agent's `recommendedProfile` toward `READ_ONLY` and emit a risk factor, rather than serve the cached score until the next scheduled recomputation.
+The signals that can trip the breaker MUST pass the same identity-grade and Sybil weighting as the scored behavior dimension (Section 9.1), and a breach MUST require a minimum number of distinct identity-graded counterparties, so that cheap, unauthenticated dispute injection cannot suppress a competitor.
+On a threshold breach, the TI SHOULD immediately recompute the agent's evaluation out of schedule and suppress its `recommendedProfile` toward `READ_ONLY`, emitting a risk factor, rather than serve the cached score until the next scheduled recomputation.
+Recomputing, not only lowering the profile, updates the numeric vector that the Section 7.3 audience-one clients read directly, the ones moving money.
 This is a discovery-suppression override, not a certificate revocation.
-It clears when the anomaly resolves or a fresh evaluation confirms the agent, and only the RA revokes certificates (Section 2.3).
+Suppression is bounded by a maximum duration and the appeal path in Section 8.3.2; it clears when the anomaly resolves, the appeal succeeds, or a fresh evaluation confirms the agent. Only the RA revokes certificates (Section 2.3).
 A TI MUST document its anomaly triggers, because a false trigger suppresses a healthy agent.
 
 ---
