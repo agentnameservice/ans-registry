@@ -103,6 +103,13 @@ In both flavors the **callee** is authenticated the same way: TLS server authent
 its possession proof, and §5 provides its identity and liveness checks. The flavors differ only
 in how the **caller** proves itself.
 
+For consumers scoring interaction strength: the Trust Index's interaction-context model
+([TRUST_INDEX_SPEC.md Appendix C](../TRUST_INDEX_SPEC.md#appendix-c-interaction-context-model-informational-implementation-recommended))
+classifies authentication methods for profile adjustment. In its terms Flavor A is the `MTLS_*`
+family and Flavor B corresponds to `JWT_CERT` — a proof signed by the agent's Identity
+Certificate. The mapping is informative: ANS-6 defines the wire procedures, the Trust Index
+consumes their outcome.
+
 ### 3.4 Composing tiers and flavors
 
 Flavor A composes with either tier: the mTLS handshake authenticates the caller's certificate,
@@ -182,6 +189,13 @@ but never substitute for the badge, receipt, or status token.
 trusts.** Verifiers maintain an explicit allowlist of trusted TL domains. Without this check, a
 spoofed or attacker-published TXT record redirects the lookup to a server returning forged badge
 data; the DNS record locates the badge, it does not confer trust on the endpoint it names.
+
+How a deployment obtains that allowlist is deployment policy, but it is the trust root of the
+badge tier, so it MUST come from configuration or an out-of-band channel the operator already
+trusts: operator-pinned configuration, a federation- or consortium-published bundle, or the list
+published by the RA the verifier itself registered with. It MUST NOT be derived from the DNS
+records under verification — that is circular — and trust-on-first-use from a first badge fetch
+is NOT RECOMMENDED.
 
 ### 4.3 Receipt
 
@@ -333,10 +347,29 @@ SPKI and reject a line whose declared `key_hash` disagrees.
 
 One TL key signs every outbound artifact — checkpoints, envelope attestations, receipts, and
 status tokens — and `/root-keys` advertises exactly one line in the reference deployment
-([ANS-4 §3](ans-4-transparency.md#3-cryptographic-standards)); parsers SHOULD nonetheless accept
-multiple lines. Verifiers maintain a list of trusted TL domains, fetch each TL's line once, and
-cache it indefinitely — the key does not rotate under normal operations. This one-time fetch is
-the only trust bootstrapping the SCITT tier requires.
+([ANS-4 §3](ans-4-transparency.md#3-cryptographic-standards)); parsers MUST nonetheless accept
+multiple lines. Verifiers maintain a list of trusted TL domains, fetch each TL's lines once at
+bootstrap, and cache them. This one-time fetch is the only trust bootstrapping the SCITT tier
+requires.
+
+**Keys never expire, and the list only grows.** The `/root-keys` contract is append-only
+([ANS-4 §5.1](ans-4-transparency.md#51-key-distribution)): a TL MAY add a key, and every
+published line is retained so previously issued artifacts stay verifiable. The verifier-side
+cache rules follow:
+
+- **Merge additively.** A refresh adds unknown lines to the cache and MUST NOT drop a cached key
+  that is absent from the response — a cached key remains valid for verifying the artifacts it
+  signed, indefinitely.
+- **Refresh on unknown `kid`.** On a receipt or status token whose `kid` matches no cached key,
+  the verifier SHOULD re-fetch `/root-keys` once and retry the lookup before rejecting (§9.5).
+  Refreshes MUST be rate-limited with a cooldown on the order of minutes: unknown kids arrive on
+  attacker-supplied input, and an ungated trigger is a fetch amplifier. A verifier that skips the
+  refresh — a pinned, static deployment — simply rejects unknown kids until its configuration is
+  updated, which is a valid posture.
+- **Collisions fail toward the cache.** A fetched line whose `kid` matches a cached key but whose
+  name or key material differs is discarded and logged as a finding; the first-seen key wins.
+- **Fetch failure keeps the cache.** A failed refresh leaves the existing snapshot in place, and
+  verification continues against cached keys.
 
 ### 4.6 HTTP header transport and refresh
 
@@ -350,7 +383,11 @@ exchange:
 | `DPoP` | Requests only (Flavor B) | Compact-JWS DPoP proof (§7.2) |
 
 Agents SHOULD include their artifacts on **every** request and response, not only the first —
-this lets peers observe a refreshed status token the moment it rotates. Each of these headers,
+this lets peers observe a refreshed status token the moment it rotates. Re-presentation does not
+imply re-verification: a receiver SHOULD cache the verified result keyed by the artifact bytes
+(or their hash) and re-run cryptographic verification only when the presented bytes change or
+the cached token's `exp` passes. The Flavor-B possession proof is the exception — it is
+single-use by design and is verified on every request (§7.4). Each of these headers,
 plus `Authorization` (which drives the token binding in §7.8), MUST appear at most once; a
 verifier MUST reject a request carrying duplicates, since two hops reading different values of
 the same header reach different conclusions about the same request. Receivers MUST bound decoded
@@ -405,7 +442,9 @@ sequenceDiagram
 ```
 
 1. **DNS lookup.** Query `_ans-badge.{calleeHost}` TXT (§4.2). No record → not a registered ANS
-   agent. Multiple records → select by version (§8.1).
+   agent. Multiple records → select the version the caller intends to call when it knows one;
+   otherwise prefer `ACTIVE` and disambiguate by certificate fingerprint after the handshake
+   (§8.1 — callees announce no version at the TLS layer).
 2. **Trusted-TL check, then fetch.** Confirm the badge URL's host is a trusted TL, then fetch the
    badge.
 3. **Status.** `ACTIVE` / `WARNING`: proceed. `DEPRECATED`: proceed, prefer an ACTIVE sibling
@@ -811,7 +850,11 @@ migration.
   ACTIVE record, or the record for the version they intend to call. Discovery records do not help
   here: `ANS_DNSAID` SVCB rows carry no version discriminator — coexisting versions' rows share
   one RRset at the bare FQDN — so version selection rides the badge record's `version` field (or
-  the URI SAN) regardless of discovery profile.
+  the URI SAN) regardless of discovery profile. Server Certificates cannot carry the version the
+  way Identity Certificates do — public CAs cannot issue the `ans://` URI SAN
+  ([ANS-2 §3](ans-2-versioned-naming.md#3-the-identity-certificate)) — so the callee-side version
+  signal is the SCITT tier: the callee's status token `ansName` names the exact version it is
+  serving (§5.2), the callee-side analogue of the caller's URI SAN.
 - **SCITT artifacts are per-version**: each version has its own receipt (its own leaf) and its
   own status token (its own `ansName`). Certificate-fingerprint arrays absorb rotations *within*
   a version; version changes produce separate artifacts, never merged arrays.
@@ -874,7 +917,15 @@ fall back to the badge tier, or fail closed, per deployment policy.
 A `410 Gone` from the status-token endpoint is not a failure — it is the terminal-state signal
 and MUST reject (§4.4). A `501` means the TL has no status tokens; use the badge tier.
 
-### 9.5 Recommended fallback order
+### 9.5 Unknown signing key (SCITT tier)
+
+A receipt or status token carrying a `kid` that matches no cached root key is not immediately a
+forgery — the TL may have added a key (§4.5). Refresh `/root-keys` once, cooldown-gated, and
+retry the lookup; if the `kid` is still unknown, reject. Do not fall back to a weaker tier on an
+unknown `kid` alone: the badge tier consults the same TL, and a verifier that cannot recognize
+the TL's signing key has a configuration problem, not an evidence problem.
+
+### 9.6 Recommended fallback order
 
 1. **Status token** — signature, `exp`, fingerprint arrays (offline).
 2. **Cached receipt** — inclusion proof (offline; proves registration, not liveness — pair with
@@ -892,7 +943,9 @@ A conformant ANS-6 verifier (callee side):
 
 1. Implements at least one caller-authentication flavor (§6 or §7) and documents which; when
    implementing Flavor B, implements the full §7.4 order, the §7.5 binding, the §7.6 replay
-   rules, and the §7.7 authority requirement, failing closed throughout.
+   rules, and the §7.7 authority requirement, failing closed throughout. Flavor B is conformant
+   only with its SCITT binding: a callee that accepts DPoP proofs without verifying a status
+   token against the proof certificate (§7.5) is non-conformant — that is not a degraded mode.
 2. Implements callee-side artifact verification per §4: receipt (JCS + RFC 9162 walk + TL
    signature), status token (signature, `exp`, terminal-status handling), root-key handling with
    `kid` cross-reference.
@@ -980,6 +1033,16 @@ them. Open-ended JOSE headers let a proof carry instructions that a second verif
 differently (`kid` steering key selection, `crit` demanding extensions, a multi-entry `x5c`
 inviting a chain walk); §7.2's closed header set rejects them all before any cryptography runs.
 
+### 11.10 Root-key trust is fetch-channel trust
+
+A new root key is trusted on no more evidence than a TLS fetch from a trusted TL domain (§4.5),
+and cached keys are never removed. A compromised `/root-keys` endpoint can therefore introduce a
+key that verifiers trust until operators intervene. The append-only contract keeps the damage
+auditable — keys cannot be silently swapped, only added — the collision rule blocks `kid` reuse,
+and the refresh cooldown bounds the fetch-amplification surface. Deployments needing more SHOULD
+pin keys explicitly and treat any addition as an operator-approval event rather than an automatic
+merge.
+
 ## Appendix A: Worked examples
 
 Non-normative worked examples (`_ans-badge` record, receipt and status-token structures, root-key
@@ -993,6 +1056,7 @@ line, a complete Flavor-B request/response exchange) live at
 - ANS-3 [`ans-3-dns-publication.md`](ans-3-dns-publication.md): `_ans-badge` and TLSA family trust records.
 - ANS-4 [`ans-4-transparency.md`](ans-4-transparency.md): TL public API, receipts, key distribution, checkpoint anchoring.
 - ANS-5 [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md): out-of-band verification checks and channels.
+- Trust Index [`TRUST_INDEX_SPEC.md`](../TRUST_INDEX_SPEC.md): interaction-context authentication-strength classes (Appendix C, informative mapping in §3.3).
 - [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449): OAuth 2.0 Demonstrating Proof of Possession (DPoP).
 - [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515): JWS (`x5c` header, compact serialization).
 - [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) / [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518): JWK and JWA (EC keys, ES256).

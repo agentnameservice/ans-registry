@@ -102,6 +102,12 @@ The TL distributes its verification key via `GET /root-keys` as a single sumdb-n
 signatures without contacting the RA. The single line reflects the single-key topology (§3); the
 4-byte key hash embedded in the line is the same value receipts carry as the COSE `kid`.
 
+The line set is **append-only**. A TL MAY add a key (a new line); it MUST retain every previously
+published line. Keys never expire — a retired key stops signing new artifacts, but removing its
+line would strand every receipt, attestation, and status token it ever signed. Verifiers cache
+and merge accordingly
+([ANS-6 §4.5](ans-6-agent-authentication.md#45-root-keys)).
+
 ### 5.2 Receipts, status tokens, checkpoints
 
 **COSE receipt profile.** A receipt is a COSE_Sign1 (RFC 9052): protected header `{alg: ES256,
@@ -220,7 +226,7 @@ A conformant ANS-4 implementation:
 3. Returns SCITT receipts matching the COSE profile in §5.2.
 4. Exposes the verification API (§5) over HTTPS with no authentication on read-only endpoints.
 5. Implements producer authentication with overlap-window key rotation (§6).
-6. Distributes its verification key via `/root-keys` (§5.1).
+6. Distributes its verification key via `/root-keys`, retaining every previously published line (§5.1).
 7. Honors JCS canonicalization, JWS Detached signatures, and the protected-header rules of §3.
 
 **Operator policy** (rotation cadence, checkpoint batching window, status-token TTL, HCS anchoring cadence) is deployment choice; a conforming verifier MUST NOT reject a receipt because an operator's cadence differs from another deployment's.

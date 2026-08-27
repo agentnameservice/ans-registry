@@ -153,3 +153,29 @@ X-SCITT-Receipt: 0oRYS6MBJgRE…
 X-ANS-Status-Token: 0oRYPqMBJgNY…
 Content-Type: application/json
 ```
+
+## A.6 Negative example: spoofed `Host` against a misconfigured callee
+
+The §7.7 authority requirement, shown failing. A callee at `api.other.example` sits behind a
+TLS-terminating proxy, derives the `htu` comparison URL from the request's own `Host` header, and
+configures no trusted-authority allowlist. An attacker who captured the A.5 proof — minted for a
+call to `payments.example.com` — replays it, together with the (public) receipt and status token,
+with a spoofed `Host`:
+
+```http
+POST /api/task HTTP/1.1
+Host: payments.example.com        <- client-controlled; this server is api.other.example
+DPoP: eyJ0eXAiOiJkcG9wK2p3dCIs…   <- captured proof, htu = https://payments.example.com/api/task
+X-SCITT-Receipt: 0oRYS6MBJgRE…
+X-ANS-Status-Token: 0oRYPqMBJgNY…
+```
+
+The misconfigured callee reconstructs `https://payments.example.com/api/task` from `Host`, the
+`htu` comparison passes, every other check passes (the artifacts are genuine and the proof's
+`jti` was never seen *here* — single-use is enforced per callee), and a request the caller never
+made to this service authenticates as that caller within the `iat` window.
+
+The same request against a conformant configuration fails before any proof verification: a
+trusted-authority allowlist containing `api.other.example` rejects the claimed authority
+outright, and an externally configured URL makes the comparison
+`htu ≠ https://api.other.example/api/task`.
