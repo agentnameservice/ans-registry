@@ -55,10 +55,11 @@ seconds at signing), and `raid` (RA instance identifier, producer signatures onl
 **TL signing-key topology.** One ECDSA P-256 key drives every outbound TL signature: the C2SP
 checkpoint's primary signature line, the JWS additional-signer line on the same checkpoint, the
 outer envelope attestation on every appended event, SCITT COSE receipts, and status tokens.
-`GET /root-keys` advertises exactly one verification line (§5.1); verifiers map the 4-byte `kid`
-in a receipt's protected header to that key in O(1). The single-key topology is intentional —
-multiple signing keys would force verifiers to maintain a key-rotation strategy that adds no
-security but doubles the implementation burden.
+The reference deployment runs a single key, so its `GET /root-keys` serves one verification line
+(§5.1) and verifiers map the 4-byte `kid` in a receipt's protected header to it in O(1).
+Single-key is a deployment simplification, not the contract: the C2SP note format carries any
+number of verifier lines, the line set is append-only (§5.1), and consumers MUST accept multiple
+lines ([ANS-6 §4.5](ans-6-agent-authentication.md#45-root-keys)).
 
 ## 4. The `TransparencyLog` interface
 
@@ -97,10 +98,11 @@ Read-only endpoints require no authentication. Verification MUST NOT require acc
 
 ### 5.1 Key distribution
 
-The TL distributes its verification key via `GET /root-keys` as a single sumdb-note verifier line
-(text/plain), so any verifier can check checkpoint, receipt, attestation, and status-token
-signatures without contacting the RA. The single line reflects the single-key topology (§3); the
-4-byte key hash embedded in the line is the same value receipts carry as the COSE `kid`.
+The TL distributes its verification keys via `GET /root-keys` as newline-delimited sumdb-note
+verifier lines (text/plain), so any verifier can check checkpoint, receipt, attestation, and
+status-token signatures without contacting the RA. The reference deployment publishes one line —
+its single-key topology (§3) — but the format and this contract are multi-line; the 4-byte key
+hash embedded in each line is the value receipts carry as the COSE `kid`.
 
 The line set is **append-only**. A TL MAY add a key (a new line); it MUST retain every previously
 published line. Keys never expire — a retired key stops signing new artifacts, but removing its

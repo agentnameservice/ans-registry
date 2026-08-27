@@ -38,7 +38,8 @@ COSE_Sign1 [CBOR tag 18]
 │   └── 396 (vdp): inclusion proof
 │       ├── -1 (tree_size):  15
 │       ├── -2 (leaf_index): 8
-│       ├── -3 (hash_path):  [ h'de5f12…', h'8a4c09…' ]   ; 32-byte sibling hashes
+│       ├── -3 (hash_path):  [ h'de5f12…', h'8a4c09…',    ; 32-byte sibling hashes —
+│       │                      h'41c7b3…', h'f08d2a…' ]   ;   exactly 4 for leaf 8 of 15
 │       └── -4 (root_hash):  h'98a034…'                   ; advisory — unsigned
 ├── Payload (attached): JCS-canonicalized sealed leaf bytes (ANS-4 §3 envelope:
 │   {payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status})
@@ -50,7 +51,9 @@ verifies under the `/root-keys` key whose hash is `c9e2f584`; that is what makes
 trustworthy. Walking `hash_path` from `SHA-256(0x00 || payload)` per RFC 9162 *computes* a root;
 the receipt itself never authenticates it (the VDP is unprotected, and `-4` is advisory), so a
 verifier wanting tree-head trust compares the computed root against the TL's signed
-`GET /checkpoint` note.
+`GET /checkpoint` note. For `tree_size: 15, leaf_index: 8` the §4.3 walk consumes exactly four
+path elements before `sn` reaches zero — a shorter or longer array rejects, which makes the path
+length itself a useful fixture check.
 
 ## A.3 Status token structure
 
@@ -93,8 +96,9 @@ tokens carry. A parser recomputes the hash and rejects the line on disagreement.
 
 ## A.5 Flavor-B exchange (DPoP + SCITT headers)
 
-The caller `ans://v1.0.0.caller.example.com` invokes `POST /api/task` on
-`payments.example.com`, presenting a DPoP-bound OAuth access token:
+The caller `ans://v1.0.0.agent.example.com` — the agent whose receipt and status token appear in
+A.2 and A.3 — invokes `POST /api/task` on `payments.example.com`, presenting a DPoP-bound OAuth
+access token:
 
 ```http
 POST /api/task HTTP/1.1
@@ -158,22 +162,25 @@ Content-Type: application/json
 
 The §7.7 authority requirement, shown failing. A callee at `api.other.example` sits behind a
 TLS-terminating proxy, derives the `htu` comparison URL from the request's own `Host` header, and
-configures no trusted-authority allowlist. An attacker who captured the A.5 proof — minted for a
-call to `payments.example.com` — replays it, together with the (public) receipt and status token,
-with a spoofed `Host`:
+configures no trusted-authority allowlist. An attacker who captured the A.5 request — the proof
+(minted for a call to `payments.example.com`), the access token, and the public receipt and
+status token — replays it with a spoofed `Host`:
 
 ```http
 POST /api/task HTTP/1.1
 Host: payments.example.com        <- client-controlled; this server is api.other.example
+Authorization: DPoP eyJhbGciOiJFUzI1NiIs…   <- access token, captured together with the proof
 DPoP: eyJ0eXAiOiJkcG9wK2p3dCIs…   <- captured proof, htu = https://payments.example.com/api/task
 X-SCITT-Receipt: 0oRYS6MBJgRE…
 X-ANS-Status-Token: 0oRYPqMBJgNY…
 ```
 
 The misconfigured callee reconstructs `https://payments.example.com/api/task` from `Host`, the
-`htu` comparison passes, every other check passes (the artifacts are genuine and the proof's
-`jti` was never seen *here* — single-use is enforced per callee), and a request the caller never
-made to this service authenticates as that caller within the `iat` window.
+`htu` comparison passes, and every other check passes: the artifacts are genuine, the captured
+`Authorization` header satisfies the §7.8 `ath` binding in both directions (and `cnf.jkt` matches
+— this is the original proof, not a re-mint), and the proof's `jti` was never seen *here* —
+single-use is enforced per callee. A request the caller never made to this service authenticates
+as that caller within the `iat` window.
 
 The same request against a conformant configuration fails before any proof verification: a
 trusted-authority allowlist containing `api.other.example` rejects the claimed authority

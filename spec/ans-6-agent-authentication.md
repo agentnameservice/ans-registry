@@ -57,6 +57,10 @@ ANS-6 does **not** specify:
   this request — the mTLS `CertificateVerify` in Flavor A, the DPoP proof in Flavor B.
 - **Verification tier**: badge tier (online) or SCITT tier (offline), per §3.2.
 - **Replay cache**: the callee-side store enforcing single-use DPoP proof identifiers (§7.6).
+- **Verification**: establishing a peer's identity and liveness from ANS artifacts (§3.1 rows
+  1–2). ANS-5 runs verification out-of-band and periodically; §5 runs it per connection.
+- **Authentication**: verification plus a possession proof (§3.1 row 3) — the result is an
+  authenticated peer identity the callee can authorize against (§6.5).
 
 ## 3. Verification model
 
@@ -79,7 +83,7 @@ possession but not liveness accepts a revoked agent. All three are required.
 | Tier | Artifacts | Trust model | Per-request network calls |
 | --- | --- | --- | --- |
 | **Badge** | Badge JSON fetched from the TL | Trust the TL's response at query time | DNS lookup + TL query (cacheable) |
-| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation |
+| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation (under Flavor B the replay cache adds callee-side state, shared across replicas, §7.6) |
 
 The SCITT tier is RECOMMENDED for new implementations: a verifier holding the TL's root keys
 (§4.5, fetched once and cached) verifies peers with no DNS lookup and no TL query in the request
@@ -409,8 +413,10 @@ refresh touches the TL.
 ## 5. Verifying a callee
 
 The caller verifies the agent it is connecting to. Both tiers end the same way: the callee's live
-Server Certificate must match a sealed fingerprint, and its hostname must match the sealed
-`agent.host`.
+Server Certificate must match a sealed fingerprint, and the sealed `agent.host` must equal the
+host the caller actually dialed. That second comparison anchors the procedure to the caller's
+intent — every other value here comes from artifacts the callee (or a DNS spoofer) selected, and
+checking them only against each other verifies a consistent story, not the right peer.
 
 ### 5.1 Badge tier
 
@@ -451,8 +457,12 @@ sequenceDiagram
    version when one exists (§8.1). `EXPIRED` / `REVOKED`: reject.
 4. **TLS handshake and comparison.** Connect over TLS; validate the chain to a trusted public CA
    as usual; compute `SHA-256(cert.Raw)` over the presented Server Certificate; require the
-   fingerprint to equal some entry of `attestations.serverCerts[]`; require the certificate's DNS
-   SAN to match `agent.host` under standard hostname verification.
+   fingerprint to equal some entry of `attestations.serverCerts[]`; require `agent.host` to equal
+   the host the caller resolved and dialed, and require the certificate to pass standard
+   [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125) hostname verification against that same
+   requested name. The `agent.host` comparison is in addition to, never in place of, the standard
+   hostname check: every field the badge carries was chosen by whoever published it, so only the
+   dialed name ties verification to the peer the caller meant to reach.
 5. **Optional.** DANE/TLSA pinning (§5.3).
 
 Badge fetch MAY precede or follow the handshake — pre-fetching (or background refresh) keeps the
@@ -466,7 +476,7 @@ until the comparison completes.
 | TL unreachable | Apply failure policy (§9) |
 | Status `EXPIRED` / `REVOKED` | Reject |
 | Fingerprint matches no `serverCerts[]` entry | Refresh badge once, then reject (§8.2) |
-| DNS SAN does not match `agent.host` | Reject |
+| `agent.host` ≠ dialed host, or hostname verification fails | Reject |
 
 ### 5.2 SCITT tier
 
@@ -486,7 +496,7 @@ sequenceDiagram
     Note over Caller: verify receipt (Merkle proof + TL signature)
     Note over Caller: verify status token (signature, exp, status)
     Note over Caller: TLS cert fingerprint ∈ validServerCerts?
-    Note over Caller: TLS cert DNS SAN = receipt event agent.host?
+    Note over Caller: receipt agent.host = dialed host? cert valid for it?
 ```
 
 1. **TLS handshake** as in §5.1 step 4; capture the Server Certificate.
@@ -497,7 +507,9 @@ sequenceDiagram
 4. **Verify the status token** (§4.4 algorithm). Expired → fall back per §9; terminal status →
    reject.
 5. **Bind to the connection.** The Server Certificate's fingerprint must equal some
-   `validServerCerts` entry; its DNS SAN must match the receipt event's `agent.host`; the receipt
+   `validServerCerts` entry; the receipt event's `agent.host` must equal the host the caller
+   resolved and dialed, and the certificate must pass standard hostname verification against that
+   same requested name (§5.1 step 4 — the artifacts alone cannot supply this anchor); the receipt
    event and status token must name the same agent (full `ansName`, and the agent identifier when
    both carry one). Optionally compare `metadataHashes` against a fetched Agent Card.
 
@@ -535,6 +547,14 @@ processing application data.
 
 The handshake completes before verification, but the callee MUST NOT process application requests
 until verification finishes. Cache verified results per §6.4.
+
+Chain validation carries no revocation signal today: ANS-1 revocation revokes Identity
+Certificates at the issuing private CA ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)),
+but the CA publishes no CRL or OCSP endpoint, so a revoked certificate still chains cleanly. The
+TL is the revocation channel — the badge computes `REVOKED` and the status-token endpoint returns
+`410` (§4.4) — which is why the §6.2/§6.3 verification is REQUIRED even after a successful
+handshake. Where a deployment's CA does publish revocation, the TLS layer MAY check it as defense
+in depth.
 
 ### 6.2 Badge tier
 
@@ -677,7 +697,8 @@ Then, in order, cheapest and least stateful first:
 1. Proof size within bound; compact JWS structure splits into three segments.
 2. Strict header decode (§7.2); `typ` and `alg` match; `jwk` present; `x5c` has exactly one
    entry.
-3. Parse `x5c[0]`; the leaf key MUST be ECDSA P-256.
+3. Parse `x5c[0]`; the leaf key MUST be ECDSA P-256; the certificate's validity period MUST
+   contain the current time (§7.5).
 4. `jwk` equals the certificate key, byte-for-byte.
 5. JWS signature verifies under that single key.
 6. `htm` equals the request method.
@@ -712,13 +733,23 @@ The certificate that signed the proof must be the certificate the TL vouches for
 4. **Peer pinning (optional).** A callee that only accepts known peers compares the authenticated
    ANSName host against its configured set.
 
-**Deliberately absent:** CA-chain validation, certificate validity dates, key usage, and
-certificate-type checks. The status token — signed by the TL, bounded by `exp`, revoked by
-omission (§4.4) — is the trust statement about the certificate. Chain validation would introduce
-a second trust root whose revocation semantics (CRL/OCSP) run on a different clock than the TL's;
-this profile keeps one authority for "is this certificate currently the agent's identity".
-Deployments MAY layer additional X.509 policy on top, but conformance does not require it. This
-is a profile decision, not an oversight.
+**Certificate validity is checked.** Verifiers MUST reject a proof whose `x5c[0]` validity period
+does not contain the current time (`notBefore ≤ now ≤ notAfter`, allowing the §7.4 step 9 skew
+tolerance). The status token cannot provide this bound: identity-certificate rotation is additive
+([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)) and a sealed event's fingerprint
+arrays are immutable once the event lands, so nothing ever prunes a rotated-away or expired
+certificate from `validIdentityCerts`. Without this check, a certificate the operator rotated
+away from would stay acceptable past its own `notAfter` — the certificate's dates are the only
+expiry the system carries for it.
+
+**Deliberately absent:** CA-chain validation, key usage, and certificate-type checks. The status
+token — signed by the TL, bounded by `exp` — is the trust statement about the certificate's
+*registration*. Chain validation would introduce a second trust root whose revocation semantics
+(CRL/OCSP) run on a different clock than the TL's; this profile keeps one authority for "is this
+certificate currently the agent's identity". Deployments MAY layer additional X.509 policy on
+top, but conformance does not require it. This is a profile decision, not an oversight — though
+note it deviates from [RFC 7515 §4.1.6](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.6),
+which expects full RFC 5280 path validation for `x5c`; §7.9 records the deviation.
 
 The authenticated result is the status token's `ansName` and `agentId`, the proof certificate's
 fingerprint, and the key's RFC 7638 thumbprint (for §7.8). As everywhere in ANS-6, this is
@@ -769,7 +800,9 @@ of:
   Implementations SHOULD verify at wiring time that the configured reconstruction varies with the
   path, and fail startup when it does not.
 
-Implementations SHOULD refuse or loudly warn when neither is configured.
+Implementations MUST fail startup when neither is configured, and MUST NOT fall back to deriving
+the comparison authority from the request's own `Host` header — a default-constructed verifier
+that "works" by trusting `Host` is exactly the misconfigured callee of example A.6.
 
 ### 7.8 OAuth 2.0 composition
 
@@ -796,8 +829,16 @@ the header, they MUST read identical bytes — one parser, not two.
 
 ### 7.9 RFC 9449 conformance notes
 
-- Proofs are wire-conformant RFC 9449 DPoP. The profile adds two restrictions the RFC permits a
-  deployment to impose: ES256 only, and the closed header set of §7.2.
+- Proofs are wire-conformant RFC 9449 DPoP: a textbook DPoP verifier accepts them. ES256-only is
+  a restriction [RFC 9449 §4.3](https://www.rfc-editor.org/rfc/rfc9449#section-4.3) item 5
+  permits a deployment to impose. The closed header set of §7.2 is a deliberate **deviation**,
+  not a permitted restriction: RFC 9449 §4.2 allows additional header parameters and
+  [RFC 7515 §4](https://www.rfc-editor.org/rfc/rfc7515#section-4) requires ignoring unrecognized
+  ones, so an ANS-6 verifier rejects some RFC-conformant proofs (one carrying a library-added
+  `kid`, for example). Interoperability is asymmetric by choice — ANS-6 proofs validate anywhere,
+  but an ANS-6 verifier is stricter than the RFC; §11.9 is the rationale. Skipping `x5c` chain
+  validation in favor of the §7.5 status-token binding and validity check is likewise a deviation
+  from [RFC 7515 §4.1.6](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.6).
 - Server-provided nonces (RFC 9449 §8–§9) are not used: for direct agent-to-agent requests the
   tight `iat` window plus single-use `jti` bounds replay equivalently, without the extra round
   trip. A callee MAY additionally demand nonces per the RFC; that is a private agreement between
@@ -814,8 +855,20 @@ hostile callee discloses its receipt and status token (both public documents) an
 `htu`-bound, `iat`-bounded proof — the callee learns nothing it can replay elsewhere as that
 caller, but the caller has still spoken to the wrong party; §5's callee verification is what
 prevents that. There is also no mutual endpoint authentication at the TLS layer and no
-credential confidentiality for the proof itself. Deployments needing those properties run
-Flavor A (or both — the flavors are not mutually exclusive on one callee).
+credential confidentiality for the proof itself.
+
+**No request-content integrity.** The proof binds only the method and URI: neither the query
+string (§7.3) nor the message body is covered
+([RFC 9449 §11.7](https://www.rfc-editor.org/rfc/rfc9449#section-11.7)). A hop that terminates
+TLS — the topology Flavor B exists for — can therefore alter either on a first, in-flight request
+without invalidating the proof, and that is not replay: the `jti` is unseen and the `iat` fresh.
+Deployments needing content integrity SHOULD bind a request digest
+([RFC 9530](https://www.rfc-editor.org/rfc/rfc9530)) into an additional proof claim, which RFC
+9449 §11.7 contemplates. Flavor A prevents the tampering structurally — an intermediary cannot
+terminate mTLS to the callee without being the callee.
+
+Deployments needing these properties run Flavor A (or both — the flavors are not mutually
+exclusive on one callee).
 
 ### 7.11 Outcomes
 
@@ -824,12 +877,12 @@ Flavor A (or both — the flavors are not mutually exclusive on one callee).
 | Duplicate `DPoP` / `Authorization` / SCITT header | Reject |
 | Request authority outside the trusted set | Reject |
 | Proof oversize, malformed, wrong `typ`/`alg`, extra header params, `d` in `jwk` | Reject |
-| `x5c` count ≠ 1, non-P-256 leaf, `jwk` ≠ certificate key | Reject |
+| `x5c` count ≠ 1, non-P-256 leaf, certificate expired or not yet valid, `jwk` ≠ certificate key | Reject |
 | Signature invalid | Reject |
 | `htm`/`htu` mismatch | Reject |
 | `ath` without token, token without `ath`, or hash mismatch | Reject |
 | `iat` outside window; `jti` missing or oversize | Reject |
-| Missing status token (or missing receipt where required) | Reject or fall back to Flavor A / badge tier per deployment policy (§9) |
+| Missing status token (or missing receipt where required) | Reject — §10.1 makes accepting this non-conformant, and the absence may be an intermediary stripping headers (§9.7) |
 | Status token invalid, expired, or terminal status | Reject (expired: §9.4) |
 | Fingerprint not in `validIdentityCerts`; no/mismatched `ans://` URI SAN; receipt names a different agent | Reject |
 | `jti` already seen; replay cache full or erroring | Reject (fail closed) |
@@ -925,7 +978,22 @@ retry the lookup; if the `kid` is still unknown, reject. Do not fall back to a w
 unknown `kid` alone: the badge tier consults the same TL, and a verifier that cannot recognize
 the TL's signing key has a configuration problem, not an evidence problem.
 
-### 9.6 Recommended fallback order
+### 9.6 Replay cache unavailable or saturated (Flavor B)
+
+The replay cache is the one stateful dependency in the §7.4 pipeline, and §7.6 requires it to
+fail closed: a cache that is down, erroring, or at capacity rejects requests rather than admitting
+a possibly-replayed proof. There is no weaker tier to fall back to — skipping the `jti` check
+reopens the replay exposure that single-use proofs exist to close. Operationally:
+
+- **Bound the wait.** A shared cache MUST be consulted with a deadline; a timeout is a rejection,
+  never a skip.
+- **Alarm before saturation.** A saturated cache is an authentication outage for every caller
+  (§11.6), not a degradation — monitor occupancy against the §7.6 sizing
+  (`maxEntries ≥ peak RPS × (skew + grace)`).
+- **Shrink the window before growing the cache.** Halving the `iat` freshness window halves the
+  cache pressure at the same traffic (§7.6).
+
+### 9.7 Recommended fallback order
 
 1. **Status token** — signature, `exp`, fingerprint arrays (offline).
 2. **Cached receipt** — inclusion proof (offline; proves registration, not liveness — pair with
@@ -935,7 +1003,10 @@ the TL's signing key has a configuration problem, not an evidence problem.
 
 Fallbacks apply to *missing or stale* evidence. Evidence that is present and **fails** — a bad
 Merkle proof, a forged signature, a fingerprint mismatch, a terminal status — is a rejection, not
-a trigger to try a weaker tier.
+a trigger to try a weaker tier. Absence is not always innocent either: where the topology lets an
+intermediary remove headers — Flavor B's operating premise — a missing SCITT artifact on a `DPoP`
+request is a rejection (§7.11, §10.1), not a fallback trigger. §9.5's reasoning applies: that is
+a configuration or tampering problem, not an evidence problem.
 
 ## 10. Conformance
 
@@ -966,10 +1037,15 @@ A conformant ANS-6 caller:
 
 ### 11.1 Revocation latency
 
-Badge caches reflect a revocation only on refresh; status tokens only at `exp` (default one
-hour). Both bounds are explicit, not instantaneous. High-assurance deployments shorten the token
-TTL or supplement critical transitions with live badge checks; §9.4's grace window extends the
-bound and is a deliberate availability trade.
+Revocation is bounded, not instantaneous, and the bounds compose. On the SCITT tier the worst
+case is status-token TTL + clock skew + grace: one hour by default
+([ANS-4 §5.2](ans-4-transparency.md#52-receipts-status-tokens-checkpoints)), plus the §4.4 step 7
+skew allowance (up to 10 minutes), plus §9.4's grace window (up to 1× TTL) — 2 hours 10 minutes
+at the defaults. On the badge tier the bound is the badge cache TTL plus the §9.2 staleness
+threshold, both deployment configuration rather than spec-bounded: a deployment MUST document the
+values it runs, and SHOULD bound §6.4's verified-result reuse by the status-token TTL so "cached
+for the life of the process" is unreachable. High-assurance deployments shorten the token TTL,
+decline the §9.4 grace, or supplement critical transitions with live badge checks.
 
 ### 11.2 Receipts prove history, not liveness
 
@@ -995,8 +1071,11 @@ defined there, not here.
 
 Without DNSSEC the `_ans-badge` lookup is spoofable. The trusted-TL allowlist (§4.2) caps the
 damage — an attacker can point the verifier at a *trusted* TL's badge for a different agent, but
-the fingerprint and hostname comparisons then fail; what the attacker cannot do is redirect to a
-forging TL. The SCITT tier removes the DNS dependency from the request path entirely.
+the comparisons then fail: on the caller-verification path every field anchors to the validated
+client certificate (§6.2), and on the callee path `agent.host` anchors to the name the caller
+dialed (§5.1 step 4), which the attacker's badge cannot rename. What the attacker cannot do is
+redirect to a forging TL. The SCITT tier removes the DNS dependency from the request path
+entirely.
 
 ### 11.5 `htu` authority spoofing and path rewriting
 
@@ -1043,6 +1122,15 @@ and the refresh cooldown bounds the fetch-amplification surface. Deployments nee
 pin keys explicitly and treat any addition as an operator-approval event rather than an automatic
 merge.
 
+Retirement is the unsolved half: `/root-keys` lines are never removed (§4.5), and ANS-6 defines
+no in-band way to stop trusting a compromised TL key. This gap predates this layer — it is the
+TL's key-management surface — and the constraint runs deeper than distribution: one key signs
+every artifact, so distrusting it invalidates every receipt and status token it ever signed, and
+receipts are not re-issued. Any retirement mechanism is therefore a log-wide incident procedure,
+not a routine rotation, and belongs in ANS-4 alongside its producer-key compromise section. Until
+one exists, the operational controls are HSM-backed TL signing keys — bounding the compromise
+class to key misuse rather than key exfiltration — and the explicit pinning above.
+
 ## Appendix A: Worked examples
 
 Non-normative worked examples (`_ans-badge` record, receipt and status-token structures, root-key
@@ -1065,6 +1153,8 @@ line, a complete Flavor-B request/response exchange) live at
 - [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052): COSE (receipt and status-token envelopes).
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785): JCS canonicalization (leaf bytes).
 - [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698): DANE TLSA.
+- [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125): TLS server-identity (hostname) verification (§5).
+- [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): HTTP content digests (§7.10 content-integrity option).
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110): HTTP semantics (header fields, auth schemes).
 - [C2SP signed-note](https://c2sp.org/signed-note): root-key line format.
 - [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; Flavor B is the RFC 9449-stable form of this pattern).
