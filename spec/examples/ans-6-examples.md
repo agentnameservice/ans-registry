@@ -1,4 +1,4 @@
-# ANS-6 worked examples (badge record, receipt, status token, root keys, Flavor-B exchange)
+# ANS-6 worked examples (badge record, receipt, status token, root keys, Method-B exchange)
 
 Non-normative worked examples for ans-6-agent-authentication. Implementers MAY use these as
 fixtures or cross-checks. Hosts, UUIDs, keys, and hashes are illustrative.
@@ -18,7 +18,7 @@ _ans-badge.agent.example.com. IN TXT "v=ans-badge1; version=v1.0.0; url=https://
 _ans-badge.agent.example.com. IN TXT "v=ans-badge1; version=v1.0.1; url=https://transparency-log.example.com/v1/agents/019be7f3-5720-77c9-9672-adae3394502f"
 ```
 
-A callee authenticating a Flavor-A caller whose Identity Certificate URI SAN is
+A callee authenticating a Method-A caller whose Identity Certificate URI SAN is
 `ans://v1.0.1.agent.example.com` selects the second record by its `version` field and fetches
 only that badge. The badge response shape is the V2 TL envelope shown in
 [ANS-4 example A.2](ans-4-examples.md#a2-tl-badge-response).
@@ -94,7 +94,7 @@ transparency-log.example.com+c9e2f584+AjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJiE0e
 stripping the leading C2SP key-type octet `0x02`), and is the `kid` (label 4) receipts and status
 tokens carry. A parser recomputes the hash and rejects the line on disagreement.
 
-## A.5 Flavor-B exchange (DPoP + SCITT headers)
+## A.5 Method-B exchange (DPoP + SCITT headers)
 
 The caller `ans://v1.0.0.agent.example.com` — the agent whose receipt and status token appear in
 A.2 and A.3 — invokes `POST /api/task` on `payments.example.com`, presenting a DPoP-bound OAuth

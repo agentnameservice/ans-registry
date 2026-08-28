@@ -20,16 +20,16 @@ Authentication decomposes along two independent axes:
 - **Verification tier** — where the trust evidence comes from. The **badge tier** queries the TL
   at connection time and trusts its response. The **SCITT tier** verifies receipt and status-token
   artifacts locally, with no per-request network calls.
-- **Possession-proof flavor** — how the caller proves it holds its identity key. **Flavor A
+- **Possession-proof method** — how the caller proves it holds its identity key. **Method A
   (mTLS)** presents the Identity Certificate in the TLS handshake ([ANS-2
-  §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates)). **Flavor B (application-layer
+  §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates)). **Method B (application-layer
   proof of possession)** carries an RFC 9449 DPoP proof in an HTTP header, surviving L7 proxies
   and gateways that terminate TLS.
 
-The two flavors have equal standing. A deployment picks per its topology: Flavor A where the TLS
-path between the agents is end-to-end; Flavor B where intermediaries terminate TLS, or where
+The two methods have equal standing. A deployment picks per its topology: Method A where the TLS
+path between the agents is end-to-end; Method B where intermediaries terminate TLS, or where
 client certificates are operationally unavailable. A conformant callee implements at least one
-flavor and documents which (§10).
+method and documents which (§10).
 
 ANS-6 does **not** specify:
 
@@ -54,8 +54,9 @@ ANS-6 does **not** specify:
 - **Status token**: a short-lived COSE_Sign1 structure asserting an agent's current lifecycle
   state with bounded staleness. Proves *liveness*: the registration is currently valid.
 - **Possession proof**: evidence that the caller holds the Identity Certificate's private key for
-  this request — the mTLS `CertificateVerify` in Flavor A, the DPoP proof in Flavor B.
+  this request — the mTLS `CertificateVerify` in Method A, the DPoP proof in Method B.
 - **Verification tier**: badge tier (online) or SCITT tier (offline), per §3.2.
+- **Possession-proof method**: Method A (mTLS) or Method B (application-layer DPoP), per §3.3.
 - **Replay cache**: the callee-side store enforcing single-use DPoP proof identifiers (§7.6).
 - **Verification**: establishing a peer's identity and liveness from ANS artifacts (§3.1 rows
   1–2). ANS-5 runs verification out-of-band and periodically; the §5–§7 procedures embed it per
@@ -73,7 +74,7 @@ Authenticating a peer establishes three independent facts, all bound to one cert
 | --- | --- | --- |
 | **Identity** | Is this certificate sealed in the Transparency Log for this agent? | Badge (badge tier) or receipt (SCITT tier) |
 | **Liveness** | Is that registration valid *right now* (ACTIVE, not revoked)? | Badge `status` (badge tier) or status token (SCITT tier) |
-| **Possession** | Does the peer hold the certificate's private key, for *this* connection or request? | TLS handshake (Server Certificate for callees; Identity Certificate under Flavor A) or DPoP proof (Flavor B) |
+| **Possession** | Does the peer hold the certificate's private key, for *this* connection or request? | TLS handshake (Server Certificate for callees; Identity Certificate under Method A) or DPoP proof (Method B) |
 
 A verifier that checks identity and liveness but not possession accepts anyone replaying public
 artifacts — badges, receipts, and status tokens are all public documents. A verifier that checks
@@ -84,7 +85,7 @@ possession but not liveness accepts a revoked agent. All three are required.
 | Tier | Artifacts | Trust model | Per-request network calls |
 | --- | --- | --- | --- |
 | **Badge** | Badge JSON fetched from the TL | Trust the TL's response at query time | DNS lookup + TL query (cacheable) |
-| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation (under Flavor B the replay cache adds callee-side state, shared across replicas, §7.6) |
+| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation (under Method B the replay cache adds callee-side state, shared across replicas, §7.6) |
 
 The SCITT tier is RECOMMENDED for new implementations: a verifier holding the TL's root keys
 (§4.5, fetched once and cached) verifies peers with no DNS lookup and no TL query in the request
@@ -93,33 +94,33 @@ the background (§4.6). The badge tier remains fully supported and is sufficient
 queries are acceptable. The tiers compose: a SCITT-tier verifier falls back to the badge tier
 when a peer presents no artifacts (§9).
 
-### 3.3 Possession-proof flavors
+### 3.3 Possession-proof methods
 
-| Property | Flavor A: mTLS | Flavor B: application-layer PoP (DPoP) |
+| Property | Method A: mTLS | Method B: application-layer PoP (DPoP) |
 | --- | --- | --- |
 | Proof mechanism | Identity Certificate + `CertificateVerify` in the TLS handshake | RFC 9449 DPoP proof in the `DPoP` request header |
 | Survives TLS-terminating proxies | No — the L7 hop drops the client identity | Yes — the proof rides the HTTP request end to end |
 | Channel binding | Yes — the proof is the channel | No — the channel is server-authenticated HTTPS only |
-| Request binding | No — the handshake authenticates the connection, not individual requests | Yes — each proof binds one method + URL, single-use |
+| Request binding | No — the handshake authenticates the connection, not individual requests | Yes — each proof binds one HTTP method + URL, single-use |
 | Trust anchor for the caller's certificate | Chain to the RA's Private CA ([ANS-2 §3](ans-2-versioned-naming.md#3-the-identity-certificate)) | Status token's `validIdentityCerts` fingerprint set (§7.5) |
 | Callee-side state | None beyond TLS | Replay cache (§7.6) |
 
-In both flavors the **callee** is authenticated the same way: TLS server authentication provides
-its possession proof, and §5 provides its identity and liveness checks. The flavors differ only
+In both methods the **callee** is authenticated the same way: TLS server authentication provides
+its possession proof, and §5 provides its identity and liveness checks. The methods differ only
 in how the **caller** proves itself.
 
 For consumers scoring interaction strength: the Trust Index's interaction-context model
 ([TRUST_INDEX_SPEC.md Appendix C](../TRUST_INDEX_SPEC.md#appendix-c-interaction-context-model-informational-implementation-recommended))
-classifies authentication methods for profile adjustment. In its terms Flavor A is the `MTLS_*`
-family and Flavor B corresponds to `JWT_CERT` — a proof signed by the agent's Identity
+classifies authentication methods for profile adjustment. In its terms Method A is the `MTLS_*`
+family and Method B corresponds to `JWT_CERT` — a proof signed by the agent's Identity
 Certificate. The mapping is informative: ANS-6 defines the wire procedures, the Trust Index
 consumes their outcome.
 
-### 3.4 Composing tiers and flavors
+### 3.4 Composing tiers and methods
 
-Flavor A composes with either tier: the mTLS handshake authenticates the caller's certificate,
+Method A composes with either tier: the mTLS handshake authenticates the caller's certificate,
 and the badge (§6.2) or the caller's SCITT artifacts (§6.3) establish identity and liveness.
-Flavor B requires the SCITT tier: its binding checks run against the status token's certificate
+Method B requires the SCITT tier: its binding checks run against the status token's certificate
 fingerprint arrays (§7.5), and its whole point is a request path free of per-request TL queries.
 
 ## 4. Verification artifacts
@@ -385,13 +386,13 @@ exchange:
 | --- | --- | --- |
 | `X-SCITT-Receipt` | Both — callers send it on requests, callees on responses | Standard-base64 COSE_Sign1 receipt |
 | `X-ANS-Status-Token` | Both | Standard-base64 COSE_Sign1 status token |
-| `DPoP` | Requests only (Flavor B) | Compact-JWS DPoP proof (§7.2) |
+| `DPoP` | Requests only (Method B) | Compact-JWS DPoP proof (§7.2) |
 
 Agents SHOULD include their artifacts on **every** request and response, not only the first —
 this lets peers observe a refreshed status token the moment it rotates. Re-presentation does not
 imply re-verification: a receiver SHOULD cache the verified result keyed by the artifact bytes
 (or their hash) and re-run cryptographic verification only when the presented bytes change or
-the cached token's `exp` passes. The Flavor-B possession proof is the exception — it is
+the cached token's `exp` passes. The Method-B possession proof is the exception — it is
 single-use by design and is verified on every request (§7.4). Each of these headers,
 plus `Authorization` (which drives the token binding in §7.8), MUST appear at most once; a
 verifier MUST reject a request carrying duplicates, since two hops reading different values of
@@ -528,7 +529,7 @@ records — multiple records coexist during rotations. Per RFC
 rather than trusted. See [ANS-5 §5](ans-5-integrity-monitoring.md#5-verification-procedure-verifier-facing)
 for where DANE sits among the verification channels.
 
-## 6. Authenticating a caller — Flavor A: mTLS
+## 6. Authenticating a caller — Method A: mTLS
 
 The caller presents its Identity Certificate in the TLS handshake per
 [ANS-2 §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates). The handshake proves
@@ -616,9 +617,9 @@ attestations), run them after ANS verification instead.
 | Fingerprint matches no identity-cert entry | Reject (badge tier: refresh once first, §8.2) |
 | DNS SAN ≠ `agent.host` or URI SAN ≠ `ansName` | Reject |
 
-## 7. Authenticating a caller — Flavor B: application-layer proof of possession
+## 7. Authenticating a caller — Method B: application-layer proof of possession
 
-Flavor B moves the caller's possession proof from the TLS handshake to the application layer as a
+Method B moves the caller's possession proof from the TLS handshake to the application layer as a
 [DPoP](https://www.rfc-editor.org/rfc/rfc9449) proof — the RFC-stable form of the IETF WIMSE
 workload-proof-token pattern — carried in the standard `DPoP` header over ordinary
 server-authenticated HTTPS. No client certificate appears in the handshake, so the proof survives
@@ -629,7 +630,7 @@ thumbprint into an access token, this profile gets it from the Identity Certific
 Transparency Log — it works with no authorization server at all. OAuth 2.0 composes on top,
 unchanged, when a deployment adds one (§7.8).
 
-### 7.1 The three proofs under Flavor B
+### 7.1 The three proofs under Method B
 
 | Proof | Provided by |
 | --- | --- |
@@ -685,7 +686,7 @@ it is case-sensitive and receives no dot-segment or percent-encoding canonicaliz
 path-rewriting hop between caller and callee breaks the binding **by design**: the proof binds
 the URL the caller signed, not whatever a middlebox turned it into. Because `htu` excludes the
 query string, request parameters are not bound — deployments MUST NOT put authority-bearing
-parameters in the query string of a Flavor-B endpoint.
+parameters in the query string of a Method-B endpoint.
 
 ### 7.4 Verification procedure
 
@@ -703,7 +704,7 @@ Then, in order, cheapest and least stateful first:
    contain the current time (§7.5).
 4. `jwk` equals the certificate key, byte-for-byte.
 5. JWS signature verifies under that single key.
-6. `htm` equals the request method.
+6. `htm` equals the request's HTTP method.
 7. `htu` equals the normalized expected URL (§7.3, authority per §7.7).
 8. Token binding: `ath` ⟺ presented access token, both directions (§7.8).
 9. `iat` within the freshness window: `|now − iat| ≤ skew` (default 120 seconds).
@@ -849,7 +850,7 @@ the header, they MUST read identical bytes — one parser, not two.
   also uses the fixed-width `R || S` form per RFC 7518 §3.4. Implementations bridging to DER-based
   APIs convert accordingly.
 
-### 7.10 What Flavor B gives up relative to Flavor A
+### 7.10 What Method B gives up relative to Method A
 
 DPoP provides sender-constraint, not channel binding: the TLS channel is server-authenticated
 only, and the proof binds the request, not the connection. A caller induced to connect to a
@@ -859,17 +860,17 @@ caller, but the caller has still spoken to the wrong party; §5's callee authent
 prevents that. There is also no mutual endpoint authentication at the TLS layer and no
 credential confidentiality for the proof itself.
 
-**No request-content integrity.** The proof binds only the method and URI: neither the query
+**No request-content integrity.** The proof binds only the HTTP method and URI: neither the query
 string (§7.3) nor the message body is covered
 ([RFC 9449 §11.7](https://www.rfc-editor.org/rfc/rfc9449#section-11.7)). A hop that terminates
-TLS — the topology Flavor B exists for — can therefore alter either on a first, in-flight request
+TLS — the topology Method B exists for — can therefore alter either on a first, in-flight request
 without invalidating the proof, and that is not replay: the `jti` is unseen and the `iat` fresh.
 Deployments needing content integrity SHOULD bind a request digest
 ([RFC 9530](https://www.rfc-editor.org/rfc/rfc9530)) into an additional proof claim, which RFC
-9449 §11.7 contemplates. Flavor A prevents the tampering structurally — an intermediary cannot
+9449 §11.7 contemplates. Method A prevents the tampering structurally — an intermediary cannot
 terminate mTLS to the callee without being the callee.
 
-Deployments needing these properties run Flavor A (or both — the flavors are not mutually
+Deployments needing these properties run Method A (or both — the methods are not mutually
 exclusive on one callee).
 
 ### 7.11 Outcomes
@@ -899,7 +900,7 @@ independent Identity Certificates, independent TL entries, and coexisting `_ans-
 ANS imposes no retirement timeline; the AHP MAY mark the old version `DEPRECATED` to signal
 migration.
 
-- **Selecting the right badge**: the caller's certificate URI SAN (Flavor A) carries the version;
+- **Selecting the right badge**: the caller's certificate URI SAN (Method A) carries the version;
   match it against the `version` field across the `_ans-badge` TXT records rather than fetching
   every badge. Callers verifying a callee (whose Server Certificate carries no version) prefer an
   ACTIVE record, or the record for the version they intend to call. Discovery records do not help
@@ -987,7 +988,7 @@ retry the lookup; if the `kid` is still unknown, reject. Do not fall back to a w
 unknown `kid` alone: the badge tier consults the same TL, and a verifier that cannot recognize
 the TL's signing key has a configuration problem, not an evidence problem.
 
-### 9.6 Replay cache unavailable or saturated (Flavor B)
+### 9.6 Replay cache unavailable or saturated (Method B)
 
 The replay cache is the one stateful dependency in the §7.4 pipeline, and §7.6 requires it to
 fail closed: a cache that is down, erroring, or at capacity rejects requests rather than admitting
@@ -1013,7 +1014,7 @@ reopens the replay exposure that single-use proofs exist to close. Operationally
 Fallbacks apply to *missing or stale* evidence. Evidence that is present and **fails** — a bad
 Merkle proof, a forged signature, a fingerprint mismatch, a terminal status — is a rejection, not
 a trigger to try a weaker tier. Absence is not always innocent either: where the topology lets an
-intermediary remove headers — Flavor B's operating premise — a missing SCITT artifact on a `DPoP`
+intermediary remove headers — Method B's operating premise — a missing SCITT artifact on a `DPoP`
 request is a rejection (§7.11, §10.1), not a fallback trigger. §9.5's reasoning applies: that is
 a configuration or tampering problem, not an evidence problem.
 
@@ -1021,9 +1022,9 @@ a configuration or tampering problem, not an evidence problem.
 
 A conformant ANS-6 verifier (callee side):
 
-1. Implements at least one caller-authentication flavor (§6 or §7) and documents which; when
-   implementing Flavor B, implements the full §7.4 order, the §7.5 binding, the §7.6 replay
-   rules, and the §7.7 authority requirement, failing closed throughout. Flavor B is conformant
+1. Implements at least one caller-authentication method (§6 or §7) and documents which; when
+   implementing Method B, implements the full §7.4 order, the §7.5 binding, the §7.6 replay
+   rules, and the §7.7 authority requirement, failing closed throughout. Method B is conformant
    only with its SCITT binding: a callee that accepts DPoP proofs without verifying a status
    token against the proof certificate (§7.5) is non-conformant — that is not a degraded mode.
 2. Implements callee-side artifact verification per §4: receipt (JCS + RFC 9162 walk + TL
@@ -1038,7 +1039,7 @@ A conformant ANS-6 caller:
 5. Authenticates callees per §5 before trusting application data, including the fingerprint and
    hostname binding.
 6. Serves its own artifacts per §4.6 — on every request, refreshed in the background, never
-   minted or fetched in the request path — and, under Flavor B, mints proofs conformant to §7.2
+   minted or fetched in the request path — and, under Method B, mints proofs conformant to §7.2
    with fresh `jti` and current `iat` per request.
 7. Enforces single-valued security headers in both directions (§4.6).
 
@@ -1090,7 +1091,7 @@ entirely.
 
 §7.7 is a deployment requirement, not advice: with the comparison URL derived from the client's
 `Host` header, cross-origin proof replay is trivial. Path-rewriting hops between the caller and
-the verifying process break `htu` by design; terminate Flavor-B verification at a hop that sees
+the verifying process break `htu` by design; terminate Method-B verification at a hop that sees
 the externally-visible path, or configure the reconstruction to reproduce it.
 
 ### 11.6 Replay-cache exhaustion
@@ -1105,9 +1106,9 @@ a legitimate-traffic spike that saturates the cache rejects legitimate callers.
 `ath` alone does not sender-constrain a token: the thief holds the token bytes and mints a
 matching `ath` under its own key. The `cnf.jkt` thumbprint comparison (§7.8) is the check that
 defeats token theft, and it lives with whoever validates the token. Deployments composing OAuth
-on Flavor B MUST implement it there.
+on Method B MUST implement it there.
 
-### 11.8 Hostile callee (Flavor B)
+### 11.8 Hostile callee (Method B)
 
 A caller induced to speak to the wrong endpoint leaks public artifacts and one spent,
 target-bound proof (§7.10) — the exposure is bounded, but the misdirected request itself may
@@ -1143,7 +1144,7 @@ class to key misuse rather than key exfiltration — and the explicit pinning ab
 ## Appendix A: Worked examples
 
 Non-normative worked examples (`_ans-badge` record, receipt and status-token structures, root-key
-line, a complete Flavor-B request/response exchange) live at
+line, a complete Method-B request/response exchange) live at
 [`examples/ans-6-examples.md`](examples/ans-6-examples.md).
 
 ## 12. References
@@ -1166,4 +1167,4 @@ line, a complete Flavor-B request/response exchange) live at
 - [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): HTTP content digests (§7.10 content-integrity option).
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110): HTTP semantics (header fields, auth schemes).
 - [C2SP signed-note](https://c2sp.org/signed-note): root-key line format.
-- [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; Flavor B is the RFC 9449-stable form of this pattern).
+- [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; Method B is the RFC 9449-stable form of this pattern).

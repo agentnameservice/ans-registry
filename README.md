@@ -23,7 +23,7 @@ The ANS protocol is split across seven layered specifications under [`spec/`](sp
 | ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
 | ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, checkpoints and tiles, HCS anchoring |
 | ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
-| ANS-6 | [`spec/ans-6-agent-authentication.md`](spec/ans-6-agent-authentication.md) | Agent-to-agent authentication: badge/SCITT verification tiers, mTLS and DPoP (RFC 9449) caller flavors |
+| ANS-6 | [`spec/ans-6-agent-authentication.md`](spec/ans-6-agent-authentication.md) | Agent-to-agent authentication: badge/SCITT verification tiers, mTLS and DPoP (RFC 9449) caller methods |
 
 Worked examples for ANS-1 live at [`spec/examples/ans-1-examples.md`](spec/examples/ans-1-examples.md). [`DESIGN.md`](DESIGN.md) is a pointer to the layered specs and to the IETF draft.
 
