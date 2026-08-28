@@ -58,7 +58,8 @@ ANS-6 does **not** specify:
 - **Verification tier**: badge tier (online) or SCITT tier (offline), per §3.2.
 - **Replay cache**: the callee-side store enforcing single-use DPoP proof identifiers (§7.6).
 - **Verification**: establishing a peer's identity and liveness from ANS artifacts (§3.1 rows
-  1–2). ANS-5 runs verification out-of-band and periodically; §5 runs it per connection.
+  1–2). ANS-5 runs verification out-of-band and periodically; the §5–§7 procedures embed it per
+  connection.
 - **Authentication**: verification plus a possession proof (§3.1 row 3) — the result is an
   authenticated peer identity the callee can authorize against (§6.5).
 
@@ -410,13 +411,14 @@ Artifacts are refreshed by each agent's own runtime in the background, never in 
 Peers never call the TL to verify each other in this tier; only each agent's own background
 refresh touches the TL.
 
-## 5. Verifying a callee
+## 5. Authenticating a callee
 
-The caller verifies the agent it is connecting to. Both tiers end the same way: the callee's live
-Server Certificate must match a sealed fingerprint, and the sealed `agent.host` must equal the
-host the caller actually dialed. That second comparison anchors the procedure to the caller's
-intent — every other value here comes from artifacts the callee (or a DNS spoofer) selected, and
-checking them only against each other verifies a consistent story, not the right peer.
+The caller authenticates the agent it is connecting to. Both tiers end the same way: the
+callee's live Server Certificate must match a sealed fingerprint, and the sealed `agent.host`
+must equal the host the caller actually dialed. That second comparison anchors the procedure to
+the caller's intent — every other value here comes from artifacts the callee (or a DNS spoofer)
+selected, and checking them only against each other verifies a consistent story, not the right
+peer.
 
 ### 5.1 Badge tier
 
@@ -608,7 +610,7 @@ attestations), run them after ANS verification instead.
 | --- | --- |
 | Certificate does not chain to the Private CA | Reject at TLS layer |
 | No URI SAN | Not an ANS Identity Certificate |
-| No `_ans-badge` record for the caller's FQDN (badge tier) | Cannot verify — apply failure policy |
+| No `_ans-badge` record for the caller's FQDN (badge tier) | NXDOMAIN → reject (§9.1 — revocation removes the record, so determinate absence is adverse); SERVFAIL/timeout → apply failure policy |
 | Badge URL host not a trusted TL | Reject |
 | Status terminal (`EXPIRED` / `REVOKED`) | Reject |
 | Fingerprint matches no identity-cert entry | Reject (badge tier: refresh once first, §8.2) |
@@ -853,7 +855,7 @@ DPoP provides sender-constraint, not channel binding: the TLS channel is server-
 only, and the proof binds the request, not the connection. A caller induced to connect to a
 hostile callee discloses its receipt and status token (both public documents) and one single-use,
 `htu`-bound, `iat`-bounded proof — the callee learns nothing it can replay elsewhere as that
-caller, but the caller has still spoken to the wrong party; §5's callee verification is what
+caller, but the caller has still spoken to the wrong party; §5's callee authentication is what
 prevents that. There is also no mutual endpoint authentication at the TLS layer and no
 credential confidentiality for the proof itself.
 
@@ -945,6 +947,13 @@ Distinguish NXDOMAIN (record does not exist → not an ANS agent) from SERVFAIL/
 failed → apply failure policy). When some of several `_ans-badge` URLs fail to fetch, one
 retrieved-and-matching badge suffices; none retrievable → failure policy.
 
+NXDOMAIN can be the *post-revocation* state, not only the never-registered one: revocation
+deletes the version's records, `_ans-badge` included
+([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)'s `dnsRecordsToRemove`). So when a peer
+presents an ANS Identity Certificate and its host publishes no matching badge record, the
+determinate answer is rejection (§6.6) — a cached pre-revocation badge is not a fallback. §9.2's
+fail-open-with-cache applies to an unreachable TL, never to a record that is affirmatively gone.
+
 ### 9.2 TL unreachable (badge tier)
 
 | Policy | Behavior | Trade-off |
@@ -1026,7 +1035,7 @@ A conformant ANS-6 verifier (callee side):
 
 A conformant ANS-6 caller:
 
-5. Verifies callees per §5 before trusting application data, including the fingerprint and
+5. Authenticates callees per §5 before trusting application data, including the fingerprint and
    hostname binding.
 6. Serves its own artifacts per §4.6 — on every request, refreshed in the background, never
    minted or fetched in the request path — and, under Flavor B, mints proofs conformant to §7.2
@@ -1102,7 +1111,7 @@ on Flavor B MUST implement it there.
 
 A caller induced to speak to the wrong endpoint leaks public artifacts and one spent,
 target-bound proof (§7.10) — the exposure is bounded, but the misdirected request itself may
-carry a sensitive body. Callee verification (§5) runs *before* the request body is sent for
+carry a sensitive body. Callee authentication (§5) runs *before* the request body is sent for
 exactly this reason.
 
 ### 11.9 Header and JOSE smuggling
