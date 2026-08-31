@@ -1073,6 +1073,15 @@ fail-open-with-cache applies to an unreachable TL, never to a record that is aff
 | Fail open with cache | Accept on a sufficiently fresh cached badge | Requires an explicit staleness threshold |
 | Fail open | Accept unverified | NOT RECOMMENDED |
 
+**The outage cascades across tiers.** Badges and status tokens come from the same log, so a TL
+outage degrades both tiers at once: §9.4's badge fallback lands on this section's outage rows,
+not on a live tier. The onset is bounded — nothing changes until the status-token TTL + skew
+(plus any §9.4 grace) expires, so the offline property absorbs any outage shorter than that
+bound. Past it, the remaining choices are the cached-badge row, whose staleness threshold now
+also bounds a growing revocation blind spot (§11.1), or failing closed. Deployments SHOULD
+treat the token TTL as their TL-outage budget and set the badge-cache staleness threshold with
+the composed exposure in mind.
+
 ### 9.3 Receipt unavailable (SCITT tier)
 
 Receipts never expire (§4.3), so a cached receipt remains valid; a `503` from the receipt
