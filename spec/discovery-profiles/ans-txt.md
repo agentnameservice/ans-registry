@@ -43,6 +43,12 @@ v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
 - `p` — the protocol token (§3): `a2a`, `mcp`, or `http-api`.
 - `mode` — always `direct` on every emitted row.
 - `url` — the endpoint's `agentUrl`, verbatim.
+- `gi` (optional) — governance domain. Carries the accountable organization's controlling domain
+  (the `gi` value from `_dnsid.{agentHost}`, when that record is published). Unsigned — a verifier
+  that needs a signed governance proof MUST query `_dnsid.{agentHost}` and verify its `sg` field.
+- `lr` (optional) — Transparency Log reference, format `scitt:{url}`, where `{url}` is the TL
+  badge endpoint for this registration (the same URL carried by `_ans-badge.url`). When present,
+  satisfies the `_ans-badge` requirement — see §4.
 
 **HTTPS RR**, one per registration, at the bare `{fqdn}`:
 
@@ -72,7 +78,7 @@ One `_ans` TXT row is emitted per endpoint, in endpoint order; the HTTPS RR is e
 | --- | --- | --- |
 | `_ans.{fqdn}` TXT | **Yes** | The discovery record. verify-dns blocks activation until it resolves to the announced content |
 | `{fqdn}` HTTPS RR | No | A CNAME at the apex precludes publishing an HTTPS RR (RFC 1034 §3.6.2); its absence is non-fatal |
-| `_ans-badge` TXT (family) | Yes | ANS-3 §6.3 |
+| `_ans-badge` TXT (family) | Yes, unless any `_ans` record at `{fqdn}` carries `lr=scitt:{url}` | ANS-3 §6.3. When `lr` is present, a verifier SHOULD resolve the TL entry from `{url}` in place of querying `_ans-badge`. The RA MUST accept such a registration as satisfying the badge requirement. |
 | `_{port}._tcp.{fqdn}` TLSA (family) | No | ANS-3 §6.3; verify-side enforces a match only when the zone is DNSSEC-validated |
 
 Every emitted record carries TTL `3600`. The composed set is sealed verbatim into the
@@ -140,6 +146,20 @@ agent.example.com.             3600 IN HTTPS 1 . alpn=h2
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
 _ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
+_443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
+```
+
+When the agent also publishes a `_dnsid` record, the `_ans` record carries governance hints and the
+TL reference inline, and `_ans-badge` is not required (§4):
+
+```text
+; discovery record with governance hints and TL reference (lr satisfies badge requirement)
+_ans.agent.example.com.        3600 IN TXT   "v=ans1; version=v1.0.0; p=a2a; mode=direct; url=https://agent.example.com/a2a; gi=example.com; lr=scitt:https://transparency-log.example.com/v1/agents/{agentId}"
+
+; connection hint — unchanged
+agent.example.com.             3600 IN HTTPS 1 . alpn=h2
+
+; family TLSA — unchanged; _ans-badge is omitted because lr is present above
 _443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
