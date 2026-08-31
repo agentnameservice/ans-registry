@@ -664,6 +664,12 @@ closed. `x5c` is limited to one entry because trust comes from the status token,
 (§7.5): a second entry is never consulted here, and tolerating it would let a chain-walking
 verifier reach a different conclusion over the same bytes.
 
+Two rejections integrators meet first, both by design: an `x5c` carrying the issuing chain
+(certificate tooling emits chains; the proof takes exactly the leaf) and a `jwk` with members a
+library export added (`alg`, `use`, `kid` — the profile takes exactly the four). Rejection
+messages SHOULD name the offending parameter, and the conformance vectors cover both cases
+(§10).
+
 The payload claims:
 
 | Claim | Value |
@@ -673,6 +679,8 @@ The payload claims:
 | `iat` | Issue time, Unix seconds |
 | `jti` | Unique proof id, ≤ 128 bytes. Signers SHOULD generate ≥ 96 bits of randomness (the reference signer uses 128); verifiers can only enforce presence and the size cap |
 | `ath` | Only when the request presents an access token: `base64url(SHA-256(token))` (§7.8) |
+| `ans_profile` | OPTIONAL. The Method-B profile revision the proof was minted under; this document defines revision `1`. Verifiers MUST NOT reject a proof for omitting it — every revision-1 proof in the field predates the claim. §7.12 defines how revisions work |
+| `ans_content_digest` | Only when the request carries content: `base64url(SHA-256(content))` over the content octets as the signer transmitted them (§7.13) |
 
 Additional payload claims are tolerated per RFC 9449; only the header is closed. Verifiers MUST
 bound the proof's size before parsing (the reference profile caps it at 8 KiB).
@@ -706,7 +714,8 @@ Then, in order, cheapest and least stateful first:
 5. JWS signature verifies under that single key.
 6. `htm` equals the request's HTTP method.
 7. `htu` equals the normalized expected URL (§7.3, authority per §7.7).
-8. Token binding: `ath` ⟺ presented access token, both directions (§7.8).
+8. Token and content binding: `ath` ⟺ presented access token, both directions (§7.8);
+   `ans_content_digest` ⟺ request content, both directions where present or required (§7.13).
 9. `iat` within the freshness window: `|now − iat| ≤ skew` (default 120 seconds).
 10. `jti` present and within the size bound.
 11. Verify the status token and (unless the deployment waives it) the receipt; run the binding
@@ -839,9 +848,10 @@ the header, they MUST read identical bytes — one parser, not two.
   [RFC 7515 §4](https://www.rfc-editor.org/rfc/rfc7515#section-4) requires ignoring unrecognized
   ones, so an ANS-6 verifier rejects some RFC-conformant proofs (one carrying a library-added
   `kid`, for example). Interoperability is asymmetric by choice — ANS-6 proofs validate anywhere,
-  but an ANS-6 verifier is stricter than the RFC; §11.9 is the rationale. Skipping `x5c` chain
-  validation in favor of the §7.5 status-token binding and validity check is likewise a deviation
-  from [RFC 7515 §4.1.6](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.6).
+  but an ANS-6 verifier is stricter than the RFC; §11.9 is the rationale and §7.12 is how the
+  profile evolves under that strictness. Skipping `x5c` chain validation in favor of the §7.5
+  status-token binding and validity check is likewise a deviation from
+  [RFC 7515 §4.1.6](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.6).
 - Server-provided nonces (RFC 9449 §8–§9) are not used: for direct agent-to-agent requests the
   tight `iat` window plus single-use `jti` bounds replay equivalently, without the extra round
   trip. A callee MAY additionally demand nonces per the RFC; that is a private agreement between
@@ -860,15 +870,14 @@ caller, but the caller has still spoken to the wrong party; §5's callee authent
 prevents that. There is also no mutual endpoint authentication at the TLS layer and no
 credential confidentiality for the proof itself.
 
-**No request-content integrity.** The proof binds only the HTTP method and URI: neither the query
-string (§7.3) nor the message body is covered
+**No request-content integrity by default.** The base proof binds only the HTTP method and URI:
+neither the query string (§7.3) nor the message body is covered
 ([RFC 9449 §11.7](https://www.rfc-editor.org/rfc/rfc9449#section-11.7)). A hop that terminates
 TLS — the topology Method B exists for — can therefore alter either on a first, in-flight request
 without invalidating the proof, and that is not replay: the `jti` is unseen and the `iat` fresh.
-Deployments needing content integrity SHOULD bind a request digest
-([RFC 9530](https://www.rfc-editor.org/rfc/rfc9530)) into an additional proof claim, which RFC
-9449 §11.7 contemplates. Method A prevents the tampering structurally — an intermediary cannot
-terminate mTLS to the callee without being the callee.
+The `ans_content_digest` claim (§7.13) closes this for the message content, opt-in at revision 1;
+the query string stays uncovered by design. Method A prevents the tampering structurally — an
+intermediary cannot terminate mTLS to the callee without being the callee.
 
 Deployments needing these properties run Method A (or both — the methods are not mutually
 exclusive on one callee).
@@ -884,11 +893,112 @@ exclusive on one callee).
 | Signature invalid | Reject |
 | `htm`/`htu` mismatch | Reject |
 | `ath` without token, token without `ath`, or hash mismatch | Reject |
+| `ans_content_digest` mismatch; claim without content; unbound content where policy requires binding | Reject |
 | `iat` outside window; `jti` missing or oversize | Reject |
 | Missing status token (or missing receipt where required) | Reject — §10.1 makes accepting this non-conformant, and the absence may be an intermediary stripping headers (§9.7) |
 | Status token invalid, expired, or terminal status | Reject (expired: §9.4) |
 | Fingerprint not in `validIdentityCerts`; no/mismatched `ans://` URI SAN; receipt names a different agent | Reject |
 | `jti` already seen; replay cache full or erroring | Reject (fail closed) |
+
+### 7.12 Profile evolution
+
+The closed header set (§7.2) freezes exactly the parameters that steer key selection and
+cryptography — the parameters that should be frozen. It does not freeze the profile: the payload
+is the extension lane. Unknown payload claims are tolerated per RFC 9449 by every conformant
+verifier, so an addition that a verifier may safely ignore ships as a new OPTIONAL payload claim
+with no coordination — deployed callees keep verifying, upgraded callees read the new claim.
+`ath` and `ans_profile` are themselves examples of this shape.
+
+A change a verifier cannot safely ignore — a new `alg`, a different key-carriage mechanism, a
+tightened check — is a **profile revision**. Revisions follow three rules:
+
+- **The revision is never carried in `typ`.** RFC 9449 pins `typ: dpop+jwt`, and wire-conformance
+  with textbook DPoP is a property this profile keeps. A proof states its revision in the
+  `ans_profile` payload claim (§7.2); absence means revision 1.
+- **Selection rides the discovery layer, not the proof.** A proof is one-shot — there is no
+  round trip in which to negotiate, so an in-proof version field alone would leave the caller
+  guessing. Callers already resolve the callee before dialing (ANS-3 records, the Agent Card,
+  the badge), and the Agent Card is the callee-owned metadata document: a callee advertises
+  both its supported revisions and any claim requirements there (for example
+  `ans6: { profiles: [1, 2], contentBinding: "required" }`), integrity-protected by the status
+  token's `metadataHashes` (§4.4). The channel is therefore tamper-evident — a downgraded card
+  fails the hash, a stale card-and-token pair fails the token's `exp` — so revision selection
+  inherits TL trust instead of trusting the transport. Absence of an advertisement means
+  revision 1: the failure mode of missing metadata is baseline interop, never a hard failure
+  and never silent adoption of an unproven capability. Callers mint at the newest
+  mutually-supported revision.
+- **Migrations are dual-stack, not flag-day.** A callee accepting revision N+1 MUST keep
+  accepting revision N for a deployment-declared overlap window, mirroring how certificate
+  rotation (§8.2) and the badge→SCITT tiers already coexist. `ans_profile` tells the verifier
+  which rule set to apply to the proof in hand. A revision is a property of the *proof*, not of
+  the peer relationship: two mutually-calling agents may run different revisions in each
+  direction, mixed per request, with no session state to corrupt.
+
+Version skew is then the caller's to handle, under two rules that make the handling safe
+rather than merely graceful:
+
+- **A rejection is not a negotiation message.** Callers MUST NOT lower their minting revision
+  in response to an unauthenticated error; an intermediary able to inject a `401` must not be
+  able to hold the ecosystem at revision 1. The only path down is re-resolving discovery
+  through the authenticated channel above.
+- **Hints ratchet up, never down.** An unauthenticated response hint suggesting a *newer*
+  revision MAY be honored — an adversary who can only push callers toward stronger behavior
+  has no attack — but a hint suggesting an older revision MUST be ignored.
+
+Tightening a requirement follows the same discipline as raising a revision, two-phased:
+**advertise before enforcing**. A callee that will require a claim updates its advertisement
+first, observes what still arrives unbound, and only then rejects — policy sunsets get the
+§8.2 overlap treatment, not a flag-day.
+
+### 7.13 Request-content binding
+
+`htm` and `htu` bind the method and target; they say nothing about the message content. On a
+`POST`, `PUT`, `PATCH`, or content-bearing `DELETE`, the body crosses every TLS-terminating hop
+unbound — and a hop that rewrites it on a *first* request defeats none of the §7.4 checks,
+because that is not replay: the `jti` is unseen and the `iat` fresh (§11.11). The
+`ans_content_digest` claim closes this gap inside the proof itself.
+
+**Claim semantics.** The value is `base64url(SHA-256(content))`, computed over the request
+content octets exactly as the signer transmitted them. SHA-256 is pinned, like every other
+algorithm in this profile; agility arrives by profile revision (§7.12), not by an in-claim
+algorithm parameter. Presence is driven by content, not by method: a signer MUST include the
+claim when — and only when — the request carries content (a zero-length body carries none), so
+a `DELETE` with a body binds it and a bodyless `POST` carries no claim.
+
+**Verification is strict in both directions**, mirroring `ath` (§7.8):
+
+- Claim present and the digest of the received content does not match → reject.
+- Claim present and the request carries no content → reject.
+- Content present and no claim → accepted at revision 1, since the claim is OPTIONAL — but
+  this acceptance is a *mint-time* choice by the caller, never something an intermediary can
+  arrange: the claim rides the signed proof payload, so it cannot be stripped or altered
+  without invalidating the signature. Deployments SHOULD require the claim on state-changing
+  endpoints wherever any hop between caller and callee terminates TLS, and a future profile
+  revision MAY make it REQUIRED for content-bearing requests.
+
+The caller has a mirror-image rule: a revision-1 callee ignores the claim, so binding content
+does not mean the binding was *enforced* — the request succeeds either way, silently weaker. A
+caller whose policy depends on enforcement MUST gate on the callee's advertised support
+(§7.12) rather than infer it from success.
+
+**The binding is transformation-hostile by design**, exactly as §7.3 is for paths: the digest
+covers the octets the caller sent, so a hop that re-encodes, recompresses, or otherwise
+rewrites content breaks the binding — the proof binds what the caller signed, not what a
+middlebox produced. Deployments MUST NOT transform request content on Method-B endpoints, the
+content analogue of §7.3's query-string rule.
+
+**Verify before acting.** The digest may be computed incrementally as content streams, but the
+callee MUST complete the comparison before acting on any of the content. Content-size bounding
+remains the deployment's ordinary concern and precedes hashing.
+
+[RFC 9530](https://www.rfc-editor.org/rfc/rfc9530) `Content-Digest` MAY be emitted alongside
+for diagnostics and generic tooling, but a verifier MUST NOT accept the header in place of the
+claim: the hop that can rewrite the body can strip or rewrite a header just as easily, and only
+the in-proof claim rides the proof's signature (§11.11). The digest computation matches
+RFC 9530's `sha-256` semantics; only the carriage differs.
+
+The query string remains uncovered, deliberately (§7.3): authority-bearing parameters belong in
+the bound content or the bound path, never in the query.
 
 ## 8. Version changes and certificate rotation
 
@@ -1043,6 +1153,11 @@ A conformant ANS-6 caller:
    with fresh `jti` and current `iat` per request.
 7. Enforces single-valued security headers in both directions (§4.6).
 
+A conformant implementation of either role passes the profile's conformance vectors. The vector
+suite MUST include the §7.2 negative cases — a library-added `kid`, a multi-entry `x5c`, a
+`jwk` carrying members beyond the four, a `d` in the `jwk` — and the §7.12 tolerance case: a
+proof carrying an unknown payload claim verifies.
+
 ## 11. Security considerations
 
 ### 11.1 Revocation latency
@@ -1121,6 +1236,8 @@ Duplicate security headers let two hops act on different bytes of the same reque
 them. Open-ended JOSE headers let a proof carry instructions that a second verifier interprets
 differently (`kid` steering key selection, `crit` demanding extensions, a multi-entry `x5c`
 inviting a chain walk); §7.2's closed header set rejects them all before any cryptography runs.
+The strictness is deliberately confined to the header — the payload stays open, and §7.12 is the
+evolution path, so closing the header does not close the profile.
 
 ### 11.10 Root-key trust is fetch-channel trust
 
@@ -1140,6 +1257,20 @@ receipts are not re-issued. Any retirement mechanism is therefore a log-wide inc
 not a routine rotation, and belongs in ANS-4 alongside its producer-key compromise section. Until
 one exists, the operational controls are HSM-backed TL signing keys — bounding the compromise
 class to key misuse rather than key exfiltration — and the explicit pinning above.
+
+### 11.11 Content manipulation behind the TLS terminator
+
+Method B's operating premise cuts both ways: the hop that lets headers survive TLS termination
+also sees — and can rewrite — the request body, and doing so on a *first* request trips no
+replay defense (§7.10). The §7.13 claim closes this by riding the proof's signature: unlike an
+[RFC 9530](https://www.rfc-editor.org/rfc/rfc9530) header, which the offending hop can strip or
+rewrite, a claim inside the signed payload is tamper-evident — removing it invalidates the
+proof. The residual exposure at revision 1 is the caller that chooses not to bind: absence of
+the claim is a mint-time decision, visible to the callee, and callee policy (not an
+intermediary) decides whether unbound content is acceptable. Transformation-hostility is the
+same stance §7.3 takes for paths and §11.5 defends for authorities: the proof binds what the
+caller signed, and a middlebox that changes it is indistinguishable from an attacker — by
+design, because at this layer it is one.
 
 ## Appendix A: Worked examples
 
@@ -1164,7 +1295,7 @@ line, a complete Method-B request/response exchange) live at
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785): JCS canonicalization (leaf bytes).
 - [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698): DANE TLSA.
 - [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125): TLS server-identity (hostname) verification (§5).
-- [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): HTTP content digests (§7.10 content-integrity option).
+- [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): HTTP content digests (digest semantics for §7.13; header form is diagnostic-only).
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110): HTTP semantics (header fields, auth schemes).
 - [C2SP signed-note](https://c2sp.org/signed-note): root-key line format.
 - [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; Method B is the RFC 9449-stable form of this pattern).
