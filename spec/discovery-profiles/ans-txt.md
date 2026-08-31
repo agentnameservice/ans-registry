@@ -48,7 +48,10 @@ v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
   that needs a signed governance proof MUST query `_dnsid.{agentHost}` and verify its `sg` field.
 - `lr` (optional) — Transparency Log reference, format `scitt:{url}`, where `{url}` is the TL
   badge endpoint for this registration (the same URL carried by `_ans-badge.url`). When present,
-  satisfies the `_ans-badge` requirement — see §4.
+  satisfies the `_ans-badge` requirement — see §4. An `lr` value whose prefix is not `scitt:`
+  MUST be treated as absent by both the RA and verifier; the badge requirement applies normally.
+  For a multi-protocol agent with multiple `_ans` rows at the same FQDN, `lr` on any one row
+  satisfies the badge requirement for the agent; it need not appear on every row.
 
 **HTTPS RR**, one per registration, at the bare `{fqdn}`:
 
