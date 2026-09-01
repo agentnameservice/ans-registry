@@ -1,8 +1,8 @@
 # Trust Index Open Specification
 
-Version 1.1.0 | 2026-03-20
+Version 1.2.0 | 2026-08-25
 
-*Spec version 1.1.0 defines Trust Manifest schema version 1.0.0.
+*Spec version 1.2.0 defines Trust Manifest schema version 1.0.0.
 Non-breaking spec revisions do not bump the schema version.*
 
 ---
@@ -146,6 +146,8 @@ Features from companion proposals that are not yet part of the core ANS architec
 ### 2.1 Five signal categories
 
 The specification defines five signal categories, ordered from cryptographic facts to behavioral observations. A conforming TI MUST evaluate all dimensions defined in its declared schema version and MUST NOT collapse them into fewer dimensions.
+Each signal contributes to exactly one dimension.
+Where a single piece of evidence could inform more than one dimension (a TEE attestation speaks to both mechanical integrity and safety), the specification assigns it to the one dimension whose question it best answers, so the dimensions stay independent and no evidence is counted twice.
 
 **Integrity: Is this agent mechanically sound?**
 
@@ -202,6 +204,13 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Enclave attestation | TEE hardware details: provider, hardware version, SVN. Known-vulnerable generations are penalized. |
 | Compliance certifications | Third-party audit results: SOC 2 Type II, HIPAA, ISO 27001 |
 
+**Critical signals cap their dimension.** Within a dimension, most signals combine into a weighted score, but some findings are disqualifying and MUST NOT be averaged away.
+A signal MAY be marked *critical*; when a critical signal is failing, the dimension score is capped at that signal's low value regardless of healthier signals in the same dimension.
+The cap fires only on an affirmative failing finding, such as an open data-egress policy or a failed adversarial-safety test: an agent that leaks data to anyone does not become safe by also holding a guardrail certificate.
+Two adjacent cases are handled differently, so the rule never rewards concealment over disclosure.
+For a gated profile, a required critical signal that is absent MUST prevent its dimension from passing that profile, whether or not the dimension holds other signals, and the TI MUST emit a `{DIMENSION}_{SIGNAL}_MISSING` risk factor. Unrelated signals in the same dimension MUST NOT raise it to a passing score. This closes the concealment path: an agent that withholds the required adversarial-safety test cannot reach the gate on a self-declared data-egress policy alone. (The absent case differs from the unevaluated cap in Section 2.3, which fires only when a dimension has no signals at all.)
+An expired certification is a freshness condition (Section 2.5): it lowers the score and MUST emit a risk factor, but it is not a critical failure, so a lapsed certification does not score worse than one that was never claimed.
+
 ### 2.2 Trust Vector
 
 The Trust Vector has this JSON representation:
@@ -235,18 +244,45 @@ Two agents score within seven composite points but qualify for different profile
 In schema version 1.0, the Trust Vector contains the five dimensions defined above. The consortium governance body MAY add dimensions in future schema versions. A conforming TI MUST support the dimensions defined in its declared schema version and MUST NOT drop or rename any.
 Additional signal categories (such as sustainability) MAY be returned as supplementary fields outside the `trustVector` object.
 
+**Per-dimension coverage.** Each dimension score is accompanied by a coverage value reporting how much evidence supports the score.
+Coverage separates "evaluated and low" from "not enough data to evaluate."
+A solvency score of 0 with full coverage means the agent proved it cannot pay; a solvency score of 0 with zero coverage means the agent supplied no solvency evidence at all.
+A caller MUST be able to tell these apart, because the first says "walk away" and the second says "ask for more proof first."
+A dimension with zero coverage is unevaluated and is subject to the gating rule in Section 2.3.
+Appendix B carries a `coverage` value alongside each dimension score, but populates it at SHOULD.
+So that a caller reading only the required outputs can still make this distinction, a TI MUST also emit a `{DIMENSION}_UNEVALUATED` risk factor (naming per Section 7.3) for each unevaluated dimension; because `riskFactors` is a required response field, the evaluated-versus-unevaluated signal reaches the caller even when `coverage` is absent.
+
+**Lead with the band.** The `recommendedProfile` in Section 2.3 is the primary output of an evaluation; the per-dimension 0-100 scores are supporting detail.
+A caller SHOULD decide whether to proceed from the profile band and consult the numeric scores for nuance, not the reverse.
+Numeric scores SHOULD be calibrated so a given value carries a consistent operational meaning, for example against an observed rate of no incident within a defined window, rather than being derived from hand-picked signal-to-score mappings.
+A TI MUST document its calibration basis and MUST make it discoverable, for example as a `calibrationBasis` URL in the TI's Trust Index registry entry or at a documented well-known path, so an auditor can retrieve the per-dimension floors without prior arrangement.
+
 ### 2.3 Recommended profiles
 
 The Trust Evaluation API response includes a `recommendedProfile` field classifying agents into operating categories:
 
 | Profile | Conditions | Suitable for |
 | --------- | ------------ | -------------- |
-| `READ_ONLY` | Low solvency or identity | Information queries, read-only data access |
+| `READ_ONLY` | Low solvency or identity; an unevaluated gating dimension; or no active Identity Certificate (see Section 2.3) | Information queries, read-only data access |
 | `TRANSACTIONAL` | Moderate scores across all dimensions | Small purchases, reversible transactions |
-| `FIDUCIARY` | High identity and solvency | Financial delegation, legal contracts |
+| `FIDUCIARY` | Identity, solvency, and safety all evaluated and passing | Financial delegation, legal contracts |
 | `UNTRUSTED` | Any dimension below a critical threshold | No delegation; the client SHOULD NOT proceed |
 
 A conforming TI MUST support these four profiles. A TI MAY define additional profiles and MUST document their assignment criteria.
+
+**Gating dimensions MUST be evaluated, not assumed.** A profile that authorizes financial or legal exposure (`FIDUCIARY`, and any provider-defined profile above `TRANSACTIONAL`) MUST require its gating dimensions to be present and passing, not merely turned off so they cannot lower the score.
+A dimension is *evaluated* only when the TI scored it against at least one signal; a dimension with no signals is *unevaluated*, which is not the same as a low score.
+An unevaluated gating dimension MUST cap the recommendation at `READ_ONLY`, and the TI MUST NOT skip it as though it had passed.
+For `FIDUCIARY`, the gating dimensions are identity, solvency, and safety; each MUST be evaluated and passing before a TI returns `FIDUCIARY`.
+
+A dimension *passes* for a profile when its score is at or above the per-dimension floor the TI documents for that profile in its calibration basis (Section 2.2). A TI MUST publish these floors, so two conforming TIs do not return the same profile against different thresholds.
+
+`TRANSACTIONAL` requires identity to be evaluated and passing and MUST NOT be returned while any gating dimension is unevaluated; it does not require solvency or safety to reach a fiduciary floor.
+
+Integrity is deliberately not a `FIDUCIARY` gate. Mechanical-soundness problems (stale attestation, an unresolved `INTEGRITY_WARNING`, high code volatility) lower the integrity score and emit risk factors, so a caller sees them and can refuse an agent it judges mechanically unsound. Identity, solvency, and safety gate the profile; integrity informs it.
+
+**Fiduciary requires cryptographic consent.** An agent reaches `FIDUCIARY` only if it can sign a high-stakes transaction payload with an Identity Certificate private key, which an agent holds only while it has an active Identity Certificate.
+An agent with no active Identity Certificate is capped at `READ_ONLY` for fiduciary-grade decisions.
 
 When interaction context is provided, the TI SHOULD adjust the recommended profile based on authentication strength. The `FIDUCIARY` profile SHOULD require transport-layer authentication (mTLS or equivalent).
 
@@ -547,7 +583,7 @@ The `ANS_DELEGATION` claim type closes this gap. The tenant issues a W3C Verifia
 | `did:web` | Verified | DNS-anchored; a DNS compromise can replace the DID document and forge a delegation. |
 | Ledger-anchored DID (`did:ion`, `did:ethr`) | Premium | Survives DNS compromise; the signing key is on a ledger the tenant controls. |
 
-Without a delegation VC, the TI sees Salesforce's DV certificate and an unverified LEI. Identity grade: Basic. With a verified delegation VC signed by AcmeCorp's ledger-anchored DID and a GLEIF-verified LEI, the grade reaches Premium. The recommended profile shifts from `READ_ONLY` to `FIDUCIARY`.
+Without a delegation VC, the TI sees Salesforce's DV certificate and an unverified LEI. Identity grade: Basic. With a verified delegation VC signed by AcmeCorp's ledger-anchored DID and a GLEIF-verified LEI, the identity grade reaches Premium. That lifts the identity dimension; the recommended profile can rise from `READ_ONLY` toward `FIDUCIARY` only when the Section 2.3 gates are also met (identity, solvency, and safety all evaluated and passing, plus an active Identity Certificate). Identity evidence alone does not confer `FIDUCIARY`.
 
 The delegation VC travels with the Trust Card or Trust Manifest. Any TI crawling any RA's TL verifies the delegation independently. No RA-specific knowledge is required.
 
@@ -742,7 +778,7 @@ The response serves three audiences:
 
 2. **Policy engines** consume the `recommendedProfile`. An organization's security policy might prohibit `FIDUCIARY` delegation to any agent with an `UNTRUSTED` profile.
 
-3. **Human operators** read the `riskFactors` array. Each string identifies a specific, actionable concern. Risk factors SHOULD follow a naming convention: `{DIMENSION}_{SIGNAL}_{CONDITION}` (e.g., `INTEGRITY_SBOM_MISSING`, `SOLVENCY_PROOF_EXPIRED`).
+3. **Human operators** read the `riskFactors` array. Each string identifies a specific, actionable concern. Risk factors SHOULD follow a naming convention: `{DIMENSION}_{SIGNAL}_{CONDITION}` (e.g., `INTEGRITY_SBOM_MISSING`, `SOLVENCY_PROOF_EXPIRED`). The `{DIMENSION}_UNEVALUATED` factor (Section 2.2) is a deliberate two-slot exception: it reports that a whole dimension had no evidence, not a per-signal condition. Linters and SDK generators SHOULD accept it alongside the three-slot form.
 
 ### 7.4 Fresh vs cached (?fresh=true challenge-response)
 
@@ -1257,6 +1293,17 @@ This is the canonical schema. Where inline descriptions in the specification bod
         "safety": { "type": "integer", "minimum": 0, "maximum": 100 }
       }
     },
+    "coverage": {
+      "type": "object",
+      "description": "Per-dimension evidence coverage, 0.0 (unevaluated) to 1.0 (fully evidenced). A dimension score MUST be read together with its coverage: zero coverage means unevaluated, not low. A TI SHOULD populate coverage for every dimension it returns. See Section 2.2.",
+      "properties": {
+        "integrity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "identity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "solvency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "behavior": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
     "compositeScore": {
       "type": "integer",
       "minimum": 0,
@@ -1331,7 +1378,7 @@ When a client includes `interactionContext` in its evaluation request, it declar
 The same agent at different authentication strengths warrants different recommended profiles. A TI receiving interaction context SHOULD adjust the recommended profile:
 
 - An agent that would normally qualify as `TRANSACTIONAL` authenticated via `ANONYMOUS` SHOULD be downgraded to `READ_ONLY`.
-- An agent that would normally qualify as `TRANSACTIONAL` authenticated via `MTLS_PRICC` MAY be upgraded to `FIDUCIARY` if its Trust Vector supports it.
+- An agent that would normally qualify as `TRANSACTIONAL` authenticated via `MTLS_PRICC` MAY be upgraded to `FIDUCIARY` only if it also meets the Section 2.3 `FIDUCIARY` gates (identity, solvency, and safety evaluated and passing, plus an active Identity Certificate). Strong authentication alone does not confer it.
 
 The adjustment is monotonic with authentication strength: stronger authentication can only maintain or improve the profile, never degrade it below the base evaluation.
 
