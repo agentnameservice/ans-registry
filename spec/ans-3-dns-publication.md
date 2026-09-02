@@ -203,11 +203,11 @@ profile registered alone still produces them:
   Transparency Log badge endpoint for the agent (`{tlPublicBaseURL}/v1/agents/{agentId}`), falling
   back to the agent's first endpoint URL when no public TL URL is configured. Emitted only when the
   registration has at least one endpoint. **`Required=true`**: a badge-verifying client will not
-  trust an agent whose discovery records publish without a paired badge. An `_ans` TXT record
-  carrying `lr=scitt:{url}` satisfies this requirement: the RA MUST accept such a registration
-  without an `_ans-badge` record, and a verifier SHOULD resolve the TL entry from `{url}` without
-  querying `_ans-badge` (see the [ANS_TXT profile §4](discovery-profiles/ans-txt.md#4-required-flag-and-tl-seal)
-  for the operator-facing rule).
+  trust an agent whose discovery records publish without a paired badge. A profile MAY additionally
+  emit an `lr=scitt:{receipt-url}` hint on its discovery record pointing at the agent's SCITT COSE
+  receipt endpoint (`{tlPublicBaseURL}/v1/agents/{agentId}/receipt`); the hint supplements the badge
+  and does not change its `Required=true` status (see the
+  [ANS_TXT profile §2](discovery-profiles/ans-txt.md#2-record-assembly) for the operator-facing detail).
 - **Server DANE TLSA** — `_{port}._tcp.{agentHost}` TLSA, value `3 0 1 {fingerprint}` (DANE-EE,
   full-certificate selector 0, SHA-256 — the fingerprint is SHA-256 over the full DER Server
   Certificate, matching the badge fingerprint in the TL). One record per **distinct TLS endpoint

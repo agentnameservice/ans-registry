@@ -43,15 +43,13 @@ v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
 - `p` — the protocol token (§3): `a2a`, `mcp`, or `http-api`.
 - `mode` — always `direct` on every emitted row.
 - `url` — the endpoint's `agentUrl`, verbatim.
-- `gi` (optional) — governance domain. Carries the accountable organization's controlling domain
-  (the `gi` value from `_dnsid.{agentHost}`, when that record is published). Unsigned — a verifier
-  that needs a signed governance proof MUST query `_dnsid.{agentHost}` and verify its `sg` field.
-- `lr` (optional) — Transparency Log reference, format `scitt:{url}`, where `{url}` is the TL
-  badge endpoint for this registration (the same URL carried by `_ans-badge.url`). When present,
-  satisfies the `_ans-badge` requirement — see §4. An `lr` value whose prefix is not `scitt:`
-  MUST be treated as absent by both the RA and verifier; the badge requirement applies normally.
-  For a multi-protocol agent with multiple `_ans` rows at the same FQDN, `lr` on any one row
-  satisfies the badge requirement for the agent; it need not appear on every row.
+- `lr` (optional) — Transparency Log reference, format `scitt:{url}`, where `{url}` is this
+  registration's SCITT COSE receipt endpoint, `{tlPublicBaseURL}/v1/agents/{agentId}/receipt`
+  ([ANS-4 §5.2](../ans-4-transparency.md#52-receipts-status-tokens-checkpoints)). Emitted only when
+  a public TL base URL is configured. `lr` is an additive hint: a verifier that recognizes it MAY
+  fetch the receipt from `{url}` directly, but `lr` does **not** replace `_ans-badge`, which remains
+  required (§4). A verifier that does not recognize `lr` ignores it and resolves the badge as today.
+  An `lr` value whose prefix is not `scitt:` is malformed and MUST be ignored.
 
 **HTTPS RR**, one per registration, at the bare `{fqdn}`:
 
@@ -81,7 +79,7 @@ One `_ans` TXT row is emitted per endpoint, in endpoint order; the HTTPS RR is e
 | --- | --- | --- |
 | `_ans.{fqdn}` TXT | **Yes** | The discovery record. verify-dns blocks activation until it resolves to the announced content |
 | `{fqdn}` HTTPS RR | No | A CNAME at the apex precludes publishing an HTTPS RR (RFC 1034 §3.6.2); its absence is non-fatal |
-| `_ans-badge` TXT (family) | Yes, unless any `_ans` record at `{fqdn}` carries `lr=scitt:{url}` | ANS-3 §6.3. When `lr` is present, a verifier SHOULD resolve the TL entry from `{url}` in place of querying `_ans-badge`. The RA MUST accept such a registration as satisfying the badge requirement. |
+| `_ans-badge` TXT (family) | **Yes** | ANS-3 §6.3. An `_ans` row MAY also carry an additive `lr=scitt:{receipt-url}` hint (§2); it supplements the badge and does not replace it. |
 | `_{port}._tcp.{fqdn}` TLSA (family) | No | ANS-3 §6.3; verify-side enforces a match only when the zone is DNSSEC-validated |
 
 Every emitted record carries TTL `3600`. The composed set is sealed verbatim into the
@@ -152,17 +150,20 @@ _ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=
 _443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
-When the agent also publishes a `_dnsid` record, the `_ans` record carries governance hints and the
-TL reference inline, and `_ans-badge` is not required (§4):
+When a public TL base URL is configured, the `_ans` record MAY carry an additive `lr` hint pointing
+at the SCITT COSE receipt endpoint. `_ans-badge` is still published and still required (§4); `lr`
+gives a receipt-aware verifier a direct path to the COSE receipt without changing anything for a
+badge-only verifier:
 
 ```text
-; discovery record with governance hints and TL reference (lr satisfies badge requirement)
-_ans.agent.example.com.        3600 IN TXT   "v=ans1; version=v1.0.0; p=a2a; mode=direct; url=https://agent.example.com/a2a; gi=example.com; lr=scitt:https://transparency-log.example.com/v1/agents/{agentId}"
+; discovery record with an additive TL-receipt hint (lr); _ans-badge is unchanged and still required
+_ans.agent.example.com.        3600 IN TXT   "v=ans1; version=v1.0.0; p=a2a; mode=direct; url=https://agent.example.com/a2a; lr=scitt:https://transparency-log.example.com/v1/agents/{agentId}/receipt"
 
 ; connection hint — unchanged
 agent.example.com.             3600 IN HTTPS 1 . alpn=h2
 
-; family TLSA — unchanged; _ans-badge is omitted because lr is present above
+; family trust records — unchanged; _ans-badge remains present
+_ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
 _443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
