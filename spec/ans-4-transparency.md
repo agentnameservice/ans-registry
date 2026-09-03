@@ -95,6 +95,8 @@ A conforming TL MUST expose the following REST API surface (HTTPS; JSON unless n
 
 Read-only endpoints require no authentication. Verification MUST NOT require access to producer public keys or knowledge of RA implementation details: every proof verifies against the TL's own published key.
 
+A verifier that already holds an agent's badge URL derives that agent's receipt endpoint by appending `/receipt` (`GET /v1/agents/{agentId}/receipt`, §5.2); no separate discovery record is needed to locate it. That endpoint serves the SCITT COSE receipt for the agent's latest sealed event and returns 404 until the `AGENT_REGISTERED` event seals at activation (ANS-1 §4.3), which is after the agent's discovery records are published. A verifier therefore treats a 404 as "not yet sealed" during the registration window, not as a verification failure.
+
 ### 5.1 Key distribution
 
 The TL distributes its verification key via `GET /root-keys` as a single sumdb-note verifier line
