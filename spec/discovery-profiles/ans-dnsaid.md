@@ -100,8 +100,11 @@ Every emitted record carries TTL `3600`. The composed set is sealed verbatim int
 ## 5. Freshness and ANS-5 monitoring
 
 Records carry TTL `3600`. ANS-5's DNS-pointer check re-queries the SVCB row and validates DNSSEC
-where the zone is signed. The verifier compares the expected SvcParams against the live record by
-value-equality; because the comparison requires equal values, a Private-Use key collision with an
+where the zone is signed. The verifier matches the live record as a superset of the expected one
+(RFC 9460 §8): SvcPriority equal; effective TargetName equal (§2.5.2, so `.` and the explicit owner
+name are the same target); every expected SvcParam present; `alpn` compared as a list (every
+expected id advertised, more allowed); every other key by value-equality; SvcParams the RA did not
+emit tolerated. Because each expected key must match by value, a Private-Use key collision with an
 unrelated experiment that picked the same code point can only cause a false negative (verify-dns
 fails), never a false accept.
 
