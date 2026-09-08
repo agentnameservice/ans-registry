@@ -29,7 +29,11 @@ monitored on their own per-identity cadence (§4.3), independently of the agents
 
 ANS-5 does **not**:
 
-- Score, rank, or filter agents. Trust scoring is out of scope for ANS and lives in a separate `ti-*` layer set. The clean separation matters because some deployments want verification (am I being lied to?) without scoring (is this the best one?), and others want both. ANS-5's verb is **verify**. A conforming AIM MAY be composed into a larger system that also performs scoring, provided the scoring function does not influence verification outcomes.
+- Score, rank, or filter agents. Trust scoring is out of scope for ANS and lives in a separate
+  `ti-*` layer set. The clean separation matters because some deployments want verification (am I
+  being lied to?) without scoring (is this the best one?), and others want both. ANS-5's verb is
+  **verify**. A conforming AIM MAY be composed into a larger system that also performs scoring,
+  provided the scoring function does not influence verification outcomes.
 - Issue revocations or command state changes. Findings are reports; the RA decides what to do with them. ANS-1 specifies the warning event the RA emits when a finding clears quorum; the agent stays ACTIVE. Revocation only happens through the RA's own decision per ANS-1.
 - Specify grade-tier rules for principal bindings. ANS-5 specifies *how* to verify each binding type; *which* bindings are acceptable *when* is grade-tier policy that lives outside ANS.
 
@@ -43,7 +47,13 @@ ANS-5 does **not**:
 
 ## 3. The `VerificationWorker` interface
 
-The `VerificationWorker` interface is the protocol contract for ANS-5: the orchestration layer MUST ensure only ACTIVE registrations are submitted for verification. The worker runs the per-check semantics named in the verification-checks section and produces per-check results. Checks that do not apply to the input registration are omitted (not reported as failures). A conforming implementation MAY emit individual per-check results rather than a single grouped record, provided each is attributable to a verification cycle and carries provenance. The wire format of the AIM's output is implementation-defined.
+The `VerificationWorker` interface is the protocol contract for ANS-5: the orchestration layer MUST
+ensure only ACTIVE registrations are submitted for verification. The worker runs the per-check
+semantics named in the verification-checks section and produces per-check results. Checks that do
+not apply to the input registration are omitted (not reported as failures). A conforming
+implementation MAY emit individual per-check results rather than a single grouped record, provided
+each is attributable to a verification cycle and carries provenance. The wire format of the AIM's
+output is implementation-defined.
 
 ## 4. Verification checks
 
@@ -69,7 +79,12 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 
 The verification record records which checks fired; downstream consumers react per their own policy.
 
-**Identity certificate verification note.** The identity certificate is typically a client certificate not presented during a standard TLS handshake to the operational endpoint. Runtime re-verification of the identity certificate fingerprint requires a dedicated identity presentation protocol not currently defined in ANS. Implementations SHOULD record the identity certificate type as evidence; fingerprint re-verification is deferred to a future ANS extension. This check does not contribute to conformance level determination until such an extension is published.
+**Identity certificate verification note.** The identity certificate is typically a client
+certificate not presented during a standard TLS handshake to the operational endpoint. Runtime
+re-verification of the identity certificate fingerprint requires a dedicated identity presentation
+protocol not currently defined in ANS. Implementations SHOULD record the identity certificate type
+as evidence; fingerprint re-verification is deferred to a future ANS extension. This check does not
+contribute to conformance level determination until such an extension is published.
 
 ### 4.1 Check severity
 
@@ -116,11 +131,14 @@ A verifier checks an agent through independent steps, each using a different tru
 | Step | Check | Trust channel | What it proves |
 | --- | --- | --- | --- |
 | 1 | PKI certificate validation | CA system | Standard TLS. Cannot detect a compromised CA |
-| 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_{port}._tcp.{agentHost}` for the endpoint's port ([ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). A compromised CA alone cannot forge this record |
+| 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate matches a TLSA record at `_{port}._tcp.{agentHost}` for the endpoint's port, evaluated under the record's selector and matching type ([ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). A compromised CA alone cannot forge this record |
 | 3 | TL inclusion proof verification | TL (signed by KMS-rooted key) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof |
 | 4 | Live state match | DNS + TLS | The current DNS records and certificates match what was sealed |
 
-**TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
+**TLSA parameters.** The RA specifies `TLSA 3 1 1 [sha256_hash]` (DANE-EE, SubjectPublicKeyInfo, SHA-256) or
+`TLSA 3 0 1 [sha256_hash]` (DANE-EE, full Server Certificate, SHA-256), per ANS-3 §6.3. A verifier computes from the
+presented Server Certificate whichever hash the record's selector calls for; selector 0 equals the badge fingerprint in
+the TL, selector 1 is SHA-256 over the certificate's SubjectPublicKeyInfo DER.
 
 **DNSSEC prerequisite for step 2.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation. Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The RA SHOULD verify
 DNSSEC status before provisioning TLSA records.
@@ -160,7 +178,11 @@ A conformant ANS-5 implementation:
 7. Marks records as `degraded` when the underlying ANS-0 claim was retrieved via the soft-stale fallback.
 
 
-**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); AIM verification cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
+**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks
+section fires only when the registration carries the corresponding binding); AIM verification
+cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely
+because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord`
+because the AIM omitted an unavailable check.
 
 **Conformance levels.** Implementations declare their conformance level:
 
