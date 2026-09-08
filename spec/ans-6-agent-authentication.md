@@ -519,12 +519,14 @@ sequenceDiagram
 ### 5.3 DANE/TLSA (optional, both tiers)
 
 Where the callee's zone is DNSSEC-signed, the caller MAY additionally validate the Server
-Certificate against the `_{port}._tcp.{agentHost}` TLSA record set (`3 0 1` — DANE-EE, full
-certificate, SHA-256; [ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). Selector 0
-makes the TLSA content the same SHA-256 the badge and status token carry, so no extra hash is
-computed. The `{port}` label is the port the connection actually uses — under `ANS_DNSAID` the
-SVCB row's `port=` SvcParam, under `ANS_TXT` the endpoint URL's port. Check against **all** TLSA
-records — multiple records coexist during rotations. Per RFC
+Certificate against the `_{port}._tcp.{agentHost}` TLSA record set (`3 1 1` or `3 0 1` — DANE-EE,
+SHA-256; [ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)), evaluating each record
+under its own selector and matching type: selector 1 is SHA-256 over the Server Certificate's
+SubjectPublicKeyInfo DER, selector 0 is SHA-256 over the full DER certificate and equals the
+fingerprint the badge and status token carry. The `{port}` label is the port the connection
+actually uses — under `ANS_DNSAID` the SVCB row's `port=` SvcParam, under `ANS_TXT` the endpoint
+URL's port. Check against **all** TLSA records — multiple records coexist during rotations, and a
+match on any one of them suffices. Per RFC
 6698 §4, a TLSA RRset that does not DNSSEC-validate as "secure" is unusable and MUST be ignored
 rather than trusted. See [ANS-5 §5](ans-5-integrity-monitoring.md#5-verification-procedure-verifier-facing)
 for where DANE sits among the verification channels.
