@@ -208,7 +208,10 @@ Where a single piece of evidence could inform more than one dimension (a TEE att
 A signal MAY be marked *critical*; when a critical signal is failing, the dimension score is capped at that signal's low value regardless of healthier signals in the same dimension.
 The cap fires only on an affirmative failing finding, such as an open data-egress policy or a failed adversarial-safety test: an agent that leaks data to anyone does not become safe by also holding a guardrail certificate.
 Two adjacent cases are handled differently, so the rule never rewards concealment over disclosure.
-For a gated profile, a required critical signal that is absent MUST prevent its dimension from passing that profile, whether or not the dimension holds other signals, and the TI MUST emit a `{DIMENSION}_{SIGNAL}_MISSING` risk factor. Unrelated signals in the same dimension MUST NOT raise it to a passing score. This closes the concealment path: an agent that withholds the required adversarial-safety test cannot reach the gate on a self-declared data-egress policy alone. (The absent case differs from the unevaluated cap in Section 2.3, which fires only when a dimension has no signals at all.)
+For a gated profile, a required critical signal that is absent MUST prevent its dimension from passing that profile, whether or not the dimension holds other signals, and the TI MUST emit a `{DIMENSION}_{SIGNAL}_MISSING` risk factor.
+Unrelated signals in the same dimension MUST NOT raise it to a passing score.
+This closes the concealment path: an agent that withholds the required adversarial-safety test cannot reach the gate on a self-declared data-egress policy alone.
+(The absent case differs from the unevaluated cap in Section 2.3, which fires only when a dimension has no signals at all.)
 An expired certification is a freshness condition (Section 2.5): it lowers the score and MUST emit a risk factor, but it is not a critical failure, so a lapsed certification does not score worse than one that was never claimed.
 
 ### 2.2 Trust Vector
@@ -255,7 +258,7 @@ So that a caller reading only the required outputs can still make this distincti
 **Lead with the band.** The `recommendedProfile` in Section 2.3 is the primary output of an evaluation; the per-dimension 0-100 scores are supporting detail.
 A caller SHOULD decide whether to proceed from the profile band and consult the numeric scores for nuance, not the reverse.
 Numeric scores SHOULD be calibrated so a given value carries a consistent operational meaning, for example against an observed rate of no incident within a defined window, rather than being derived from hand-picked signal-to-score mappings.
-A TI MUST document its calibration basis and MUST make it discoverable, for example as a `calibrationBasis` URL in the TI's Trust Index registry entry or at a documented well-known path, so an auditor can retrieve the per-dimension floors without prior arrangement.
+A TI MUST document its calibration basis and MUST make it discoverable at a documented well-known path so an auditor can retrieve the per-dimension floors without prior arrangement; the RECOMMENDED location is a `calibrationBasis` URL at `/.well-known/trust-index-calibration.json` on the TI's domain, a sibling of the version manifest in Section 3.4.
 
 ### 2.3 Recommended profiles
 
@@ -263,7 +266,7 @@ The Trust Evaluation API response includes a `recommendedProfile` field classify
 
 | Profile | Conditions | Suitable for |
 | --------- | ------------ | -------------- |
-| `READ_ONLY` | Low solvency or identity; an unevaluated gating dimension; or no active Identity Certificate (see Section 2.3) | Information queries, read-only data access |
+| `READ_ONLY` | Low solvency or identity; an unevaluated gating dimension; or no active Identity Certificate | Information queries, read-only data access |
 | `TRANSACTIONAL` | Moderate scores across all dimensions | Small purchases, reversible transactions |
 | `FIDUCIARY` | Identity, solvency, and safety all evaluated and passing | Financial delegation, legal contracts |
 | `UNTRUSTED` | Any dimension below a critical threshold | No delegation; the client SHOULD NOT proceed |
@@ -275,7 +278,8 @@ A dimension is *evaluated* only when the TI scored it against at least one signa
 An unevaluated gating dimension MUST cap the recommendation at `READ_ONLY`, and the TI MUST NOT skip it as though it had passed.
 For `FIDUCIARY`, the gating dimensions are identity, solvency, and safety; each MUST be evaluated and passing before a TI returns `FIDUCIARY`.
 
-A dimension *passes* for a profile when its score is at or above the per-dimension floor the TI documents for that profile in its calibration basis (Section 2.2). A TI MUST publish these floors, so two conforming TIs do not return the same profile against different thresholds.
+A dimension *passes* for a profile when its score is at or above the per-dimension floor the TI documents for that profile in its calibration basis (Section 2.2), and, for a gated profile, no required critical signal for that profile is absent (Section 2.1).
+A TI MUST publish these floors, and the per-profile required-critical designations, in that calibration basis, so two conforming TIs do not return the same profile against different thresholds or different absence rules.
 
 `TRANSACTIONAL` requires identity to be evaluated and passing and MUST NOT be returned while any gating dimension is unevaluated; it does not require solvency or safety to reach a fiduciary floor.
 
@@ -583,7 +587,10 @@ The `ANS_DELEGATION` claim type closes this gap. The tenant issues a W3C Verifia
 | `did:web` | Verified | DNS-anchored; a DNS compromise can replace the DID document and forge a delegation. |
 | Ledger-anchored DID (`did:ion`, `did:ethr`) | Premium | Survives DNS compromise; the signing key is on a ledger the tenant controls. |
 
-Without a delegation VC, the TI sees Salesforce's DV certificate and an unverified LEI. Identity grade: Basic. With a verified delegation VC signed by AcmeCorp's ledger-anchored DID and a GLEIF-verified LEI, the identity grade reaches Premium. That lifts the identity dimension; the recommended profile can rise from `READ_ONLY` toward `FIDUCIARY` only when the Section 2.3 gates are also met (identity, solvency, and safety all evaluated and passing, plus an active Identity Certificate). Identity evidence alone does not confer `FIDUCIARY`.
+Without a delegation VC, the TI sees Salesforce's DV certificate and an unverified LEI. Identity grade: Basic.
+With a verified delegation VC signed by AcmeCorp's ledger-anchored DID and a GLEIF-verified LEI, the identity grade reaches Premium.
+That lifts the identity dimension; the recommended profile can rise from `READ_ONLY` toward `FIDUCIARY` only when the Section 2.3 gates are also met (identity, solvency, and safety all evaluated and passing, plus an active Identity Certificate).
+Identity evidence alone does not confer `FIDUCIARY`.
 
 The delegation VC travels with the Trust Card or Trust Manifest. Any TI crawling any RA's TL verifies the delegation independently. No RA-specific knowledge is required.
 
@@ -778,7 +785,10 @@ The response serves three audiences:
 
 2. **Policy engines** consume the `recommendedProfile`. An organization's security policy might prohibit `FIDUCIARY` delegation to any agent with an `UNTRUSTED` profile.
 
-3. **Human operators** read the `riskFactors` array. Each string identifies a specific, actionable concern. Risk factors SHOULD follow a naming convention: `{DIMENSION}_{SIGNAL}_{CONDITION}` (e.g., `INTEGRITY_SBOM_MISSING`, `SOLVENCY_PROOF_EXPIRED`). The `{DIMENSION}_UNEVALUATED` factor (Section 2.2) is a deliberate two-slot exception: it reports that a whole dimension had no evidence, not a per-signal condition. Linters and SDK generators SHOULD accept it alongside the three-slot form.
+3. **Human operators** read the `riskFactors` array. Each string identifies a specific, actionable concern.
+   Risk factors SHOULD follow a naming convention: `{DIMENSION}_{SIGNAL}_{CONDITION}` (e.g., `INTEGRITY_SBOM_MISSING`, `SOLVENCY_PROOF_EXPIRED`).
+   The `{DIMENSION}_UNEVALUATED` factor (Section 2.2) is a deliberate two-slot exception: it reports that a whole dimension had no evidence, not a per-signal condition.
+   Linters and SDK generators SHOULD accept it alongside the three-slot form.
 
 ### 7.4 Fresh vs cached (?fresh=true challenge-response)
 
