@@ -88,7 +88,7 @@ continue to follow the A, AAAA, or CNAME.
 | Discovery (SVCB) | `{agentHost}` | SVCB | `ANS_DNSAID` (default) | One per endpoint: DNS-AID SvcParams ([ans-dnsaid](discovery-profiles/ans-dnsaid.md)) | Yes (No in the `ANS_TXT` union, §6.4) |
 | Connection hint (HTTPS RR) | `{agentHost}` | HTTPS | `ANS_TXT` | `1 . alpn=h2` service binding | No (CNAME at apex precludes it) |
 | Badge | `_ans-badge.{agentHost}` | TXT | family (every profile) | TL badge URL for verification (§6.3) | Yes |
-| Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate fingerprint (`3 0 1`, selector 0); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
+| Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate binding (`3 1 1` or `3 0 1`); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
 
 When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it
 provisioned for that FQDN. The RA's revocation response lists the records to delete (see
@@ -123,7 +123,7 @@ into `dnsRecordsProvisioned[]` for this registration.
 | --- | --- | --- | --- |
 | Discovery (the `_ans.{agentHost}` TXT for `ANS_TXT`, the `{agentHost}` SVCB for `ANS_DNSAID`, per §6) | RA performs a DNS lookup for each announced discovery record at its label | Each required discovery record resolves to the announced content | Registration stays in `PENDING_DNS`; the RA retries on schedule and the registrant reconciles by publishing the announced record |
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
-| Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | No DNSSEC-validated TLSA record contradicts the expected fingerprint (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
+| Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | At least one DNSSEC-validated TLSA record matches the Server Certificate under its own selector and matching type (§6.3), or none is present (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA RRset with **no** record matching the Server Certificate is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
 
 **DNSSEC result.** TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
 result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified` — `true` when the
@@ -204,15 +204,18 @@ profile registered alone still produces them:
   back to the agent's first endpoint URL when no public TL URL is configured. Emitted only when the
   registration has at least one endpoint. **`Required=true`**: a badge-verifying client will not
   trust an agent whose discovery records publish without a paired badge.
-- **Server DANE TLSA** — `_{port}._tcp.{agentHost}` TLSA, value `3 0 1 {fingerprint}` (DANE-EE,
-  full-certificate selector 0, SHA-256 — the fingerprint is SHA-256 over the full DER Server
-  Certificate, matching the badge fingerprint in the TL). One record per **distinct TLS endpoint
+- **Server DANE TLSA** — `_{port}._tcp.{agentHost}` TLSA, value `3 1 1 {spki-sha256}` or
+  `3 0 1 {cert-sha256}` (DANE-EE, SHA-256; selector 1 hashes the Server Certificate's
+  SubjectPublicKeyInfo DER, selector 0 hashes the full DER Server Certificate and equals the badge
+  fingerprint in the TL). An RA MAY publish either selector; selector 1 is RECOMMENDED (RFC 7671
+  §5.1). Verifiers MUST evaluate each record under its own selector and matching type and MUST
+  accept a match on any DANE-EE record. One record per **distinct TLS endpoint
   port** (ports sorted ascending; plaintext `http` endpoints skipped; an empty port set falls back
   to `443`), so a DANE client connecting to a non-443 endpoint finds a record at `_{its-port}._tcp`.
   Emitted only when the registration has a server certificate. **`Required=false`**: a TLSA is only
   meaningful in a DNSSEC-signed zone, a runtime property the record set cannot know; the verify layer
-  enforces the stricter rule that a DNSSEC-validated TLSA MUST match the expected fingerprint
-  (§4).
+  enforces the stricter rule that a DNSSEC-validated TLSA RRset MUST contain a record matching the
+  Server Certificate (§4).
 
 ### 6.4 Composition: ordering, dedup, and the required-flag transition
 
@@ -352,6 +355,7 @@ an operator chose `ANS_TXT` over `ANS_DNSAID` (or vice versa).
 - [RFC 1034](https://www.rfc-editor.org/rfc/rfc1034): DNS concepts (CNAME blocking).
 - [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035): DNS implementation (TXT, label limits).
 - [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698): DANE TLSA records.
+- [RFC 7671](https://www.rfc-editor.org/rfc/rfc7671): DANE operational guidance (selector choice).
 - [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615): well-known URIs.
 - [RFC 9460](https://www.rfc-editor.org/rfc/rfc9460.html): SVCB and HTTPS resource records.
 
@@ -391,9 +395,9 @@ ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=mcp port=8443 key65402=m
 ; Badge TXT [RA-content] — family record; one per registration; points at the TL badge endpoint
 _ans-badge.ai-agent.acmecorp.com. 3600 IN TXT  "v=ans-badge1; version=v2.1.0; url=https://transparency-log.example.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
 
-; Server DANE TLSA [RA-content] — family record; one per distinct TLS port (443 and 8443); 3 0 1 over the full Server Certificate
-_443._tcp.ai-agent.acmecorp.com.  3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
-_8443._tcp.ai-agent.acmecorp.com. 3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+; Server DANE TLSA [RA-content] — family record; one per distinct TLS port (443 and 8443); 3 1 1 over the Server Certificate's SubjectPublicKeyInfo
+_443._tcp.ai-agent.acmecorp.com.  3600 IN TLSA 3 1 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+_8443._tcp.ai-agent.acmecorp.com. 3600 IN TLSA 3 1 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 ```
 
 **Record ownership summary:**
@@ -406,5 +410,5 @@ _8443._tcp.ai-agent.acmecorp.com. 3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b
 
 - With `["ANS_DNSAID", "ANS_TXT"]`, both families' discovery records coexist; the `_ans` TXT rows carry the required signal and the SVCB rows are `Required=false` (§6.4).
 - The composed canonical order sealed into `dnsRecordsProvisioned[]` is `[_ans TXT×N, HTTPS, SVCB×N, badge, TLSA×ports]`.
-- Server DANE TLSA is per distinct TLS port; both 443 and 8443 carry the same full-certificate fingerprint (the cert is FQDN-scoped, not per-port).
+- Server DANE TLSA is per distinct TLS port; both 443 and 8443 carry the same SPKI hash (the cert is FQDN-scoped, not per-port).
 - When v2.1.0 is revoked, the RA's revocation response lists the v2.1.0 `_ans`, SVCB, and `_ans-badge` records to delete.

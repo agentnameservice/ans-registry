@@ -140,7 +140,7 @@ agent.example.com.             3600 IN HTTPS 1 . alpn=h2
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
 _ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
-_443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
+_443._tcp.agent.example.com.   3600 IN TLSA  3 1 1 {server-cert-spki-sha256}
 ```
 
 The sealed `dnsRecordsProvisioned[]` entries carry the same `{name, type, value, purpose, required,
