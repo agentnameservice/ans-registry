@@ -51,7 +51,11 @@ v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
 ```
 
 SvcPriority `1` (ServiceMode), TargetName `.` (the origin — the owner name itself), `alpn=h2`
-(HTTP/2 service binding).
+(HTTP/2 service binding). Verification matches the live record the same way as the `ANS_DNSAID`
+SVCB row ([ans-dnsaid §5](ans-dnsaid.md#5-freshness-and-ans-5-monitoring)): SvcPriority and
+effective TargetName equal, `alpn` must include `h2` and may list more, additional SvcParams
+tolerated. A provider-synthesized apex HTTPS record such as `1 . alpn=h3,h2` with `ech` and address
+hints satisfies it.
 
 ## 3. Parameter sources and selection
 
