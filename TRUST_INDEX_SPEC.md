@@ -266,9 +266,9 @@ The Trust Evaluation API response includes a `recommendedProfile` field classify
 
 | Profile | Conditions | Suitable for |
 | --------- | ------------ | -------------- |
-| `READ_ONLY` | Low solvency or identity; an unevaluated gating dimension; or no active Identity Certificate | Information queries, read-only data access |
-| `TRANSACTIONAL` | Moderate scores across all dimensions | Small purchases, reversible transactions |
-| `FIDUCIARY` | Identity, solvency, and safety all evaluated and passing | Financial delegation, legal contracts |
+| `READ_ONLY` | Low solvency or identity; or an unevaluated gating dimension | Information queries, read-only data access |
+| `TRANSACTIONAL` | Identity evaluated and passing; all gating dimensions evaluated; solvency and safety need not reach fiduciary floors | Small purchases, reversible transactions |
+| `FIDUCIARY` | Identity, solvency, and safety all evaluated and passing; active Identity Certificate present | Financial delegation, legal contracts |
 | `UNTRUSTED` | Any dimension below a critical threshold | No delegation; the client SHOULD NOT proceed |
 
 A conforming TI MUST support these four profiles. A TI MAY define additional profiles and MUST document their assignment criteria.
