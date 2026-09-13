@@ -162,8 +162,8 @@ Emitted at activation (the verify-dns transition to `ACTIVE`). Payload follows t
 `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` records, each optionally
 carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC Authenticated-Data bit;
 `domainValidation` (the constant `ACME-DNS-01`); an optional `metadataHashes` map
-keyed by protocol token — plus `expiresAt` (the earliest `notAfter` across the attested certificates),
-`issuedAt`, `raId`, and `timestamp`.
+keyed by protocol token — plus `expiresAt` (the minimum of the latest `notAfter` in each required
+certificate group, calculated under [§7.3](#73-expiry)), `issuedAt`, `raId`, and `timestamp`.
 
 Registrations driven through the V1 paths (`/v1/agents/*`) seal **V1-format** payloads instead: a map-typed
 `dnsRecordsProvisioned` with no `dnssecVerified`, and `validIdentityCerts[]` / `validServerCerts[]`
@@ -239,11 +239,33 @@ CSR (§7 table); the path to an Identity Certificate is a new versioned registra
 
 ### 7.3 Expiry
 
-A registration's sealed `AGENT_REGISTERED` event carries `expiresAt` — the earliest `notAfter` across its
-attested certificates. Certificate lapse does not change RA state on an `ACTIVE` registration and emits no
-event; the TL derives `WARNING` and `EXPIRED` at read time from the attested expiry (ANS-4). The RA's expiry
-sweep applies only to pending registrations: a lapsed `PENDING_VALIDATION` row is retired to `EXPIRED` without
-a TL event.
+A registration's `expiresAt` MUST be calculated by taking the latest certificate expiry within each
+required certificate group, then the earliest of those group expirations:
+
+```text
+serverExpiry   = max(server certificate notAfter values)
+identityExpiry = max(identity certificate notAfter values)
+expiresAt      = min(serverExpiry, identityExpiry)
+```
+
+"Latest" means the furthest `notAfter`, not the most recently issued certificate. The groups contain
+the currently valid certificates allowed for this registration in its latest sealed agent attestation.
+A newly issued certificate MUST NOT extend the expiry used by TL consumers until that certificate is
+included in sealed evidence. The same calculation applies to the V1 and V2 certificate representations.
+
+Server Certificates are required. Identity Certificates are required for a registration that opted
+into Identity Certificates; for a registration created without them ([§7.2](#72-registrations-without-an-identity-certificate)),
+`expiresAt = serverExpiry`. If a required group has no currently valid certificate, the registration has
+lapsed; that group MUST NOT be omitted from the calculation to extend the registration's validity.
+
+An older certificate expiring during an overlap period does not expire the registration while each
+required group still has a valid replacement. Each certificate remains subject to its own validity and
+revocation checks: the aggregate expiry does not extend an individual certificate's validity or make a
+revoked certificate usable. See the [overlap example](examples/ans-1-examples.md#a4-certificate-expiry-during-overlap).
+
+Certificate lapse does not change RA state on an `ACTIVE` registration and emits no event; the TL derives
+`WARNING` and `EXPIRED` at read time using this calculation (ANS-4). The RA's expiry sweep applies only to
+pending registrations: a lapsed `PENDING_VALIDATION` row is retired to `EXPIRED` without a TL event.
 
 ## 8. RA key management
 

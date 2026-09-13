@@ -111,3 +111,30 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 ```
 
 Submitted to `POST /v1/agents/{agentId}/revoke` (V2: `POST /v2/ans/agents/{agentId}/revoke`). `reason` is required (an RFC 5280 revocation reason name token); `comments` is optional, max 200 chars. The sealed `AGENT_REVOKED` event canonicalizes `reason` to `revocationReasonCode` so the immutable record is unambiguous.
+
+## A.4 Certificate expiry during overlap
+
+At `2026-11-01T00:00:00Z`, assume the latest sealed agent attestation lists these four currently valid
+certificates. All expiry dates below mean `00:00:00Z` on that date.
+
+| Certificate group | First certificate expires | Second certificate expires | Latest group expiry |
+| --- | --- | --- | --- |
+| Server | 2026-12-01 | 2027-01-01 | 2027-01-01 |
+| Identity | 2027-10-01 | 2027-12-01 | 2027-12-01 |
+
+Applying [ANS-1 §7.3](../ans-1-registration.md#73-expiry):
+
+```text
+serverExpiry   = max(2026-12-01, 2027-01-01) = 2027-01-01
+identityExpiry = max(2027-10-01, 2027-12-01) = 2027-12-01
+expiresAt      = min(2027-01-01, 2027-12-01) = 2027-01-01
+```
+
+The attested `expiresAt` is therefore `2027-01-01T00:00:00Z`. The first Server Certificate becoming
+unusable on `2026-12-01` does not expire the registration: the second Server Certificate remains valid,
+and the Identity Certificate group remains valid beyond it.
+
+For a registration created without Identity Certificates, only the Server Certificate group participates,
+giving the same `2027-01-01T00:00:00Z` in this example. This omission applies only to registrations that
+never opted into Identity Certificates; an expired or otherwise unusable required identity group cannot
+be dropped to extend a registration's validity.
