@@ -138,3 +138,23 @@ For a registration created without Identity Certificates, only the Server Certif
 giving the same `2027-01-01T00:00:00Z` in this example. This omission applies only to registrations that
 never opted into Identity Certificates; an expired or otherwise unusable required identity group cannot
 be dropped to extend a registration's validity.
+
+### A.5 Renewal while the other certificate group is expired
+
+An identity-bearing registration still has stored RA status `ACTIVE`, but its last Identity Certificate
+expired on `2026-09-01T00:00:00Z`. On `2026-09-13`, the AHP completes Server Certificate renewal with a
+replacement expiring on `2026-12-12T00:00:00Z`.
+
+The renewal succeeds. Its published certificate evidence includes the replacement Server Certificate and
+the expired Identity Certificate with its original fingerprint and `notAfter`:
+
+```text
+serverExpiry   = 2026-12-12T00:00:00Z
+identityExpiry = 2026-09-01T00:00:00Z
+expiresAt      = 2026-09-01T00:00:00Z
+```
+
+The TL still reports `EXPIRED`. If the AHP then renews the Identity Certificate through
+`2027-09-13T00:00:00Z`, the new sealed evidence makes `expiresAt = 2026-12-12T00:00:00Z` and removes the
+certificate-lapse condition. The old Identity Certificate remains unusable. The same rule applies when
+an Identity Certificate is renewed while the Server Certificate group is expired.

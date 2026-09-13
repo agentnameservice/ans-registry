@@ -249,7 +249,9 @@ expiresAt      = min(serverExpiry, identityExpiry)
 ```
 
 "Latest" means the furthest `notAfter`, not the most recently issued certificate. The groups contain
-the currently valid certificates allowed for this registration in its latest sealed agent attestation.
+the certificate evidence in the registration's latest sealed agent attestation: all currently valid
+certificates, or the last-expiring non-revoked certificate when a required group has lapsed. Retaining
+that expired certificate records the lapse; it does not authorize use of the certificate.
 A newly issued certificate MUST NOT extend the expiry used by TL consumers until that certificate is
 included in sealed evidence. The same calculation applies to the V1 and V2 certificate representations.
 
@@ -257,6 +259,13 @@ Server Certificates are required. Identity Certificates are required for a regis
 into Identity Certificates; for a registration created without them ([§7.2](#72-registrations-without-an-identity-certificate)),
 `expiresAt = serverExpiry`. If a required group has no currently valid certificate, the registration has
 lapsed; that group MUST NOT be omitted from the calculation to extend the registration's validity.
+
+On a registration whose stored RA status remains `ACTIVE`, expiry of another required certificate group
+MUST NOT by itself block certificate renewal. When publishing a renewal, the RA MUST retain the other
+group's certificate evidence, including its original `notAfter` when expired. Renewing the Server
+Certificate alone therefore leaves the TL status `EXPIRED` if the Identity Certificate group is still
+expired, and vice versa. Renewal success describes certificate issuance; registration validity requires
+usable certificates in every required group.
 
 An older certificate expiring during an overlap period does not expire the registration while each
 required group still has a valid replacement. Each certificate remains subject to its own validity and
