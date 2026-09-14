@@ -108,7 +108,12 @@ DPoP: eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7…
 X-SCITT-Receipt: 0oRYS6MBJgRE…                (std base64 of A.2's COSE bytes)
 X-ANS-Status-Token: 0oRYPqMBJgNY…             (std base64 of A.3's COSE bytes)
 Content-Type: application/json
+Content-Length: 46
+
+{"task":"reconcile-ledger","amount":"1000.00"}
 ```
+
+The body is exactly the 46 UTF-8 octets shown, with no trailing newline.
 
 The `DPoP` value is a compact JWS. Decoded JOSE header — exactly four parameters, nothing else:
 
@@ -138,15 +143,19 @@ Decoded payload:
   "htu": "https://payments.example.com/api/task",
   "iat": 1787529605,
   "jti": "4b6ff43ff44e3f65a4f8f3aad4b6f0e2",
-  "ath": "fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo"
+  "ath": "fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo",
+  "ans_profile": 1,
+  "ans_content_digest": "wT8MhptL9zBd-WXZkYTjY7AHo1vNNfPYZzVifJEzPJc"
 }
 ```
 
 `htu` is the normalized target (lowercased scheme/host, default port dropped, no query or
 fragment); `ath` is `base64url(SHA-256(access token))` and is present only because the request
-carries `Authorization: DPoP`. The callee verifies the proof, binds it to the status token and
-receipt, records the `jti`, checks the access token's `cnf.jkt` against the proof key's RFC 7638
-thumbprint while validating the token, and only then authorizes and processes the request.
+carries `Authorization: DPoP`; `ans_content_digest` is `base64url(SHA-256(content))` over the
+46 body octets shown (§7.13). The callee verifies the proof, binds it to the status token and
+receipt, verifies the content digest, records the `jti`, checks the access token's `cnf.jkt`
+against the proof key's RFC 7638 thumbprint while validating the token, and only then authorizes
+and processes the request.
 
 The response carries the callee's own artifacts, which the caller verifies against the TLS Server
 Certificate it captured in the handshake:
@@ -173,16 +182,43 @@ Authorization: DPoP eyJhbGciOiJFUzI1NiIs…   <- access token, captured together
 DPoP: eyJ0eXAiOiJkcG9wK2p3dCIs…   <- captured proof, htu = https://payments.example.com/api/task
 X-SCITT-Receipt: 0oRYS6MBJgRE…
 X-ANS-Status-Token: 0oRYPqMBJgNY…
+Content-Type: application/json
+Content-Length: 46
+
+{"task":"reconcile-ledger","amount":"1000.00"}
 ```
 
 The misconfigured callee reconstructs `https://payments.example.com/api/task` from `Host`, the
 `htu` comparison passes, and every other check passes: the artifacts are genuine, the captured
 `Authorization` header satisfies the §7.8 `ath` binding in both directions (and `cnf.jkt` matches
-— this is the original proof, not a re-mint), and the proof's `jti` was never seen *here* —
-single-use is enforced per callee. A request the caller never made to this service authenticates
-as that caller within the `iat` window.
+— this is the original proof, not a re-mint), the unchanged 46-byte body satisfies
+`ans_content_digest`, and the proof's `jti` was never seen *here* — single-use is enforced per
+callee. A request the caller never made to this service authenticates as that caller within the
+`iat` window.
 
 The same request against a conformant configuration fails before any proof verification: a
 trusted-authority allowlist containing `api.other.example` rejects the claimed authority
 outright, and an externally configured URL makes the comparison
 `htu ≠ https://api.other.example/api/task`.
+
+## A.7 Content binding: empty requests and tampering
+
+A request without content, including a `POST` with `Content-Length: 0`, still carries
+`ans_content_digest`. Its value is:
+
+```text
+47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU
+```
+
+This is `base64url(SHA-256(b""))`, without padding. The body and digest in A.5 and this
+empty-content value are computed fixtures. Assuming the other authentication checks pass:
+
+| Signed content | Received content | Digest-check result |
+| --- | --- | --- |
+| A.5's 46 octets | The same 46 octets | Pass |
+| A.5's 46 octets | `amount` changed to `"9000.00"` | Reject — digest mismatch |
+| A.5's 46 octets | Empty | Reject — content removed |
+| Empty | Empty | Pass — empty-content digest |
+| Empty | A.5's 46 octets | Reject — content added |
+| Any, with the digest claim omitted | Any | Reject — missing required claim |
+| A.5's 46 octets | The same content carried with chunked transfer coding | Pass — chunk framing is excluded from the digest |
