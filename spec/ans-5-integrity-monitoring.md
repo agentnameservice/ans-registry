@@ -29,7 +29,11 @@ monitored on their own per-identity cadence (§4.3), independently of the agents
 
 ANS-5 does **not**:
 
-- Score, rank, or filter agents. Trust scoring is out of scope for ANS and lives in a separate `ti-*` layer set. The clean separation matters because some deployments want verification (am I being lied to?) without scoring (is this the best one?), and others want both. ANS-5's verb is **verify**. A conforming AIM MAY be composed into a larger system that also performs scoring, provided the scoring function does not influence verification outcomes.
+- Score, rank, or filter agents. Trust scoring is out of scope for ANS and lives in a separate
+  `ti-*` layer set. The clean separation matters because some deployments want verification
+  (am I being lied to?) without scoring (is this the best one?), and others want both.
+  ANS-5's verb is **verify**. A conforming AIM MAY be composed into a larger system that also
+  performs scoring, provided the scoring function does not influence verification outcomes.
 - Issue revocations or command state changes. Findings are reports; the RA decides what to do with them. ANS-1 specifies the warning event the RA emits when a finding clears quorum; the agent stays ACTIVE. Revocation only happens through the RA's own decision per ANS-1.
 - Specify grade-tier rules for principal bindings. ANS-5 specifies *how* to verify each binding type; *which* bindings are acceptable *when* is grade-tier policy that lives outside ANS.
 
@@ -43,7 +47,13 @@ ANS-5 does **not**:
 
 ## 3. The `VerificationWorker` interface
 
-The `VerificationWorker` interface is the protocol contract for ANS-5: the orchestration layer MUST ensure only ACTIVE registrations are submitted for verification. The worker runs the per-check semantics named in the verification-checks section and produces per-check results. Checks that do not apply to the input registration are omitted (not reported as failures). A conforming implementation MAY emit individual per-check results rather than a single grouped record, provided each is attributable to a verification cycle and carries provenance. The wire format of the AIM's output is implementation-defined.
+The `VerificationWorker` interface is the protocol contract for ANS-5: the orchestration layer MUST
+ensure only ACTIVE registrations are submitted for verification. The worker runs the per-check
+semantics named in the verification-checks section and produces per-check results. Checks that do
+not apply to the input registration are omitted (not reported as failures). A conforming
+implementation MAY emit individual per-check results rather than a single grouped record, provided
+each is attributable to a verification cycle and carries provenance. The wire format of the AIM's
+output is implementation-defined.
 
 ## 4. Verification checks
 
@@ -52,7 +62,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | Check | What the AIM does | Pass condition | Required when |
 | --- | --- | --- | --- |
 | **TL presence** | Query the ANS-4 TL for the registration's most recent sealed event | Inclusion proof verifies against the TL's Signed Tree Head | Always |
-| **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist, content matches TL-sealed expected values, and DNSSEC validates (when signed) | Always (against the record set the registration's discovery profiles emit, [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) |
+| **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist, content matches TL-sealed expected values according to the selected discovery profile's matching rules, and DNSSEC validates (when signed) | Always (against the record set the registration's discovery profiles emit, [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) |
 | **Server Certificate match** | TLS handshake to the operational endpoint, extract certificate fingerprint | Fingerprint matches the value sealed in the TL | When the anchor profile ties to TLS (FQDN; `did:web` resolved domain) |
 | **Identity Certificate match** | Verify identity certificate fingerprint against TL-sealed value (see §4 note below) | Fingerprint matches | Only when ANS-2 versioned registration |
 | **Schema integrity** | Fetch each endpoint's `metaDataUrl`, hash the document | Hash matches the protocol-keyed entry in the TL `attestations.metadataHashes` map (e.g. `metadataHashes["A2A"]`) | Only when per-endpoint `metaDataHash` values were submitted at registration |
@@ -65,11 +75,21 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 
 **DNS pointer record types.** `_ans` and `_ans-badge` (or `_ra-badge`) TXT records MUST be verified. TLSA and HTTPS/SVCB records SHOULD be verified when the registration's attestation includes them.
 
-**DNS pointer content matching.** "Records exist and validate" means: (1) the record exists at the authoritative nameserver, (2) its content matches the TL-sealed expected value, and (3) the record's DNSSEC validation state is secure when the zone is signed. A record that exists but whose content does not match the sealed value is a `Mismatch` finding.
+**DNS pointer content matching.** "Records exist and validate" means: (1) the record exists at the
+authoritative nameserver, (2) its content matches the TL-sealed expected value according to the
+selected discovery profile's matching rules, and (3) the record's DNSSEC validation state is secure
+when the zone is signed. "Matches" means exact equality unless the profile defines semantic matching,
+such as SVCB/HTTPS subset matching. A record that exists but whose content does not match the sealed
+value under those matching rules is a `Mismatch` finding.
 
 The verification record records which checks fired; downstream consumers react per their own policy.
 
-**Identity certificate verification note.** The identity certificate is typically a client certificate not presented during a standard TLS handshake to the operational endpoint. Runtime re-verification of the identity certificate fingerprint requires a dedicated identity presentation protocol not currently defined in ANS. Implementations SHOULD record the identity certificate type as evidence; fingerprint re-verification is deferred to a future ANS extension. This check does not contribute to conformance level determination until such an extension is published.
+**Identity certificate verification note.** The identity certificate is typically a client
+certificate not presented during a standard TLS handshake to the operational endpoint. Runtime
+re-verification of the identity certificate fingerprint requires a dedicated identity presentation
+protocol not currently defined in ANS. Implementations SHOULD record the identity certificate type
+as evidence; fingerprint re-verification is deferred to a future ANS extension. This check does not
+contribute to conformance level determination until such an extension is published.
 
 ### 4.1 Check severity
 
@@ -160,7 +180,11 @@ A conformant ANS-5 implementation:
 7. Marks records as `degraded` when the underlying ANS-0 claim was retrieved via the soft-stale fallback.
 
 
-**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks section fires only when the registration carries the corresponding binding); AIM verification cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord` because the AIM omitted an unavailable check.
+**Optional surface.** Per-binding-type verification coverage (each row in the verification-checks
+section fires only when the registration carries the corresponding binding); AIM verification
+cadence is operator-defined. A conforming verifier MUST NOT downgrade integrity scoring solely
+because a registration omits an optional binding type, and MUST NOT reject a `VerificationRecord`
+because the AIM omitted an unavailable check.
 
 **Conformance levels.** Implementations declare their conformance level:
 
