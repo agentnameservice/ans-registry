@@ -162,8 +162,8 @@ Emitted at activation (the verify-dns transition to `ACTIVE`). Payload follows t
 `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` records, each optionally
 carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC Authenticated-Data bit;
 `domainValidation` (the constant `ACME-DNS-01`); an optional `metadataHashes` map
-keyed by protocol token — plus `expiresAt` (the earliest `notAfter` across the attested certificates),
-`issuedAt`, `raId`, and `timestamp`.
+keyed by protocol token — plus `expiresAt` (the minimum of the latest `notAfter` in each required
+certificate group, calculated under [§7.3](#73-expiry)), `issuedAt`, `raId`, and `timestamp`.
 
 Registrations driven through the V1 paths (`/v1/agents/*`) seal **V1-format** payloads instead: a map-typed
 `dnsRecordsProvisioned` with no `dnssecVerified`, and `validIdentityCerts[]` / `validServerCerts[]`
@@ -239,11 +239,50 @@ CSR (§7 table); the path to an Identity Certificate is a new versioned registra
 
 ### 7.3 Expiry
 
-A registration's sealed `AGENT_REGISTERED` event carries `expiresAt` — the earliest `notAfter` across its
-attested certificates. Certificate lapse does not change RA state on an `ACTIVE` registration and emits no
-event; the TL derives `WARNING` and `EXPIRED` at read time from the attested expiry (ANS-4). The RA's expiry
-sweep applies only to pending registrations: a lapsed `PENDING_VALIDATION` row is retired to `EXPIRED` without
-a TL event.
+The RA MUST calculate the `expiresAt` it seals in `AGENT_REGISTERED` ([§6.1](#61-agent_registered))
+by taking the latest certificate expiry within each required certificate group, then the earliest
+of those group expirations:
+
+```text
+serverExpiry   = max(server certificate notAfter values)
+identityExpiry = max(identity certificate notAfter values)
+expiresAt      = min(serverExpiry, identityExpiry)
+```
+
+`notAfter` and `expiresAt` MUST be compared as RFC 3339 instants, normalizing offsets to UTC rather than
+ordering their text representations. A certificate's validity period includes its `notAfter`
+(RFC 5280 §4.1.2.5). A group has lapsed due to expiration when the current instant is later than
+its latest `notAfter`.
+
+"Latest" means the furthest `notAfter`, not the most recently issued certificate. The groups contain
+every certificate in the registration's sealed `AGENT_REGISTERED` attestation, whether or not it has
+since expired. Later expiry or revocation does not remove a certificate from that historical evidence
+or recalculate the sealed `expiresAt`. The same calculation applies to the V1 and V2 certificate
+representations.
+
+Server Certificates are required. Identity Certificates are required for a registration that opted
+into Identity Certificates; for a registration created without them ([§7.2](#72-registrations-without-an-identity-certificate)),
+`expiresAt = serverExpiry`. Every required group MUST contain at least one certificate at activation.
+The RA MUST NOT seal an activation attestation with a missing or empty required group, omit that group
+to extend validity, or substitute an expiry for an undefined `max()`. After activation, a required
+group's expiry remains the latest `notAfter` among all certificates sealed for that group, including
+expired ones.
+
+On a registration whose stored RA status remains `ACTIVE`, expiry of another required certificate group
+MUST NOT by itself block Server Certificate renewal. Renewal success describes certificate issuance;
+registration validity requires usable certificates in every required group. Renewal and identity-certificate
+rotation seal no TL event under [§6.3](#63-reserved-event-types) and [§7](#7-lifecycle-operations).
+A certificate issued after activation therefore does not update the sealed `AGENT_REGISTERED` evidence
+or the `expiresAt` visible to TL consumers.
+
+An older certificate expiring during an overlap period does not expire the registration while each
+required group still has a valid replacement in the sealed evidence. Each certificate remains subject to
+its own validity and revocation checks: the aggregate expiry does not extend an individual certificate's
+validity or make a revoked certificate usable. See the [overlap example](examples/ans-1-examples.md#a4-certificate-expiry-during-overlap).
+
+Certificate lapse does not change RA state on an `ACTIVE` registration and emits no event; the TL derives
+`WARNING` and `EXPIRED` at read time from the sealed `expiresAt` (ANS-4). The RA's expiry sweep applies only to
+pending registrations: a lapsed `PENDING_VALIDATION` row is retired to `EXPIRED` without a TL event.
 
 ## 8. RA key management
 
@@ -293,7 +332,7 @@ sealed event timestamps.
 
 | Scenario | Consequence | RA response |
 | --- | --- | --- |
-| AHP unavailable for extended period | Certificates expire; TLS fails | The RA cannot auto-renew (the AHP owns its private keys). RA state is unchanged; the TL derives `WARNING` and then `EXPIRED` at read time from the attested certificate expiry |
+| AHP unavailable for extended period | Certificates expire; TLS fails | The RA cannot auto-renew (the AHP owns its private keys). RA state is unchanged; the TL derives `WARNING` and then `EXPIRED` at read time from the sealed `expiresAt` |
 | TL unavailable | Agent-lane event delivery is deferred | Agent-lane events queue in the transactional outbox and replay byte-for-byte until the TL accepts them; activation commits locally with the event enqueued. Identity-lane writes (ANS-0) instead fail closed with `TL_UNAVAILABLE` |
 
 ## Appendix A: Worked examples (non-normative)
@@ -308,7 +347,8 @@ Non-normative worked examples (registration request, event payloads) live at [`e
 - ANS-4 specification: [`ans-4-transparency.md`](ans-4-transparency.md) — TL append, receipt.
 - ANS-5 specification: [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md) — verification worker contract.
 - [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123): Host requirements (FQDN syntax).
-- [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280): X.509 (revocation reason codes).
+- [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339): Timestamp representation and ordering.
+- [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280): X.509 (certificate validity and revocation reason codes).
 - [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515): JWS (signature envelope).
 - [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517): JWK (JSON Web Key).
 - [RFC 8555](https://www.rfc-editor.org/rfc/rfc8555): ACME (FQDN domain-control proof).
