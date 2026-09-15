@@ -27,14 +27,14 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
       {
         "fingerprint": "SHA256:22b8a8045734ad3bd8e24c52db8d9aa4dc12907337f790ee70499999021f0eb9",
         "type": "X509-OV-CLIENT",
-        "notAfter": "2026-10-05T18:00:00.000000Z"
+        "notAfter": "2026-10-05T18:00:00Z"
       }
     ],
     "serverCerts": [
       {
         "fingerprint": "SHA256:d2b71bc02f119a61611b77eadc44c23670917ac4f435fe4e1095d4e5209087ea",
         "type": "X509-DV-SERVER",
-        "notAfter": "2026-10-05T18:00:00.000000Z"
+        "notAfter": "2026-10-05T18:00:00Z"
       }
     ],
     "dnsRecordsProvisioned": [
@@ -60,7 +60,7 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
       "A2A": "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b"
     }
   },
-  "expiresAt": "2026-10-05T18:00:00.000000Z",
+  "expiresAt": "2026-10-05T18:00:00Z",
   "issuedAt": "2025-10-05T18:00:00.000000Z",
   "raId": "id-A",
   "timestamp": "2025-10-05T18:00:00.000000Z"
@@ -114,8 +114,8 @@ Submitted to `POST /v1/agents/{agentId}/revoke` (V2: `POST /v2/ans/agents/{agent
 
 ## A.4 Certificate expiry during overlap
 
-At `2026-11-01T00:00:00Z`, assume the latest sealed agent attestation lists these four currently valid
-certificates. All expiry dates below mean `00:00:00Z` on that date.
+At `2026-11-01T00:00:00Z`, assume a sealed `AGENT_REGISTERED` attestation whose certificate evidence
+lists these four currently valid certificates. All expiry dates below mean `00:00:00Z` on that date.
 
 | Certificate group | First certificate expires | Second certificate expires | Latest group expiry |
 | --- | --- | --- | --- |
@@ -130,31 +130,33 @@ identityExpiry = max(2027-10-01, 2027-12-01) = 2027-12-01
 expiresAt      = min(2027-01-01, 2027-12-01) = 2027-01-01
 ```
 
-The attested `expiresAt` is therefore `2027-01-01T00:00:00Z`. The first Server Certificate becoming
-unusable on `2026-12-01` does not expire the registration: the second Server Certificate remains valid,
-and the Identity Certificate group remains valid beyond it.
+The attested `expiresAt` is therefore `2027-01-01T00:00:00Z`. After `2026-12-01T00:00:00Z`, the first
+Server Certificate has expired, but the second Server Certificate remains valid and the Identity
+Certificate group remains valid beyond it. The Server Certificate group's validity includes
+`2027-01-01T00:00:00Z`; it lapses only when the current instant is later than that boundary.
 
 For a registration created without Identity Certificates, only the Server Certificate group participates,
 giving the same `2027-01-01T00:00:00Z` in this example. This omission applies only to registrations that
 never opted into Identity Certificates; an expired or otherwise unusable required identity group cannot
 be dropped to extend a registration's validity.
 
-### A.5 Renewal while the other certificate group is expired
+## A.5 Renewal while the other certificate group is expired
 
-An identity-bearing registration still has stored RA status `ACTIVE`, but its last Identity Certificate
-expired on `2026-09-01T00:00:00Z`. On `2026-09-13`, the AHP completes Server Certificate renewal with a
-replacement expiring on `2026-12-12T00:00:00Z`.
-
-The renewal succeeds. Its published certificate evidence includes the replacement Server Certificate and
-the expired Identity Certificate with its original fingerprint and `notAfter`:
+At activation, an identity-bearing registration sealed a Server Certificate expiring on
+`2026-10-01T00:00:00Z` and an Identity Certificate expiring on `2026-09-01T00:00:00Z`:
 
 ```text
-serverExpiry   = 2026-12-12T00:00:00Z
+serverExpiry   = 2026-10-01T00:00:00Z
 identityExpiry = 2026-09-01T00:00:00Z
 expiresAt      = 2026-09-01T00:00:00Z
 ```
 
-The TL still reports `EXPIRED`. If the AHP then renews the Identity Certificate through
-`2027-09-13T00:00:00Z`, the new sealed evidence makes `expiresAt = 2026-12-12T00:00:00Z` and removes the
-certificate-lapse condition. The old Identity Certificate remains unusable. The same rule applies when
-an Identity Certificate is renewed while the Server Certificate group is expired.
+On `2026-09-13`, its stored RA status remains `ACTIVE`, but the Identity Certificate has expired.
+The AHP completes Server Certificate renewal with a replacement expiring on `2026-12-12T00:00:00Z`.
+
+The renewal succeeds: the RA issues the certificate and the stored registration status stays `ACTIVE`.
+Renewal seals no TL event under [ANS-1 §6.3](../ans-1-registration.md#63-reserved-event-types), so the
+sealed `AGENT_REGISTERED` attestation is unchanged. The TL still reads
+`expiresAt = 2026-09-01T00:00:00Z` and reports `EXPIRED`. The replacement Server Certificate's later
+expiry does not change that sealed value. The expired Identity Certificate remains unusable;
+Server Certificate issuance alone does not restore validity to every required group.
