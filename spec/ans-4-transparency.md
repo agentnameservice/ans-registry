@@ -34,7 +34,7 @@ ANS-4 does **not** specify:
 
 - **SCITT statement**: the unit the TL accepts and seals — the JCS-canonical inner-event payload plus a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
 - **Sealed envelope**: the record the TL appends — `{payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status}`, where the outer `signature` is the TL's own attestation. The leaf hash covers the fully signed envelope (§3).
-- **SCITT receipt**: the TL's signed statement over one sealed envelope, returned as a binary COSE_Sign1 that also carries an inclusion proof (§5.2). The signature covers the envelope; inclusion in the published tree is established against a checkpoint, not by the receipt alone.
+- **SCITT receipt**: the TL's signed statement that it sealed one envelope, returned as a binary COSE_Sign1 that also carries an inclusion proof (§5.2). The signature authenticates the statement; the inclusion proof supports an optional publication check against a checkpoint.
 - **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing key (which signs checkpoints, receipts, attestations, and status tokens).
 - **Checkpoint**: a C2SP signed note recording the log's size and root hash at a point in time. Produced as batches seal; consumed by consistency-proof verifiers.
 
@@ -118,23 +118,28 @@ header `{396 (verifiable-data-structure proofs): {-1: treeSize, -2: leafIndex, -
 path, -4: rootHash}}`; payload: the sealed envelope. The signature covers the protected header
 and the payload only; nothing in the unprotected header, `rootHash` included, is signed.
 
-**What a receipt proves.** A receipt whose signature verifies under a `/root-keys` key proves
-that the TL signed that envelope. Recomputing the leaf hash (§3) and walking the inclusion path
-yields the root of a tree of `treeSize` leaves, but that root is signed only by a checkpoint: the
-receipt proves inclusion in the published tree once the walked root equals the root of the TL's
-checkpoint for the same `treeSize`, and not before. Verifiers that need tree-head attestation MUST
-make that comparison; verifiers that need only the TL's statement about the envelope MAY stop at
-the signature. The `rootHash` in the unprotected header is a convenience copy and MUST NOT be
-treated as verified.
+**What a receipt proves.** A receipt whose signature verifies under a `/root-keys` key is the TL's
+authenticated statement that it sealed that envelope. For a relying party acting on the TL's
+assertions about an agent, that signature is the check; the inclusion proof adds nothing to it,
+and an altered proof cannot change what the TL asserted.
+
+The inclusion proof serves a separate, optional purpose. Recomputing the leaf hash (§3) and
+walking the path yields the root of a tree of `treeSize` leaves; a verifier that compares it with
+the root of the TL's checkpoint for the same `treeSize` confirms that the TL published a tree head
+containing the leaf. That is the publication check auditors and monitors use for tree-head
+attestation. It is not part of authenticating the statement, and because the same TL signs both
+the receipt and the checkpoint it does not establish the log's honesty; consistency between
+checkpoints (§9.1), HCS anchoring (§7), and ANS-5 monitoring do that. The `rootHash` in the
+unprotected header is a convenience copy and MUST NOT be treated as verified.
 
 **Receipt tree size.** A receipt is issued against a checkpoint that covers its leaf, and a TL
 MAY store it and return it unchanged as the tree grows, so a receipt's `treeSize` is normally
-below the size in the current `/checkpoint`. Verifiers MUST NOT treat that as stale or invalid.
-To attest such a receipt, use the checkpoint the TL signed at that size, served with its
-signature lines by `GET /v1/log/checkpoint/history` (`fromSize` and `toSize` equal to `treeSize`),
-or verify an RFC 6962 §2.1.2 consistency proof from `treeSize` to the current checkpoint using
-the `/tile/*` surface. A checkpoint proves what the TL published; consistency between checkpoints
-(§9.1), HCS anchoring (§7), and ANS-5 monitoring are where the log's honesty is established.
+below the size in the current `/checkpoint`. That is not staleness, and verifiers MUST NOT treat
+it as an invalid receipt, identity, or signature. A verifier performing the publication check on
+such a receipt uses the checkpoint the TL signed at that size, served with its signature lines by
+`GET /v1/log/checkpoint/history` (`fromSize` and `toSize` equal to `treeSize`), or an RFC 6962
+§2.1.2 consistency proof from `treeSize` to the current checkpoint built from the `/tile/*`
+surface.
 
 **Status tokens.** `GET /v1/agents/{agentId}/status-token` returns a short-lived signed
 assertion of the agent's computed status (`application/ans-status-token+cbor`; default TTL one
