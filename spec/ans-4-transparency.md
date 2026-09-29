@@ -34,7 +34,7 @@ ANS-4 does **not** specify:
 
 - **SCITT statement**: the unit the TL accepts and seals — the JCS-canonical inner-event payload plus a producer signature. Aligned to [`draft-ietf-scitt-architecture`](https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/).
 - **Sealed envelope**: the record the TL appends — `{payload: {logId, producer: {event, keyId, signature}}, schemaVersion, signature, status}`, where the outer `signature` is the TL's own attestation. The leaf hash covers the fully signed envelope (§3).
-- **SCITT receipt**: the proof of inclusion the TL returns — a binary COSE_Sign1 carrying the inclusion proof (§5.2).
+- **SCITT receipt**: the TL's signed statement that it sealed one envelope, returned as a binary COSE_Sign1 that also carries an inclusion proof (§5.2). The signature authenticates the statement; the inclusion proof supports an optional publication check against a checkpoint.
 - **Producer key**: the signing key an RA instance uses to sign events submitted to the TL. Distinct from the TL's own signing key (which signs checkpoints, receipts, attestations, and status tokens).
 - **Checkpoint**: a C2SP signed note recording the log's size and root hash at a point in time. Produced as batches seal; consumed by consistency-proof verifiers.
 
@@ -115,8 +115,31 @@ and merge accordingly
 **COSE receipt profile.** A receipt is a COSE_Sign1 (RFC 9052): protected header `{alg: ES256,
 kid: <4-byte SPKI key hash>, vds: 1 (RFC 9162 SHA-256), CWT claims: {iss, iat}}`; unprotected
 header `{396 (verifiable-data-structure proofs): {-1: treeSize, -2: leafIndex, -3: inclusion
-path, -4: rootHash}}`. The signature covers the leaf; a verifier recomputes the leaf hash from
-the envelope (§3) and walks the path to the signed root.
+path, -4: rootHash}}`; payload: the sealed envelope. The signature covers the protected header
+and the payload only; nothing in the unprotected header, `rootHash` included, is signed.
+
+**What a receipt proves.** A receipt whose signature verifies under a `/root-keys` key is the TL's
+authenticated statement that it sealed that envelope. For a relying party acting on the TL's
+assertions about an agent, that signature is the check; the inclusion proof adds nothing to it,
+and an altered proof cannot change what the TL asserted.
+
+The inclusion proof serves a separate, optional purpose. Recomputing the leaf hash (§3) and
+walking the path yields the root of a tree of `treeSize` leaves; a verifier that compares it with
+the root of the TL's checkpoint for the same `treeSize` confirms that the TL published a tree head
+containing the leaf. That is the publication check auditors and monitors use for tree-head
+attestation. It is not part of authenticating the statement, and because the same TL signs both
+the receipt and the checkpoint it does not establish the log's honesty; consistency between
+checkpoints (§9.1), HCS anchoring (§7), and ANS-5 monitoring do that. The `rootHash` in the
+unprotected header is a convenience copy and MUST NOT be treated as verified.
+
+**Receipt tree size.** A receipt is issued against a checkpoint that covers its leaf, and a TL
+MAY store it and return it unchanged as the tree grows, so a receipt's `treeSize` is normally
+below the size in the current `/checkpoint`. That is not staleness, and verifiers MUST NOT treat
+it as an invalid receipt, identity, or signature. A verifier performing the publication check on
+such a receipt uses the checkpoint the TL signed at that size, served with its signature lines by
+`GET /v1/log/checkpoint/history` (`fromSize` and `toSize` equal to `treeSize`), or an RFC 6962
+§2.1.2 consistency proof from `treeSize` to the current checkpoint built from the `/tile/*`
+surface.
 
 **Status tokens.** `GET /v1/agents/{agentId}/status-token` returns a short-lived signed
 assertion of the agent's computed status (`application/ans-status-token+cbor`; default TTL one
@@ -127,7 +150,9 @@ proofs consume this; verifiers MUST check the token's expiry themselves.
 primary signature line carries `<4-byte keyhash> ‖ <ASN.1 DER ECDSA signature over SHA-256(note
 body)>`, base64-encoded per the note format; a standard-JWS additional-signer line is appended to
 the same note by the same key. The `GET /tile/*` surface serves the Merkle tree in C2SP
-tlog-tiles form for bulk and offline verification.
+tlog-tiles form for bulk and offline verification. A checkpoint that verifies under a
+`/root-keys` key proves that the TL signed that tree head; that the head extends earlier heads is
+established by a consistency proof computed from the tiles (§9.1).
 
 ### 5.3 Identity surface
 
@@ -225,7 +250,7 @@ A conformant ANS-4 implementation:
 
 1. Accepts statements only with verified producer signatures (§6) and seals each into a leaf per the leaf-hash rule (§3).
 2. Dedupes appends by content hash, so byte-identical retries land on the same leaf.
-3. Returns SCITT receipts matching the COSE profile in §5.2.
+3. Returns SCITT receipts matching the COSE profile in §5.2, each issued against a checkpoint that covers its leaf.
 4. Exposes the verification API (§5) over HTTPS with no authentication on read-only endpoints.
 5. Implements producer authentication with overlap-window key rotation (§6).
 6. Distributes its verification key via `/root-keys`, retaining every previously published line (§5.1).
