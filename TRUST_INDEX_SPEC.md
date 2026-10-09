@@ -349,6 +349,15 @@ Each signal category (integrity, identity, solvency, behavior, safety) occupies 
 
 A TI MUST validate the `schemaVersion` of each signal block against its published version manifest before scoring. Signals at the current version score normally. Signals at a deprecated version receive reduced weight. Signals at a rejected version are treated as absent.
 
+**Signal provenance MUST be verifiable.** A non-TL signal is verified one of two ways, by who asserted it or by the TI checking it directly.
+A third-party attestation, an audit, insurance attestation, or certification, MUST name the accredited source that asserted it and carry that source's signature over the block.
+A TI MUST verify that signature and confirm the source is accredited for the signal's category (Section 8.5) before the signal raises any dimension score.
+A self-verifying signal is checked by the TI directly rather than through an accredited source: a cryptographic proof (Section 4.3) raises a score only when the TI validates the proof, and on-chain data raises a score only when the TI reads it from the referenced chain.
+A counterparty signal, a peer endorsement or a user rating, is not an accredited attestation. It carries the counterparty's own signature so the TI can authenticate the endorser, and it is weighted by the endorser's identity grade and transaction cost under Section 9.1, not confirmed against Section 8.5 accreditation.
+A third-party attestation whose provenance is absent, unsigned, or from an unaccredited source, a counterparty signal the TI cannot authenticate, and a self-verifying signal whose check does not pass, MUST NOT raise a score.
+The TI records such a signal as unattested and lowers the dimension's coverage (Section 2.2).
+The evaluation response names the source and its accreditation alongside each attested signal, so a reader can see who asserted the underlying evidence.
+
 ### 3.4 Signal versioning lifecycle
 
 Signal schemas evolve as new signal types are added or existing ones are refined. The lifecycle follows three stages:
@@ -734,6 +743,13 @@ The response MAY include:
 - `compositeScore`: Deprecated single integer 0-100
 - `evaluationChanged`: Boolean. True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score changes without caching and comparing vectors themselves. The TI tracks each client's last-seen evaluation via client identity or session token.
 
+The signed credential MUST carry a `validUntil` no later than its `evaluationTime` plus the shortest caching TTL (Section 7.5) among the scored signals that fed it, so the verdict expires one TTL after signing rather than at an instant that may already have passed.
+A verifier MUST reject an evaluation whose `validUntil` has passed, so a stale verdict cannot be replayed as current.
+Because a verifier rejects an expired credential, a TI MUST NOT serve one: when the most volatile scored signal reaches its TTL, the TI recomputes with the freshness penalty (Sections 2.5 and 7.5) and re-signs with a fresh `evaluationTime` and `validUntil`.
+The cached fallback that Section 7.4.2 requires in a fresh-challenge failure is this re-signed, freshness-penalized recompute, not the expired credential, so the property that a client always gets a live Trust Vector holds without serving a stale verdict.
+The signed `credentialSubject` includes `agentId` and `evaluationTime`, so the signature binds the verdict to one agent at one moment.
+A verifier MUST reject a credential presented for a different agent.
+
 ### 7.3 Trust Vector, recommended profile, and risk factors
 
 The response serves three audiences:
@@ -777,12 +793,21 @@ The agent publishes its challenge endpoint in its ANS Trust Card at `trustManife
 | Agent's challenge endpoint unreachable | Return cached evaluation | `SOLVENCY_FRESH_CHALLENGE_UNREACHABLE` |
 
 In every failure case the TI MUST return a valid response (the cached evaluation plus the appropriate risk factor), not an HTTP error. `fresh=true` degrades gracefully: the client always gets a Trust Vector, and the risk factor tells it whether the challenge succeeded.
+The cached evaluation returned here is the re-signed, freshness-penalized recompute defined in Section 7.2, never a credential past its `validUntil`.
 
 ### 7.5 Caching and freshness
 
 A conforming TI MUST implement caching. Solvency signals, which can change within minutes, require shorter TTLs than identity signals, which change on the order of days or weeks. The specific TTL values are implementation choices.
 
-When a cached signal expires and the source is unreachable, the TI applies the freshness penalty. The `evaluationTime` in the response MUST reflect when the TI last fully computed the score, not when the cached result was served.
+When a cached signal expires and the source is unreachable, the TI applies the freshness penalty. The `evaluationTime` in the response MUST reflect when the TI last computed the score, not when the cached result was served.
+
+**Behavioral-anomaly circuit breaker.** A TI SHOULD watch each agent's live signals for abnormal variance, a sudden spike in failed interactions or disputes, or a sharp departure from the agent's established baseline.
+The signals that can trip the breaker MUST pass the same identity-grade and Sybil weighting as the scored behavior dimension (Section 9.1), and a breach MUST require a minimum number of distinct identity-graded counterparties, so that cheap, unauthenticated dispute injection cannot suppress a competitor.
+On a threshold breach, the TI SHOULD immediately recompute the agent's evaluation out of schedule and suppress its `recommendedProfile` toward `READ_ONLY`, emitting a `BEHAVIOR_ANOMALY_CIRCUIT_BREAKER` risk factor, rather than serve the cached score until the next scheduled recomputation.
+Recomputing, not only lowering the profile, updates the numeric vector that the Section 7.3 audience-one clients read directly, the ones moving money.
+This is a discovery-suppression override, not a certificate revocation.
+Suppression is bounded by a maximum duration and the dispute path in Section 8.4; it clears when the anomaly resolves, the dispute succeeds, or a fresh evaluation confirms the agent. Only the RA revokes certificates (Section 2.3).
+A TI MUST document its anomaly triggers, because a false trigger suppresses a healthy agent.
 
 ---
 
@@ -887,6 +912,8 @@ A Trust Index concentrates trust decisions. TI providers MUST secure their infra
 | :--- | :--- | :--- | :--- |
 | **TI compromise** | Attacker inflates or deflates scores | CA-grade infrastructure security | MUST |
 | **Signing key compromise** | Forged evaluation VCs | Key rotation, client key pinning, transparency logging of signed evaluations. Publish key fingerprint at `/.well-known/trust-index-keys.json`. | SHOULD |
+| **Selective serving** | Provider serves a flattering evaluation to one caller and the truth to others | Publish each issued evaluation, or its hash, to a public transparency log so callers can detect divergent verdicts for the same agent and `evaluationTime`. A minimum entry carries the `agentId`, `evaluationTime`, a hash of the `trustVector`, and the issuer key id | SHOULD |
+| **Cache-window abuse** | A hijacked agent is exploited against its stale high score before the next recomputation | Behavioral-anomaly circuit breaker (Section 7.5), bounded by the short verdict `validUntil` | SHOULD |
 | **Insecure TI connection** | Man-in-the-middle on trust queries | HTTPS with valid certificate (MUST). DANE TLSA for the TI's endpoint (SHOULD). Signed VC responses (SHOULD). mTLS for `FIDUCIARY` queries (SHOULD). | MUST |
 | **Oracle failure** | Stale or missing solvency, insurance, or credential data | Cached fallback with freshness penalty. Aggregate from multiple independent sources. Circuit breakers when one source diverges. | SHOULD |
 | **Sybil attack** | Fake agents manipulate reviews and endorsements | Weight reviews by identity grade and principal binding type. Analyze the review graph for isolated clusters. Weight on-chain feedback higher than unsigned reviews, scaled by transaction cost. | SHOULD |
@@ -1099,7 +1126,18 @@ This is the canonical schema. Where inline descriptions in the specification bod
             "provider": { "type": "string" },
             "coverageAmount": { "type": "string" },
             "policyHash": { "type": "string" },
-            "expiresAt": { "type": "string", "format": "date-time" }
+            "expiresAt": { "type": "string", "format": "date-time" },
+            "provenance": {
+              "type": "object",
+              "description": "Accredited source's signature over this block (Section 3.3); required before it raises a score.",
+              "required": ["source", "signature", "alg"],
+              "properties": {
+                "source": { "type": "string", "description": "DID or identifier of the accredited verifier (Section 8.5)" },
+                "keyId": { "type": "string" },
+                "alg": { "type": "string" },
+                "signature": { "type": "string" }
+              }
+            }
           }
         },
         "escrowHistory": {
@@ -1179,7 +1217,18 @@ This is the canonical schema. Where inline descriptions in the specification bod
             },
             "auditorDid": { "type": "string" },
             "reportHash": { "type": "string" },
-            "passedAt": { "type": "string", "format": "date-time" }
+            "passedAt": { "type": "string", "format": "date-time" },
+            "provenance": {
+              "type": "object",
+              "description": "Accredited source's signature over this block (Section 3.3); required before it raises a score.",
+              "required": ["source", "signature", "alg"],
+              "properties": {
+                "source": { "type": "string", "description": "DID or identifier of the accredited verifier (Section 8.5)" },
+                "keyId": { "type": "string" },
+                "alg": { "type": "string" },
+                "signature": { "type": "string" }
+              }
+            }
           }
         },
         "enclaveAttestation": {
@@ -1212,7 +1261,18 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "properties": {
             "auditor": { "type": "string" },
             "reportHash": { "type": "string" },
-            "auditedAt": { "type": "string", "format": "date-time" }
+            "auditedAt": { "type": "string", "format": "date-time" },
+            "provenance": {
+              "type": "object",
+              "description": "Accredited source's signature over this block (Section 3.3); required before it raises a score.",
+              "required": ["source", "signature", "alg"],
+              "properties": {
+                "source": { "type": "string", "description": "DID or identifier of the accredited verifier (Section 8.5)" },
+                "keyId": { "type": "string" },
+                "alg": { "type": "string" },
+                "signature": { "type": "string" }
+              }
+            }
           }
         },
         "complianceCertifications": {
@@ -1223,7 +1283,18 @@ This is the canonical schema. Where inline descriptions in the specification bod
               "standard": { "enum": ["SOC2_TYPE1", "SOC2_TYPE2", "HIPAA", "ISO27001", "GDPR", "PCI_DSS"] },
               "issuer": { "type": "string" },
               "reportHash": { "type": "string" },
-              "validUntil": { "type": "string", "format": "date-time" }
+              "validUntil": { "type": "string", "format": "date-time" },
+              "provenance": {
+                "type": "object",
+                "description": "Accredited source's signature over this block (Section 3.3); required before it raises a score.",
+                "required": ["source", "signature", "alg"],
+                "properties": {
+                  "source": { "type": "string", "description": "DID or identifier of the accredited verifier (Section 8.5)" },
+                  "keyId": { "type": "string" },
+                  "alg": { "type": "string" },
+                  "signature": { "type": "string" }
+                }
+              }
             }
           }
         }
@@ -1279,6 +1350,19 @@ This is the canonical schema. Where inline descriptions in the specification bod
     "evaluationChanged": {
       "type": "boolean",
       "description": "True when the agent's Trust Vector changed significantly since this client's previous query. Lets polling clients detect score shifts without caching and comparing vectors. The TI tracks each client's last-seen evaluation via client identity or session token. See ADR 021."
+    },
+    "signalProvenance": {
+      "type": "array",
+      "description": "Per attested signal, the source that asserted it and whether that source is accredited (Section 3.3). Lets a reader see who vouched for each third-party signal.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dimension": { "enum": ["integrity", "identity", "solvency", "behavior", "safety"] },
+          "signal": { "type": "string" },
+          "source": { "type": "string" },
+          "accredited": { "type": "boolean" }
+        }
+      }
     },
     "interactionContext": {
       "type": "object",
