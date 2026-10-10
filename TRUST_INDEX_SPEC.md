@@ -587,13 +587,30 @@ The binding type determines how difficult it is for a bad actor to shed negative
 | `ENS_ENSIP25` (native `.eth`) | Ethereum account (via ENS name with ENSIP-25 bidirectional agent-registration record) | Medium (registering a `.eth` name costs ETH and is permanently on-chain; creating many is expensive but requires no legal entity) |
 | `ENS_ENSIP25` (ENSIP-17 DNS) | Ethereum account (via DNSSEC-resolved DNS domain with ENSIP-25 bidirectional agent-registration record) | Easy (domain registration fee, often under $15, plus free DNSSEC enablement; same barrier as `DID_WEB`) |
 
-A conforming TI MUST verify the principal binding against the declared type:
+A conforming TI MUST verify the principal binding against the declared type, for each type this section defines a procedure for:
 - `DID_WEB`: Resolve `did:web:{domain}` by fetching `/.well-known/did.json`. Verify the DID Document exists and contains a valid verification method.
 - `LEI`: Verify the vLEI credential signature against the issuing accredited organization. Confirm the LEI is active in the GLEIF database.
 - `BIOMETRIC_HASH`: Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or ZK proof.
 - `ENS_ENSIP25`: Resolve the ENS name claimed by the agent. Verify the `agent-registration[<registry>][<tokenId>]` text record exists (ENSIP-25). Then verify the reverse: the ERC-8004 registration file lists the ENS name as a service endpoint. Both directions must agree.
 
 Basic-grade agents MAY use any binding type. Verified-grade agents SHOULD use `LEI`, `DID_WEB`, or `ENS_ENSIP25`. Premium-grade agents MUST use `LEI` or `BIOMETRIC_HASH`. Higher stakes require stickier identity.
+
+**Unrecognized and versioned binding types degrade gracefully.** The types above are the ones this specification defines a verification procedure for; the binding-type field is open, not a closed list.
+When an agent presents a binding type a TI does not recognize, including a later version of a known family such as a future ENSIP-numbered ENS binding, the TI MUST treat the binding as present but unverified.
+An unverified binding cannot raise the identity dimension beyond what verified evidence supports, and the TI MUST emit an `IDENTITY_BINDING_UNVERIFIED` risk factor (naming per Section 7.3). Where a TI reports per-dimension coverage (Section 2.2), an unverified binding also lowers the identity dimension's coverage.
+A TI MUST NOT reject the evaluation or omit the agent because it carries an unrecognized binding type.
+A TI MUST NOT credit an unverified binding as though a procedure had confirmed it.
+A binding the RA verified and sealed is not unverified in this sense: per Section 4.5 the TI MAY credit it on the RA's attestation without re-verifying.
+The TI MAY do so only when the sealed event names the procedure the RA ran for that binding type; a seal that records only that the pipeline ran, without naming a procedure for the type, leaves the binding present but unverified.
+A sealed attestation therefore cannot vouch a binding type neither the RA nor the TI confirmed with a defined procedure.
+The present-but-unverified rule applies wherever neither the TI nor the RA has confirmed the binding by running a Section 5.3 procedure.
+ENS bindings are a versioned family keyed by ENSIP number, and this specification defines a verification procedure for `ENS_ENSIP25` only (above).
+A later version such as `ENS_ENSIP26` belongs to the family but has no procedure defined here yet, so it is the worked case of the rule above: a TI treats it as present but unverified until Section 5.3 gains its procedure.
+A new version becomes verifiable by adding that procedure to Section 5.3, not by changing this schema.
+
+Editor's note: Section 7.3 lists the allowed risk-factor names, and it does not yet include `IDENTITY_BINDING_UNVERIFIED`.
+We will add that entry after PR #46 merges, because PR #46 rewrites the same part of Section 7.3 and changing it here too would conflict.
+Until then, treat `IDENTITY_BINDING_UNVERIFIED` as a valid risk-factor name even though Section 7.3 has not listed it.
 
 ### 5.4 PriCC chains
 
@@ -951,7 +968,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "type": "object",
           "required": ["type", "identifier"],
           "properties": {
-            "type": { "enum": ["DID_WEB", "LEI", "BIOMETRIC_HASH", "ENS_ENSIP25"] },
+            "type": { "type": "string", "description": "Recognized types, each with a verification procedure in Section 5.3: DID_WEB, LEI, BIOMETRIC_HASH, ENS_ENSIP25. The field is open; an unrecognized type, including a later ENS version such as ENS_ENSIP26 until Section 5.3 defines its procedure, is scored per Section 5.3 (present but unverified), never rejected." },
             "identifier": { "type": "string" },
             "proof": { "type": "string" },
             "priccChain": {
