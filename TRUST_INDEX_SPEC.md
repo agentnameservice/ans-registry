@@ -180,6 +180,13 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Insurance | Active liability policy from a recognized insurer |
 | Escrow history | Track record of successful fund releases and disputes |
 
+**Solvency scores recoverable capital.** A one-time proof that a wallet held funds says little about whether those funds remain when a dispute lands, so a TI MUST weight capital committed to this agent's obligations, escrow, a posted bond, or a liability policy naming the agent, far above a floating wallet balance.
+Solvency measures the amount recoverable if the agent causes damage.
+A reserve earns solvency weight only to the extent its exclusivity to this agent's obligations is verifiable. An escrow, a posted bond, or a liability policy naming the agent can prove that exclusivity; an address-blind balance proof cannot.
+A multi-chain aggregation verifies a total without revealing the wallets (Section 4.3), and a single-chain proof attests control above a threshold; neither shows the same funds do not also back another agent, so both are non-exclusive by construction and earn only the weight of a balance snapshot.
+A TI MUST NOT credit the same funds to more than one agent, and where exclusivity cannot be proven it MUST treat the reserve as non-exclusive rather than assume it. Defining an exclusivity primitive that an otherwise address-blind proof could carry, an on-chain lock or bond naming the agent with the matching Appendix A fields, is a follow-up.
+Until that primitive exists, a wallet-only or address-blind proof MUST NOT satisfy the solvency gate for `FIDUCIARY` (Section 2.3), however high its numeric score.
+
 **Behavior: How does this agent treat others?**
 
 | Signal | What the TI checks |
@@ -191,6 +198,10 @@ The specification defines five signal categories, ordered from cryptographic fac
 | Interop compliance | Handshake success rates, async response rates, credential grant honoring |
 | On-chain feedback | Behavioral ratings on a blockchain registry such as ERC-8004. A conforming TI SHOULD weight each review by its transaction cost (`gasUsed * effectiveGasPrice`), not by count. L2 feedback costs orders of magnitude less than mainnet and carries proportionally less weight. Feedback persists across token transfers (keyed to agentId, not owner). |
 | License adherence | Whether the agent operates within machine-readable license terms. A recorded violation is a negative signal. |
+
+**Endorsements count only when backed by a settled interaction.** A peer endorsement or rating raises the behavior score only when it references a settled economic interaction between the parties, an escrow release or a completed payment, so reputation cannot be minted by agents that never transacted.
+A TI MUST cap the total behavior contribution any single principal-cluster (agents sharing an operator or principal binding) can make to one agent, so a ring of related agents cannot endorse each other into a high score.
+Section 9.1 covers the graph analysis that detects such rings.
 
 **Safety: Will this agent leak data or cause harm?**
 
@@ -274,6 +285,17 @@ The most recent event for an FQDN is the last time the RA ran ACME domain contro
 A conforming TI SHOULD discount behavioral signals when the most recent TL event for the FQDN is older than a provider-defined threshold, because no recent ACME re-validation confirms that the original operator still controls the domain.
 A domain transfer detected by the RA (via ACME failure, RDAP registrant handle change, or ProviderID mismatch) produces an `AGENT_REVOKED` event in the TL.
 The TI MUST NOT carry forward behavioral reputation from a revoked registration to a new one on the same FQDN.
+A FQDN-keyed negative reputation entry likewise does not carry across that revocation unless a durable principal anchor proves the same party controls the new registration (Section 5.5).
+
+**Post-transfer reputation cooling.** When a TI detects a change of the party behind an agent, an on-chain token transfer, a principal-binding refresh, or an operator-change attestation, it SHOULD multiply the agent's accumulated positive reputation by a cooling factor for a defined window, recovering as fresh interactions under the new owner confirm the prior pattern.
+A TI MUST document the cooling factor and window; absent a published value it SHOULD derive them from the dispute-decay profile in Appendix D rather than leave them to implementation.
+Negative reputation is not cooled.
+An operator MAY present a succession attestation, signed by the transferring key and endorsing the receiving key, to reduce the cooling; the attestation MUST NOT eliminate it, because reputation cannot be proven to transfer at full fidelity between distinct signing parties.
+
+**Recovery after a confirmed negative.** A confirmed negative reputation entry (Section 8.3) suppresses the dimension it bears on until the agent both outlives the entry and demonstrates changed behavior.
+Recovery SHOULD depend on fresh positive evidence rather than elapsed time alone: the suppression lifts as new settled interactions (Section 2.1) accrue without the fault repeating.
+Recovery MUST be monotonic and MUST NOT exceed what current evidence supports.
+A remediation accepted by the governance body, or a superseding entry under Section 8.3, MAY shorten the path but MUST NOT restore the score instantly.
 
 ### 2.6 Environment adjustments
 
@@ -287,6 +309,14 @@ The agent's score also depends on the infrastructure around it.
 | **HTTPS record** | Integrity | Enables ECH, hiding the subdomain from network observers. Cloud deployments often cannot publish HTTPS records due to CNAME restrictions. Penalize absence where the deployment permits. | MAY |
 | **SVCB discovery** | Integrity | DNS-AID SVCB record (RFC 9460) bundles protocol, port, and capability hash. `[PENDING]` When `cap-sha256` is present, compare against the TL's sealed `capabilities_hash`. Reward presence. | MAY |
 | **Domain registrar reputation** | Identity | The domain name registrar's public track record of abuse-rate compliance (not the ANS Registration Authority) | MAY |
+
+### 2.7 Bootstrapping a new agent
+
+A new agent with no behavioral history looks the same as an abandoned or malicious one, so nothing delegates to it and it never earns the history that would raise its score.
+To break that deadlock, a TI MAY let an agent reach `TRANSACTIONAL` without behavioral history when it posts a refundable stake, holds a strong identity grade, and passes a safety certification.
+The stake is forfeited on confirmed misconduct and refundable otherwise, so the agent buys a starting line rather than a score.
+The stake's amount, its forfeiture trigger, and its refund path are recorded in the governance-defined stake registry, not self-asserted in the manifest, so a TI reads them from an accountable source.
+This path MUST NOT reach `FIDUCIARY`; fiduciary standing still requires the gating dimensions and cryptographic consent of Section 2.3.
 
 ---
 
@@ -630,6 +660,20 @@ An agent that defrauds users at one RA, abandons its identity, and registers fre
 
 If the principal binding matches a previous entry, the TI SHOULD factor that history into the new agent's Trust Vector as a strong negative signal. The weight depends on the entry's severity and the issuing authority's track record.
 
+Negative reputation MUST attach to every identifier the agent demonstrably controls and exclusively uses, not only the principal binding: a single-tenant FQDN, a wallet or on-chain address the agent proved sole control of, and the fingerprints of certificates and signing keys unique to it.
+It MUST NOT attach to an identifier the agent merely transacted through or shares with others, a counterparty or custodial address, an exchange deposit address, or a wildcard-certificate fingerprint shared by every tenant of a platform (Section 2.6),
+because a bad actor could otherwise route fraudulent settlements through a victim's address and smear an identifier the victim also presents, durably, since negatives are never cooled.
+These identifiers do not all survive a change of the party behind the agent.
+A held key, a proven wallet, and a certificate or signing-key fingerprint belong to one party, and a new party gets its own, so negative reputation tied to them never lands on an innocent successor.
+A domain name is different: it passes to the new registrant intact, so negative reputation tied to an FQDN would otherwise follow the domain to a party that did nothing wrong.
+Negative reputation tied to a transferable identifier such as an FQDN therefore counts only while one party holds it, from the `AGENT_REGISTERED` event that starts that party's tenure to the `AGENT_REVOKED` event that ends it (Section 2.5).
+Once a transfer triggers `AGENT_REVOKED`, that negative reputation MUST NOT attach to the next registration on the same FQDN unless the owner carries a durable identity, a DID or LEI linked through the ANS-1 EquivalenceLink, that proves the same party holds both.
+ANS-0 already draws this line: the FQDN is the operational endpoint where the agent serves traffic, the DID or LEI is the identity anchor that says who the agent is, and negative reputation follows the identity anchor.
+Federated entries SHOULD store address commitments rather than raw addresses, consistent with the address-hiding of Section 4.3.
+An agent that registers with only a domain-validated certificate and no principal binding therefore cannot shed a bad record by re-registering under a fresh name.
+A cheap identity is cheap to discard, so a TI MUST cap the trust an agent can reach by the cost of replacing its strongest identifier: an agent bound only to a low-cost identifier cannot reach a profile that assumes the identifier is expensive to abandon.
+An agent bound only to a domain-validated certificate, with no durable principal anchor, therefore cannot reach `FIDUCIARY` (Section 2.3).
+
 ### 5.6 Inherited trust (BIMI, VMC, DMARC)
 
 Organizations often have existing trust credentials that predate AI agents: email authentication records, verified brand logos, signed software releases. These signals transfer to agents on the same domain.
@@ -822,7 +866,13 @@ The consortium charter defines liveness requirements for members, automated enfo
 
 When a principal defrauds users at one RA, abandons that identity, and registers fresh at another RA, the negative history should follow. Federated TI providers SHOULD share negative reputation signals so that banned principals cannot escape accountability through re-registration.
 
-A negative reputation entry is a signed assertion from an RA or governance body that a principal binding is associated with specified misconduct. The entry contains the principal binding, a reason code, supporting evidence references, the issuing authority's signature, and a jurisdiction scope.
+A negative reputation entry is a signed assertion from an RA or governance body that an agent is associated with specified misconduct.
+The entry names the agent by an identifier list, not the principal binding alone, so an agent that presents only a domain-validated certificate and carries no principal binding can still be named by its FQDN or key fingerprint.
+The list holds each identifier the misconduct is observable through and the agent demonstrably and exclusively controls (Section 5.5).
+Each identifier is stored as a deterministic hash over its canonical form, not the raw value; a receiving TI matches an entry by recomputing that hash from an identifier the agent presents.
+The hash binds the identifier without republishing it, but it is not a secrecy measure for an on-chain address, which is public and enumerable; the entry names only identifiers the agent already controls and presents, so it discloses nothing the Section 4.3 solvency proofs hide.
+An entry naming a transferable identifier such as an FQDN applies only to the party that held it when the misconduct occurred; a receiving TI MUST apply the change-of-control rule in Section 5.5 before matching the entry to a later registration on that identifier.
+The entry also contains a reason code, supporting evidence references, the issuing authority's signature, and a jurisdiction scope.
 
 #### 8.3.1 Scored signal, not binary block
 
@@ -1084,7 +1134,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
         "solvencyProof": {
           "type": "object",
           "properties": {
-            "type": { "enum": ["ZK_SNARK", "ZK_STARK", "BANK_API", "ESCROW"] },
+            "type": { "enum": ["ZK_SNARK", "ZK_STARK", "BANK_API", "ESCROW", "BOND", "LIABILITY_POLICY"] },
             "asset": { "enum": ["USDC", "ETH", "BTC", "FIAT"] },
             "minimumBalance": { "type": "string" },
             "chainId": { "type": "integer" },
@@ -1139,7 +1189,8 @@ This is the canonical schema. Where inline descriptions in the specification bod
             "properties": {
               "endorserAnsName": { "type": "string" },
               "endorsementType": { "enum": ["TRUSTED_PARTNER", "VERIFIED_INTEGRATION", "PREFERRED_VENDOR"] },
-              "signatureHash": { "type": "string" }
+              "signatureHash": { "type": "string" },
+              "settlementRef": { "type": "string", "description": "Reference to the settled economic interaction backing this endorsement (Section 2.1): an escrow release id, payment receipt, or on-chain settlement id. An endorsement without it does not raise the behavior score." }
             }
           }
         },
@@ -1148,6 +1199,7 @@ This is the canonical schema. Where inline descriptions in the specification bod
           "properties": {
             "averageScore": { "type": "number", "minimum": 0, "maximum": 5 },
             "totalRatings": { "type": "integer" },
+            "settledRatings": { "type": "integer", "description": "Count of the ratings backed by a settled economic interaction (Section 2.1); only these raise the behavior score." },
             "responseRate": { "type": "number" }
           }
         },
