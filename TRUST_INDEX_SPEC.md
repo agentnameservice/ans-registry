@@ -608,6 +608,10 @@ ENS bindings are a versioned family keyed by ENSIP number, and this specificatio
 A later version such as `ENS_ENSIP26` belongs to the family but has no procedure defined here yet, so it is the worked case of the rule above: a TI treats it as present but unverified until Section 5.3 gains its procedure.
 A new version becomes verifiable by adding that procedure to Section 5.3, not by changing this schema.
 
+Editor's note: Section 7.3 lists the allowed risk-factor names, and it does not yet include `IDENTITY_BINDING_UNVERIFIED`.
+We will add that entry after PR #46 merges, because PR #46 rewrites the same part of Section 7.3 and changing it here too would conflict.
+Until then, treat `IDENTITY_BINDING_UNVERIFIED` as a valid risk-factor name even though Section 7.3 has not listed it.
+
 ### 5.4 PriCC chains
 
 For agents handling high-value delegations (legal contracts, medical records, financial trading), even LEI binding may be insufficient. A corporation can dissolve and reform.
