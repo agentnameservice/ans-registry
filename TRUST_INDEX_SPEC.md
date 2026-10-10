@@ -587,7 +587,7 @@ The binding type determines how difficult it is for a bad actor to shed negative
 | `ENS_ENSIP25` (native `.eth`) | Ethereum account (via ENS name with ENSIP-25 bidirectional agent-registration record) | Medium (registering a `.eth` name costs ETH and is permanently on-chain; creating many is expensive but requires no legal entity) |
 | `ENS_ENSIP25` (ENSIP-17 DNS) | Ethereum account (via DNSSEC-resolved DNS domain with ENSIP-25 bidirectional agent-registration record) | Easy (domain registration fee, often under $15, plus free DNSSEC enablement; same barrier as `DID_WEB`) |
 
-A conforming TI MUST verify the principal binding against the declared type:
+A conforming TI MUST verify the principal binding against the declared type, for each type this section defines a procedure for:
 - `DID_WEB`: Resolve `did:web:{domain}` by fetching `/.well-known/did.json`. Verify the DID Document exists and contains a valid verification method.
 - `LEI`: Verify the vLEI credential signature against the issuing accredited organization. Confirm the LEI is active in the GLEIF database.
 - `BIOMETRIC_HASH`: Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or ZK proof.
@@ -600,8 +600,10 @@ When an agent presents a binding type a TI does not recognize, including a later
 An unverified binding cannot raise the identity dimension beyond what verified evidence supports, and the TI MUST emit an `IDENTITY_BINDING_UNVERIFIED` risk factor (naming per Section 7.3). Where a TI reports per-dimension coverage (Section 2.2), an unverified binding also lowers the identity dimension's coverage.
 A TI MUST NOT reject the evaluation or omit the agent because it carries an unrecognized binding type.
 A TI MUST NOT credit an unverified binding as though a procedure had confirmed it.
-A binding the RA's own pipeline verified and sealed is not unverified in this sense: per Section 4.5 the TI MAY credit it on the RA's attestation without re-verifying, even for a binding type the TI has no independent procedure for.
-The present-but-unverified rule applies only where neither the TI nor the RA has confirmed the binding.
+A binding the RA verified and sealed is not unverified in this sense: per Section 4.5 the TI MAY credit it on the RA's attestation without re-verifying.
+The TI MAY do so only when the sealed event names the procedure the RA ran for that binding type; a seal that records only that the pipeline ran, without naming a procedure for the type, leaves the binding present but unverified.
+A sealed attestation therefore cannot vouch a binding type neither the RA nor the TI confirmed with a defined procedure.
+The present-but-unverified rule applies wherever neither the TI nor the RA has confirmed the binding by running a Section 5.3 procedure.
 ENS bindings are a versioned family keyed by ENSIP number, and this specification defines a verification procedure for `ENS_ENSIP25` only (above).
 A later version such as `ENS_ENSIP26` belongs to the family but has no procedure defined here yet, so it is the worked case of the rule above: a TI treats it as present but unverified until Section 5.3 gains its procedure.
 A new version becomes verifiable by adding that procedure to Section 5.3, not by changing this schema.
