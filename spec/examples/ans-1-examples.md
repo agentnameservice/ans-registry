@@ -101,6 +101,10 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 
 `version`, `agentHost`, `agentDisplayName`, and at least one endpoint are required. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it registers the agent without an Identity Certificate ([ANS-1 §7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
 
+The CSR example assumes an RA that offers server issuance. For a BYOC-only RA, replace `serverCsrPEM`
+with `serverCertificatePEM` and, when needed, `serverCertificateChainPEM`. Domain-control verification
+still follows; the submitted certificate alone does not prove the registrant controls the domain.
+
 ## A.3 Revocation request
 
 ```json
@@ -160,3 +164,26 @@ sealed `AGENT_REGISTERED` attestation is unchanged. The TL still reads
 `expiresAt = 2026-09-01T00:00:00Z` and reports `EXPIRED`. The replacement Server Certificate's later
 expiry does not change that sealed value. The expired Identity Certificate remains unusable;
 Server Certificate issuance alone does not restore validity to every required group.
+
+## A.6 Server issuance disabled
+
+A valid CSR-based registration or server renewal submitted to a BYOC-only RA returns HTTP
+`422 Unprocessable Content`, with `Content-Type: application/json` and the V2 API's existing
+`ErrorResponse` body:
+
+```json
+{
+  "status": "ERROR",
+  "code": "SERVER_CA_DISABLED",
+  "message": "This RA does not issue server certificates. Submit serverCertificatePEM instead of serverCsrPEM."
+}
+```
+
+The rejection creates no registration, pending CSR, renewal, or provider order. The client obtains a
+certificate from its chosen provider and resubmits using BYOC. It does not need to cancel a pending
+operation created by this rejected request.
+
+For standalone `POST /v2/ans/agents/{agentId}/certificates/server`, the request field is `csrPEM`,
+and that route cannot accept BYOC. The status and code are the same, but the message directs the client
+to submit `serverCertificatePEM` to `POST /v2/ans/agents/{agentId}/certificates/server/renewal`, subject
+to that route's lifecycle requirements. The shared OpenAPI error schema and success responses are unchanged.
