@@ -99,7 +99,11 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 }
 ```
 
-`agentHost`, `agentDisplayName`, and at least one endpoint are required. V2 may omit `version` to create `ans://{agentHost}`; the versioned example above remains valid, and V1 still requires a version. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it registers the agent without an Identity Certificate ([ANS-1 §7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
+`agentHost`, `agentDisplayName`, and at least one endpoint are required. V2 may omit `version` to create
+`ans://{agentHost}`; the versioned example above remains valid, and V1 still requires a version. Exactly one
+of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it
+registers the agent without an Identity Certificate ([ANS-1
+§7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
 
 ## A.3 Revocation request
 
@@ -154,9 +158,63 @@ expiresAt      = 2026-09-01T00:00:00Z
 On `2026-09-13`, its stored RA status remains `ACTIVE`, but the Identity Certificate has expired.
 The AHP completes Server Certificate renewal with a replacement expiring on `2026-12-12T00:00:00Z`.
 
-The renewal succeeds: the RA issues the certificate and the stored registration status stays `ACTIVE`.
-Renewal seals no TL event under [ANS-1 §6.3](../ans-1-registration.md#63-reserved-event-types), so the
-sealed `AGENT_REGISTERED` attestation is unchanged. The TL still reads
-`expiresAt = 2026-09-01T00:00:00Z` and reports `EXPIRED`. The replacement Server Certificate's later
-expiry does not change that sealed value. The expired Identity Certificate remains unusable;
-Server Certificate issuance alone does not restore validity to every required group.
+Renewal succeeds and publishes `AGENT_RENEWED` with the replacement server certificate and the expired
+identity group's evidence. The new snapshot still has `expiresAt = 2026-09-01T00:00:00Z`, because the
+identity group remains the limiting group. The TL reports EXPIRED; server renewal alone does not restore
+validity to every required group. The prior `AGENT_REGISTERED` leaf remains unchanged.
+
+## A.6 Metadata rollout and multiple endpoints
+
+The owner reads `/v2/ans/agents/{agentId}/endpoints`, then PUTs the complete replacement with that
+resource's `If-Match` ETag. The response is 202 with `status: PENDING_PUBLICATION`. The V3 event's
+`attestations.endpointMetadata` contains the complete result. This excerpt shows both rollout overlap
+at one location and a second endpoint using the same protocol:
+
+```json
+{
+  "endpointMetadata": [
+    {
+      "protocol": "A2A",
+      "agentUrl": "https://agent.example.com/v1/a2a",
+      "metaDataUrl": "https://agent.example.com/v1/card.json",
+      "metaDataHashes": [
+        "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+    },
+    {
+      "protocol": "A2A",
+      "agentUrl": "https://agent.example.com/v2/a2a",
+      "metaDataUrl": "https://agent.example.com/v2/card.json",
+      "metaDataHashes": ["SHA256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]
+    }
+  ]
+}
+```
+
+The status-token payload uses native CBOR, shown here in diagnostic notation. Existing keys 1–8
+are omitted from this excerpt. It is not JSON text inside a token:
+
+```cbor-diag
+{
+  9: [
+    {
+      1: "A2A",
+      2: "https://agent.example.com/v1/a2a",
+      3: "https://agent.example.com/v1/card.json",
+      4: [h'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          h'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']
+    },
+    {
+      1: "A2A",
+      2: "https://agent.example.com/v2/a2a",
+      3: "https://agent.example.com/v2/card.json",
+      4: [h'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc']
+    }
+  ]
+}
+```
+
+After the old v1 metadata is retired, replace its set with only `b…`; the v2 set remains `c…`.
+Neither the agent ID nor any historical event changes. Existing overlap tokens retain their normal
+acceptance window. A digest from v2 cannot authorize the v1 document.

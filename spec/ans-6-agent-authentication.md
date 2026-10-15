@@ -216,6 +216,8 @@ tag 18):
 | Payload | The JCS-canonicalized ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)) sealed leaf bytes ([ANS-4 §3](ans-4-transparency.md#3-cryptographic-standards)), **attached** |
 | Signature | 64-byte ECDSA P-256, IEEE P1363 `R \|\| S` |
 
+The complete binary structure is defined in [ans-receipt.cddl](../api/ans-receipt.cddl).
+
 The payload is attached — the full canonical leaf rides in the receipt — so a verifier
 reconstructs the leaf hash from the receipt alone, with no side channel to the sealed record.
 The Merkle leaf is `SHA-256(0x00 || leaf_bytes)` and interior nodes are
@@ -281,7 +283,9 @@ Always pair it with a status token or badge status check (§11.2).
 `GET /v1/agents/{agentId}/status-token` returns the status token
 (`Content-Type: application/ans-status-token+cbor`), a COSE_Sign1 (CBOR tag 18) whose protected
 header carries `1` (alg) = `-7`, `4` (kid) as in §4.3, and `3` (content type) =
-`"application/ans-status-token+cbor"`. The payload is a CBOR map with integer keys:
+`"application/ans-status-token+cbor"`. The complete object and its decoded payload are described by the
+[V1/V2 CDDL](../api/ans-status-token-v1-v2.cddl) and [V3 CDDL](../api/ans-status-token-v3.cddl).
+V1/V2 share the same encoding; V3 adds optional label 9. The payload is a CBOR map with integer keys:
 
 | Key | Field | Type |
 | --- | --- | --- |
@@ -292,7 +296,8 @@ header carries `1` (alg) = `-7`, `4` (kid) as in §4.3, and `3` (content type) =
 | 5 | `ansName` | e.g. `ans://v1.0.0.agent.example.com` |
 | 6 | `validIdentityCerts` | array of cert entries |
 | 7 | `validServerCerts` | array of cert entries |
-| 8 | `metadataHashes` | map: protocol → `SHA256:...` |
+| 8 | `metadataHashes` | Legacy map: protocol → one `SHA256:...` digest |
+| 9 | `endpointMetadata` | Array of integer-keyed endpoint/location maps |
 
 Each cert entry is itself an integer-keyed map: `1` = fingerprint — the 32-byte raw SHA-256 as a
 CBOR byte string (decoders SHOULD also accept the `SHA256:<hex>` text form) — and `2` =
@@ -301,17 +306,27 @@ certificate type, drawn from the `CertificateExtended.type` enum of the V2 schem
 fingerprints, never types, and consumers SHOULD compare the type case-insensitively (the badge
 JSON enum is uppercase; implementations have emitted lowercase in the CBOR form). The arrays list **every currently-valid certificate**, so both old and new
 fingerprints appear during a rotation overlap — a verifier matches against any entry and never
-needs the refresh-on-mismatch pattern the badge tier uses (§8.2). `metadataHashes` lets a
-verifier hash a fetched Agent Card and detect post-registration tampering
-([ANS-5 §4](ans-5-integrity-monitoring.md#4-verification-checks), schema-integrity row).
+needs the refresh-on-mismatch pattern the badge tier uses (§8.2). V3 `endpointMetadata` binds accepted metadata bytes to an exact
+`(protocol, agentUrl, metaDataUrl)` tuple. Each native-CBOR record has keys `1` = protocol, `2` = service
+URL, `3` = metadata URL and `4` = an array of 32-byte SHA-256 byte strings. Missing metadata is represented
+by `""` and `[]`. No JSON is embedded. The event's equivalent JSON uses `SHA256:<hex>` strings.
 
-Under the default `ANS_DNSAID` discovery profile the same card digest also appears in DNS: the
-endpoint's SVCB row carries it as `key65401` (DNS-AID `cap-sha256`, `base64url` of the raw 32
-bytes), while `metadataHashes` carries `SHA256:<hex>` — one hash, two encodings
-([ans-dnsaid §2](discovery-profiles/ans-dnsaid.md#2-record-assembly)). A verifier that checks card
-integrity SHOULD compare both channels where available: the status-token entry is TL-signed, the
-SVCB digest is DNS-anchored where the zone DNSSEC-validates, and disagreement between the two is
-itself a finding even when the fetched card matches one of them.
+A verifier MUST select the exact tuple, hash the fetched bytes and match any digest in that selected set.
+A sibling location's digest, an unlisted digest, missing record or empty set MUST NOT authorize a document.
+When label 9 is present, do not fall back to the legacy map for an unmatched tuple. A protocol's legacy
+map entry may be provided only when there is one location and one digest; choosing one member of an
+overlap set is not a lossless legacy view.
+
+To rotate, publish `[old,new]` before serving the new bytes and arrange authenticated evidence refresh
+or wait out old-only token acceptance windows. After old replicas and caches are retired, publish `[new]`.
+Previously issued overlap tokens can accept old bytes until their existing freshness limits expire.
+Failure to refresh never authorizes unknown bytes. Re-add/publish a retired digest before using it for
+rollback. These commitments verify metadata bytes, not software execution or backend capabilities.
+
+DNS-AID output omits the optional `key65401` single-hash mirror because it cannot represent overlap.
+Legacy records may retain it. An independently required authenticated DNS commitment still needs its own
+rollover policy; do not silently ignore a mismatch. Worked event and CBOR examples are in
+[ANS-1 examples](examples/ans-1-examples.md#a6-metadata-rollout-and-multiple-endpoints).
 
 **Status-token verification algorithm:**
 
@@ -407,7 +422,7 @@ Artifacts are refreshed by each agent's own runtime in the background, never in 
   implementation polls every ~30 minutes against a one-hour TTL; proactive refresh at 50% TTL is
   a reasonable default).
 - **Receipt**: re-fetched only when the agent's latest sealed event changes — certificate
-  rotation or a version's registration ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)).
+  rotation, metadata update or registration ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)).
 
 Peers never call the TL to verify each other in this tier; only each agent's own background
 refresh touches the TL.
@@ -514,7 +529,7 @@ sequenceDiagram
    resolved and dialed, and the certificate must pass standard hostname verification against that
    same requested name (§5.1 step 4 — the artifacts alone cannot supply this anchor); the receipt
    event and status token must name the same agent (full `ansName`, and the agent identifier when
-   both carry one). Optionally compare `metadataHashes` against a fetched Agent Card.
+   both carry one). Verify requested metadata against its selected endpoint/location set when metadata integrity is required (§4.4).
 
 ### 5.3 DANE/TLSA (optional, both tiers)
 
@@ -921,14 +936,10 @@ tightened check — is a **profile revision**. This document defines revision 1 
 - **The revision is never carried in `typ`.** RFC 9449 pins `typ: dpop+jwt`, and wire-conformance
   with textbook DPoP is a property this profile keeps. A proof states its revision in the
   `ans_profile` payload claim (§7.2); absence means revision 1.
-- **Selection is deferred.** A future revision needs a callee advertisement whose integrity
-  callers can verify before selecting that revision. The status token's `metadataHashes` does
-  not provide this mutable selection channel: those hashes are optional at registration, and
-  [ANS-1 §7](ans-1-registration.md#7-lifecycle-operations) defines no operation to update them
-  in place. Changing the sealed metadata requires a new version registration; changing the
-  document alone causes an integrity mismatch. The caller's comparison is also optional (§5.2).
-  A revision 2 specification must define the selection channel and its failure, migration, and
-  downgrade rules before callers can select it.
+- **Selection is explicit.** A revision that older verifiers cannot safely ignore requires trusted
+  configuration or an authenticated selection channel and defined downgrade behavior. Mutable metadata
+  is now available, but an optional metadata check alone is not proof that a peer advertised a revision.
+  An unauthenticated rejection is never permission to downgrade.
 
 ### 7.13 Request-content binding
 

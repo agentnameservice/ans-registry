@@ -251,6 +251,11 @@ deduped (first occurrence wins) and an empty array normalizes to the default —
 rather than rejecting. The wired registry and the valid `DiscoveryProfile` enum MUST be identical;
 the RA asserts this coherence at server start and refuses to start on drift.
 
+Hash-only and display-only updates do not change DNS when those values are not mirrored there.
+V3 omits the optional SVCB single-hash mirror; signed endpoint/location sets carry metadata integrity.
+Endpoint, port and locator changes can still require operator DNS publication. `discoveryProfiles`
+changes are not generic profile edits and require a separately coordinated DNS transition.
+
 ## 7. DNS verification modes
 
 ANS-3 defines two operational modes for DNS verification.
@@ -390,7 +395,7 @@ ai-agent.acmecorp.com.        3600 IN HTTPS    1 . alpn=h2
 
 ; ANS_DNSAID discovery [RA-content] — one SVCB row per endpoint at the apex; DNS-AID SvcParams in
 ; keyNNNNN Private-Use form; Required=false here because ANS_TXT is also in the set (§6.4).
-ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=a2a port=443 key65400=https://ai-agent.acmecorp.com/.well-known/agent-card.json key65401=CY1lDMbSgN7kwPR0iadc8Xub-7rlMFGAbU4IQQiy_yc key65402=a2a key65409=agent-card.json
+ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=a2a port=443 key65400=https://ai-agent.acmecorp.com/.well-known/agent-card.json key65402=a2a key65409=agent-card.json
 ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=mcp port=8443 key65402=mcp
 
 ; Badge TXT [RA-content] — family record; one per registration; points at the TL badge endpoint
