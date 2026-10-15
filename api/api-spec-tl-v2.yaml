@@ -1458,6 +1458,8 @@ components:
             - X509-EV-SERVER
             - X509-OV-CLIENT
             - X509-OV-SERVER
+            - X509-EXTERNAL
+          description: Informational certificate category; authorization uses the fingerprint.
         notAfter:
           type: string
           format: date-time

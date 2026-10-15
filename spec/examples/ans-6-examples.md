@@ -222,3 +222,30 @@ empty-content value are computed fixtures. Assuming the other authentication che
 | Empty | A.5's 46 octets | Reject — content added |
 | Any, with the digest claim omitted | Any | Reject — missing required claim |
 | A.5's 46 octets | The same content carried with chunked transfer coding | Pass — chunk framing is excluded from the digest |
+
+## A.7 URI-independent Method B revision 2
+
+The owner submits `{identityCertificatePEM, identityCertificateChainPEM?}` to the existing identity
+certificate operation and receives `202 {status: "PENDING_PUBLICATION"}`. No enrollment signature is
+requested. The holder waits for current evidence authorizing the leaf, then signs the request with
+that leaf's private key. The usual closed JOSE header (`typ`, `alg`, `jwk`, `x5c`) is unchanged.
+
+For an empty-body GET, the signed payload includes:
+
+```json
+{
+  "ans_profile": 2,
+  "ans_agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "htm": "GET",
+  "htu": "https://service.example.com/a2a",
+  "iat": 1792080000,
+  "jti": "e75fd0fe-8d63-4ddc-a7ac-1c0c8c3accfe",
+  "ans_content_digest": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+}
+```
+
+These claims illustrate the shape; timestamps and proof IDs must be fresh on a real request.
+The status evidence must name that registration, authorize the presented leaf fingerprint, and remain
+fresh/nonterminal. The leaf's DNS SANs must cover the authenticated caller FQDN. No ANS URI SAN is
+required. A proof for another registration fails even if the same leaf is listed there. OAuth token
+binding, receipt verification where required, request/content binding and replay checks remain in force.

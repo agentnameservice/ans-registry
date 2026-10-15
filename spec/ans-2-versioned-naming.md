@@ -64,26 +64,42 @@ merging or retirement. A failed new registration leaves existing registrations i
 
 ## 3. The Identity Certificate
 
-When a registrant submits `identityCsrPEM`, the RA's Private CA issues an Identity Certificate. The binding runs through both artifacts:
+An RA MUST support owner-authorized identity BYOC and MAY offer private issuance. The owner can
+authorize a key held by another party; the holder proves possession at use time under ANS-6.
+Management operations are defined in ANS-1 §7.2.
 
-- **The CSR MUST carry the registration's full ANSName as a `uniformResourceIdentifier` SAN.** The RA validates the CSR's URI SAN against the expected ANSName before signing; a CSR naming any other identifier is rejected. (Server CSRs differ: they carry the agent's FQDN as a DNS SAN, the TLS server-auth convention.)
-- **The issued certificate carries the same ANSName URI SAN**, with `digitalSignature` key usage and the `clientAuth` extended key usage — it is minted as a TLS client certificate — and a CA-configured validity window.
+### 3.1 Admission and hostname coverage
 
-| Property | Value |
-| --- | --- |
-| Issuer | Private CA operated by the RA |
-| SAN type | `uniformResourceIdentifier` |
-| SAN value | The assigned ANSName, versioned or versionless, validated against the CSR |
-| Key usage | `digitalSignature`; EKU `clientAuth` |
-| Purpose | Binds the certificate to the registration; presentable as a TLS client certificate |
+Reject an unparseable or CA certificate, unsupported/weak key, unacceptable signature algorithm,
+expired/not-yet-valid leaf, or missing DNS SAN coverage of the registered FQDN. Both certificate roles,
+imported or issued, use standard DNS SAN hostname matching, including single-label wildcards; a CN
+cannot substitute. Apply coverage to submission, issuance, activation and endpoint mutation. Service and
+metadata URL hosts must equal that FQDN.
 
-The Identity Certificate requires a URI SAN. The `ans://` scheme is syntactically valid per RFC 3986 §3.1 and permitted in URI SANs per RFC 5280 §4.2.1.6. CA/B Forum Baseline Requirements prohibit `uniformResourceIdentifier` SANs in publicly trusted server certificates (BR §7.1.2.7.12). A Public CA cannot issue this certificate. Only a Private CA, operating under its own issuance policy, can.
-Identity Certificates MUST NOT be brought-your-own (BYOC): a rogue CA could otherwise issue an Identity Certificate for `ans://v1.0.0.payments.example.com`, and the TL would seal it as if the RA had validated it. The registration request accepts no identity-certificate BYOC input — only a CSR.
+Parse an optional BYOC chain when supplied. Imported identity leaves use informational type
+`X509-EXTERNAL`, which does not assert OV/EV identity assurance or external CA revocation status.
+Method B's X.509 trust policy is defined in ANS-6 §7.5; server TLS retains ordinary chain validation.
+
+Private identity CSRs require a valid self-signature and FQDN DNS SAN coverage. The issued leaf carries
+the FQDN subject/DNS SAN. Credentials for Method A also require its URI/clientAuth profile; existing
+URI-bound issuance continues to validate the assigned ANS name. Older credentials lacking DNS coverage
+must be replaced or retired before an operation requiring that coverage.
+
+### 3.2 Method-specific certificate use
+
+Method B revision 2 binds the signed registration ID and TL-authorized fingerprint (ANS-6 §7.5), without
+requiring an ANS URI SAN. Method A retains its URI binding, clientAuth purpose and private-CA trust rules.
+A certificate admitted for Method B is not automatically suitable for Method A.
+
+### 3.3 Rotation and removal
+
+ANS-1 §7.2 defines full-leaf fingerprint updates, valid overlap and retirement of individual bindings.
 
 ## 4. mTLS with Identity Certificates
 
-The RA's Private CA issues Identity Certificates that ANS-aware callers and callees present during the mTLS
-handshake — the `clientAuth` EKU (§3) is what makes the certificate presentable at the TLS layer. The
+Method A uses URI-bound Identity Certificates issued by a trusted private CA; their `clientAuth` EKU
+and applicable key usage make them suitable for presentation at the TLS layer. This section applies to
+that certificate profile, not automatically to every BYOC or DNS-only identity credential. The
 handshake authenticates each party's ANSName, and a separate badge check (step 6 of the handshake sequence
 below) confirms the registration sealed in the TL. The handshake itself runs between agents; ANS components issue
 and attest the certificates but are not in the connection path.
@@ -99,39 +115,42 @@ and attest the certificates but are not in the connection path.
 
 ### 4.2 Handshake scenarios across registration shapes
 
-Steps 3 and 4 of the handshake sequence above require the party being authenticated to hold an Identity Certificate. Four scenarios cover the combinations:
+The callee presents its Server Certificate for server-authenticated TLS. The caller presents a
+Method-A-compatible Identity Certificate when client authentication is used. A callee's possession of
+an identity credential for its own outbound calls does not change the certificate it serves for TLS.
 
-- **Identity-bearing callee, identity-bearing caller.** Standard mTLS. Both parties present Identity Certificates and verify the other against the ANS Private CA. The caller verifies the server's fingerprint at step 6 against the sealed badge; the server learns the caller's ANSName.
-- **Server-Certificate-only callee, identity-bearing caller.** Steps 3 and 4 run for the caller: the callee verifies the caller's Identity Certificate against the ANS Private CA. The callee authenticates itself via its Server Certificate only; the caller verifies the server's identity at step 6 against the badge sealed for the registration.
-- **Identity-bearing callee, Server-Certificate-only caller.** Steps 3 and 4 collapse: the caller has no
-  Identity Certificate to present, so step 5 establishes a server-authenticated TLS session rather than mTLS.
-  The callee authenticates via its Server and Identity Certificates; the caller is anonymous at the TLS layer
-  and MUST authenticate through application-layer means (API key, OAuth, delegation token).
-- **Both Server-Certificate-only.** Both parties authenticate via Server Certificates only; the session is server-authenticated TLS with no ANS Identity Certificate on either side. Step 6 (badge or TL verification) still runs on the callee.
+| Caller credential | Connection authentication |
+| --- | --- |
+| URI-bound identity credential meeting Method A purpose/trust requirements | TLS client authentication plus the required ANS binding/status checks |
+| DNS-only identity credential supported by Method B revision 2 | Server-authenticated TLS plus the signed application-layer Method B proof |
+| No applicable ANS identity credential | Server-authenticated TLS; caller authorization requires another supported application mechanism |
 
 DANE (`_443._tcp` TLSA) remains an optional additional pinning check across all scenarios.
 
-The combination a callee presents is fixed at registration ([ANS-1
-§7.2](ans-1-registration.md#72-registrations-without-an-identity-certificate)): a registration created
-without an Identity CSR cannot add an Identity Certificate later, and an identity-bearing registration rolls
-its certificate via rotation without changing the combination. Callers therefore learn a stable
-authentication shape from the sealed badge and do not need to re-discover the agent across certificate rolls.
+A server-only registration may later add an identity credential, and an owner may remove its last
+identity binding while retaining a valid server registration. Consumers evaluate current evidence and
+method support rather than assuming the registration's initial authentication shape is permanent.
 
 ## 5. Conformance
 
 A conformant ANS-2 implementation:
 
-1. Constructs ANSNames per §2 with the documented length limits enforced.
-2. Validates that an Identity CSR carries the registration's full ANSName as a `uniformResourceIdentifier` SAN before signing, and rejects identity-certificate BYOC input.
-3. Issues Identity Certificates that carry the ANSName in a `uniformResourceIdentifier` SAN with the `clientAuth` EKU.
-4. Supports the mTLS handshake semantics for caller-side and callee-side roles across the four authentication shapes named above.
+1. Constructs names per §2 and preserves them across supported mutations.
+2. Enforces DNS SAN coverage for both certificate roles and the admission rules in §3.1.
+3. Supports owner-authorized identity BYOC without an enrollment possession ceremony; private issuance
+   is optional and enforces the selected CSR/certificate profile.
+4. Retains method-specific mTLS rules and uses ANS-6 revision 2 for URI-independent Method B binding.
+5. Publishes credential overlap/removal through the existing certificate snapshot lifecycle.
 
 ## 6. Security considerations
 
-### 6.1 Identity Certificate forgery
+### 6.1 Identity credential authorization
 
-A rogue CA cannot impersonate the RA's Private CA without compromising the Private CA's signing key. BYOC Identity Certificates are prohibited (per §3): BYOC would let the AHP bring an Identity Certificate the RA had not validated key possession for, so the RA would seal whatever was submitted and a versioned registration would no longer prove that the actor controlling the version controls the
-binding.
+A certificate's public availability or CA signature does not authorize its use for a registration.
+The RA authenticates the owner, validates admission and publishes the authorized fingerprint. A runtime
+verifier must establish possession of that leaf's private key and validate its registration/status binding.
+A rogue CA cannot create an ANS authorization merely by issuing a matching DNS certificate. Compromise of
+an authorized private key remains a separate risk requiring binding retirement and normal revocation policy.
 
 ## 7. References
 
