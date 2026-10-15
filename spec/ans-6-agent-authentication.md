@@ -299,9 +299,9 @@ V1/V2 share the same encoding; V3 adds optional label 9. The payload is a CBOR m
 | 8 | `metadataHashes` | Legacy map: protocol → one `SHA256:...` digest |
 | 9 | `endpointMetadata` | Array of integer-keyed endpoint/location maps |
 
-Each cert entry is itself an integer-keyed map: `1` = fingerprint — the 32-byte raw SHA-256 as a
-CBOR byte string (decoders SHOULD also accept the `SHA256:<hex>` text form) — and `2` =
-certificate type, drawn from the `CertificateExtended.type` enum of the V2 schema (e.g.
+Each cert entry is itself an integer-keyed map: `1` = fingerprint in `SHA256:<hex>` text form
+(the reference encoding; decoders MAY also accept a 32-byte raw SHA-256 value), and `2` =
+certificate type from the applicable event schema, including `X509-EXTERNAL` in V3 (e.g.
 `X509-OV-CLIENT`, `X509-DV-SERVER`). The type is informational: verification decisions compare
 fingerprints, never types, and consumers SHOULD compare the type case-insensitively (the badge
 JSON enum is uppercase; implementations have emitted lowercase in the CBOR form). The arrays list **every currently-valid certificate**, so both old and new
@@ -548,7 +548,9 @@ for where DANE sits among the verification channels.
 
 ## 6. Authenticating a caller — Method A: mTLS
 
-The caller presents its Identity Certificate in the TLS handshake per
+Method A uses the URI-bound, clientAuth/private-CA credential profile. DNS-only credentials use
+Method B revision 2; they are not automatically compatible with this method. The caller presents its
+Identity Certificate in the TLS handshake per
 [ANS-2 §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates). The handshake proves
 possession; this section specifies the identity and liveness verification the callee runs before
 processing application data.
@@ -558,11 +560,10 @@ processing application data.
 1. The TLS layer validates the client certificate chain against the RA Private CA trust anchor.
    No chain → reject at the TLS layer.
 2. Extract from the validated certificate:
-   - **DNS SAN** (also the CN): the caller's FQDN, e.g. `caller.example.com`.
+   - **DNS SAN** (CN is not a substitute): the caller's FQDN, e.g. `caller.example.com`.
    - **URI SAN**: the full ANSName, e.g. `ans://v1.0.0.caller.example.com` ([ANS-2
-     §3](ans-2-versioned-naming.md#3-the-identity-certificate)). No URI SAN → not an ANS Identity
-     Certificate.
-3. Parse the version from the URI SAN: strip the leading `ans://` and the trailing `.{FQDN}`
+     §3](ans-2-versioned-naming.md#3-the-identity-certificate)). No URI SAN → not a Method A credential.
+3. Parse the assigned ANS name from the URI SAN under ANS-2, including its optional version; do not invent a version for a versionless name. For legacy names, strip the leading `ans://` and the trailing `.{FQDN}`
    (using the DNS SAN's FQDN); the remainder is the `v`-prefixed version.
 
 The handshake completes before verification, but the callee MUST NOT process application requests
@@ -578,9 +579,10 @@ in depth.
 
 ### 6.2 Badge tier
 
-1. Query `_ans-badge.{callerFQDN}` TXT. When multiple records exist, select the record whose
-   `version` field equals the version from the URI SAN (§8.1). Apply the trusted-TL check (§4.2)
-   before fetching.
+1. Query `_ans-badge.{callerFQDN}` TXT. For a versioned name, its version can select a matching
+   record; a versionless name has no version pair. Apply the trusted-TL check (§4.2), then require the
+   returned full ANS name and credential fingerprint to match the selected registration. A shared host
+   or absent version never makes unrelated registrations interchangeable.
 2. Fetch the badge and validate:
 
 | Client certificate | Badge field | Requirement |
@@ -627,7 +629,7 @@ attestations), run them after ANS verification instead.
 | Condition | Result |
 | --- | --- |
 | Certificate does not chain to the Private CA | Reject at TLS layer |
-| No URI SAN | Not an ANS Identity Certificate |
+| No URI SAN | Not a Method A credential; Method B revision 2 uses a different binding |
 | No `_ans-badge` record for the caller's FQDN (badge tier) | NXDOMAIN → reject (§9.1 — revocation removes the record, so determinate absence is adverse); SERVFAIL/timeout → apply failure policy |
 | Badge URL host not a trusted TL | Reject |
 | Status terminal (`EXPIRED` / `REVOKED`) | Reject |
@@ -696,7 +698,8 @@ The payload claims:
 | `iat` | Issue time, Unix seconds |
 | `jti` | Unique proof id, ≤ 128 bytes. Signers SHOULD generate ≥ 96 bits of randomness (the reference signer uses 128); verifiers can only enforce presence and the size cap |
 | `ath` | Only when the request presents an access token: `base64url(SHA-256(token))` (§7.8) |
-| `ans_profile` | OPTIONAL. A positive JSON integer identifying the Method-B profile revision; absence means revision `1`, the only revision this document defines. Verifiers MUST reject malformed values and revisions they do not support (§7.12) |
+| `ans_profile` | OPTIONAL. A positive JSON integer identifying the Method-B profile revision; absence means revision `1`, while revision `2` requires explicit selection and `ans_agent_id`. Verifiers MUST reject malformed values and revisions they do not support (§7.12) |
+| `ans_agent_id` | REQUIRED for revision `2`: the existing registration ID, signed with the request. It must agree with the expected caller registration and status evidence (§7.5) |
 | `ans_content_digest` | REQUIRED. `base64url(SHA-256(content))`, without padding, over the request content defined by RFC 9110 §6.4: after transfer-coding removal, with any content coding still applied. Requests without content carry the digest of the empty octet string (§7.13) |
 
 Verifiers MUST ignore payload claims they do not understand, as required by
@@ -727,7 +730,7 @@ Then, in order, cheapest and least stateful first:
 1. Proof size within bound; compact JWS structure splits into three segments.
 2. Strict header decode (§7.2); `typ` and `alg` match; `jwk` present; `x5c` has exactly one
    entry. Decode the payload; reject a malformed or unsupported `ans_profile` and a missing or
-   malformed `ans_content_digest` (§7.2).
+   malformed `ans_content_digest` (§7.2). Revision 2 also requires a valid `ans_agent_id` for the selected caller registration.
 3. Parse `x5c[0]`; the leaf key MUST be ECDSA P-256; the certificate's validity period MUST
    contain the current time (§7.5).
 4. `jwk` equals the certificate key, byte-for-byte.
@@ -754,11 +757,13 @@ The certificate that signed the proof must be the certificate the TL vouches for
 
 1. **Fingerprint.** `SHA-256(x5c[0] DER)` MUST equal some entry of the status token's
    `validIdentityCerts`.
-2. **Name.** The certificate MUST carry an `ans://` URI SAN ([ANS-2
-   §3](ans-2-versioned-naming.md#3-the-identity-certificate)) whose host equals the status
-   token's `ansName` host (case-insensitive). No URI SAN fails closed. Verifiers MAY require full
-   ANSName equality; the two are equal by construction for conformant issuance, since the RA
-   validates the URI SAN against the registration's ANSName before signing.
+2. **Registration binding.** For revision 1, the certificate MUST carry an `ans://` URI SAN whose
+   host equals the status token's ANSName host; the legacy URI checks remain in force. For revision 2,
+   `ans_agent_id` MUST equal the expected caller registration ID and the signed status token's agent ID.
+   Anchor the expected registration to its trusted TL. Parse the authenticated ANS name under ANS-2,
+   require its FQDN to be the expected caller FQDN, and check the leaf's DNS SAN coverage against it.
+   A Common Name cannot substitute for DNS SAN coverage. No ANS URI SAN is required for revision 2.
+   Do not use the callee's request Host as the caller identity or select trust from unverified proof fields.
 3. **Receipt agreement.** When a receipt is presented, the sealed event in its leaf payload MUST
    name the same agent as the status token: equal `ansName` — compared case-insensitively over
    the **full** name, version segment included — and equal agent identifier when both artifacts
@@ -768,12 +773,9 @@ The certificate that signed the proof must be the certificate the TL vouches for
 
 **Certificate validity is checked.** Verifiers MUST reject a proof whose `x5c[0]` validity period
 does not contain the current time (`notBefore ≤ now ≤ notAfter`, allowing the §7.4 step 9 skew
-tolerance). The status token cannot provide this bound: identity-certificate rotation is additive
-([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)) and a sealed event's fingerprint
-arrays are immutable once the event lands, so nothing ever prunes a rotated-away or expired
-certificate from `validIdentityCerts`. Without this check, a certificate the operator rotated
-away from would stay acceptable past its own `notAfter` — the certificate's dates are the only
-expiry the system carries for it.
+tolerance). Certificate fingerprints in historical leaves never change, and cached tokens may predate removal.
+Fresh status evidence can omit retired or expired credentials, but that does not remove the need to
+check the presented certificate's own validity period on every verification.
 
 **Deliberately absent:** CA-chain validation, key usage, and certificate-type checks. The status
 token — signed by the TL, bounded by `exp` — is the trust statement about the certificate's
@@ -919,7 +921,7 @@ Method A (or both — the methods are not mutually exclusive on one callee).
 | `iat` outside window; `jti` missing or oversize | Reject |
 | Missing status token (or missing receipt where required) | Reject — §10.1 makes accepting this non-conformant, and the absence may be an intermediary stripping headers (§9.7) |
 | Status token invalid, expired, or terminal status | Reject (expired: §9.4) |
-| Fingerprint not in `validIdentityCerts`; no/mismatched `ans://` URI SAN; receipt names a different agent | Reject |
+| Fingerprint not in `validIdentityCerts`; revision-1 URI mismatch; revision-2 registration-ID or DNS coverage mismatch; receipt names a different agent | Reject |
 | `jti` already seen; replay cache full or erroring | Reject (fail closed) |
 
 ### 7.12 Profile evolution
@@ -931,15 +933,18 @@ RFC 7519 §4), so an addition that a verifier may safely ignore can be an OPTION
 A new security requirement cannot rely on an older verifier enforcing a claim it ignores.
 
 A change a verifier cannot safely ignore — a new `alg`, a different key-carriage mechanism, a
-tightened check — is a **profile revision**. This document defines revision 1 only:
+tightened check — is a **profile revision**. This document defines revisions 1 and 2:
 
 - **The revision is never carried in `typ`.** RFC 9449 pins `typ: dpop+jwt`, and wire-conformance
   with textbook DPoP is a property this profile keeps. A proof states its revision in the
   `ans_profile` payload claim (§7.2); absence means revision 1.
-- **Selection is explicit.** A revision that older verifiers cannot safely ignore requires trusted
-  configuration or an authenticated selection channel and defined downgrade behavior. Mutable metadata
-  is now available, but an optional metadata check alone is not proof that a peer advertised a revision.
-  An unauthenticated rejection is never permission to downgrade.
+- **Revision 1** uses URI-SAN identity binding; **revision 2** requires signed `ans_agent_id` and the
+  registration/fingerprint/DNS binding in §7.5. Both use the full verification procedure in §7.4.
+- **Selection** uses trusted configuration or a separately specified authenticated advertisement.
+  Reject unsupported or unselected revisions; an unauthenticated rejection MUST NOT trigger downgrade.
+
+Revision-2 replay accounting is scoped to the trusted TL, registration and credential as well as the proof
+identifier. The existing shared-cache and fail-closed requirements apply across replicas and restarts.
 
 ### 7.13 Request-content binding
 
@@ -1138,6 +1143,7 @@ suite MUST include the §7.2 negative cases — a library-added `kid`, a multi-e
 - An unknown payload claim is ignored; an otherwise-valid proof still verifies.
 - An absent `ans_profile` and an explicit `ans_profile: 1` both select revision 1; malformed
   values and unsupported revisions reject.
+- Revision 2 rejects missing/wrong `ans_agent_id`, a token naming another registration, wrong/CN-only DNS coverage, and relabelled proofs even when a certificate is shared across registrations.
 - A missing, malformed, or mismatched `ans_content_digest` rejects, including content added to
   an empty request or removed from a request with content.
 - The empty-content digest verifies for an empty request; changing transfer framing alone

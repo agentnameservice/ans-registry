@@ -103,7 +103,7 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 `ans://{agentHost}`; the versioned example above remains valid, and V1 still requires a version. Exactly one
 of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it
 registers the agent without an Identity Certificate ([ANS-1
-§7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
+§7.2](../ans-1-registration.md#72-identity-credential-management)).
 
 ## A.3 Revocation request
 
@@ -139,10 +139,9 @@ Server Certificate has expired, but the second Server Certificate remains valid 
 Certificate group remains valid beyond it. The Server Certificate group's validity includes
 `2027-01-01T00:00:00Z`; it lapses only when the current instant is later than that boundary.
 
-For a registration created without Identity Certificates, only the Server Certificate group participates,
-giving the same `2027-01-01T00:00:00Z` in this example. This omission applies only to registrations that
-never opted into Identity Certificates; an expired or otherwise unusable required identity group cannot
-be dropped to extend a registration's validity.
+For a server-only registration, only the Server Certificate group participates, giving the same
+`2027-01-01T00:00:00Z`. Returning to server-only operation requires explicit retirement of the identity
+bindings under ANS-1 §7.2; expiration alone does not remove a required group.
 
 ## A.5 Renewal while the other certificate group is expired
 
