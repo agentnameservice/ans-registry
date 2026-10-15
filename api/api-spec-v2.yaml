@@ -180,9 +180,13 @@ paths:
         submitted information, then interacts with the CA to issue certificates
         or validates provided (BYOC) server certificates.
 
-        The request MUST include an identity CSR. The request can optionally
-        include a server CSR (for RA-issued server cert) or a BYOC server
-        certificate with its chain.
+        The identity CSR is optional. Exactly one of serverCsrPEM or
+        serverCertificatePEM MUST be provided. BYOC registration is supported
+        by every conformant RA; server certificate issuance is optional.
+        A BYOC-only RA rejects an otherwise valid CSR-based request with
+        422 SERVER_CA_DISABLED before creating registration or order state.
+        Submit serverCertificatePEM instead. No capability-discovery call
+        is required. Temporary issuer failures use 503, not SERVER_CA_DISABLED.
       operationId: registerAgent
       requestBody:
         description: Agent registration request
@@ -217,17 +221,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Invalid registration request
+          description: >-
+            Invalid registration request, or server issuance is not offered
+            (SERVER_CA_DISABLED).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                serverIssuanceDisabled:
+                  $ref: '#/components/examples/serverIssuanceDisabled'
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/CertificateProviderUnavailable'
 
   /ans/agents/{agentId}:
     get:
@@ -284,8 +295,10 @@ paths:
       summary: Trigger ACME validation
       description: |
         Initiates domain control validation. The AHP calls this after placing
-        the ACME challenge token. The RA validates domain control, which is
-        required before issuing both server and identity certificates.
+        the ACME challenge token. The RA validates domain control before
+        completing server certificate issuance or BYOC acceptance, and before
+        issuing an identity certificate when an identity CSR was supplied.
+        BYOC domain validation does not require a server-certificate issuer.
       operationId: validateRegistration
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -326,6 +339,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/CertificateProviderUnavailable'
 
   /ans/agents/{agentId}/verify-dns:
     post:
@@ -495,8 +510,15 @@ paths:
         - Certificate Management
       summary: Submit server certificate CSR
       description: |
-        Submits a CSR for the agent's server certificate.
-        The response contains a `csrId` matching `CertificateResponse.csrId`.
+        Submits a CSR for the agent's server certificate when the RA offers
+        server issuance. The response contains a `csrId` matching
+        `CertificateResponse.csrId`.
+
+        A BYOC-only RA rejects an otherwise valid request with
+        422 SERVER_CA_DISABLED before storing a CSR or modifying the agent.
+        This route accepts csrPEM only. For BYOC replacement, submit
+        serverCertificatePEM to POST /ans/agents/{agentId}/certificates/server/renewal,
+        subject to that route's lifecycle requirements.
       operationId: submitServerCsr
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -532,17 +554,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Invalid CSR
+          description: >-
+            Invalid CSR, or server issuance is not offered
+            (SERVER_CA_DISABLED).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                serverIssuanceDisabled:
+                  $ref: '#/components/examples/standaloneServerIssuanceDisabled'
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/CertificateProviderUnavailable'
 
   /ans/agents/{agentId}/certificates/server/renewal:
     post:
@@ -550,9 +579,16 @@ paths:
         - Certificate Management
       summary: Submit server certificate renewal
       description: |
-        Initiates server certificate renewal. Supports CSR path (RA issues)
-        or BYOC path (client provides certificate). Only one pending renewal
-        allowed per agent.
+        Initiates server certificate renewal. Exactly one of serverCsrPEM
+        or serverCertificatePEM MUST be provided. BYOC renewal is supported
+        even when the previous certificate was issued through the RA.
+        Only one pending renewal is allowed per agent.
+
+        CSR issuance is optional. A BYOC-only RA rejects an otherwise valid
+        CSR-based request with 422 SERVER_CA_DISABLED before creating CSR,
+        renewal, or provider-order state or modifying existing certificates.
+        Submit serverCertificatePEM instead. Temporary issuer failures use
+        503, not SERVER_CA_DISABLED.
       operationId: submitServerCertRenewal
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -594,17 +630,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation failed
+          description: >-
+            Validation failed, or server issuance is not offered
+            (SERVER_CA_DISABLED).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                serverIssuanceDisabled:
+                  $ref: '#/components/examples/serverIssuanceDisabled'
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/CertificateProviderUnavailable'
     get:
       tags:
         - Certificate Management
@@ -694,8 +737,9 @@ paths:
         - Certificate Management
       summary: Verify ACME challenges for pending server cert renewal
       description: |
-        Triggers ACME validation for external agents only.
-        DNS-01 or HTTP-01 challenge verification.
+        Verifies DNS-01 or HTTP-01 domain-control challenges for the pending
+        renewal. CSR issuance uses the configured issuer; BYOC acceptance
+        does not require a server-certificate issuer.
       operationId: verifyRenewalAcme
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -742,6 +786,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/CertificateProviderUnavailable'
 
   # ──────────────────────────────────────────────────────────────────
   # Certificate Management — Identity
@@ -1356,6 +1402,45 @@ components:
         format: uuid
 
   # ──────────────────────────────────────────────────────────────────
+  # Reusable certificate responses and examples
+  # ──────────────────────────────────────────────────────────────────
+  responses:
+    CertificateProviderUnavailable:
+      description: >-
+        An enabled certificate provider is temporarily unavailable. Retryable;
+        uses a documented error code distinct from SERVER_CA_DISABLED.
+        This response does not indicate that BYOC is required.
+      headers:
+        Retry-After:
+          description: >-
+            Retry interval in seconds or an HTTP-date, when the RA can provide one.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  examples:
+    serverIssuanceDisabled:
+      summary: This RA accepts BYOC server certificates only
+      value:
+        status: ERROR
+        code: SERVER_CA_DISABLED
+        message: >-
+          This RA does not issue server certificates.
+          Submit serverCertificatePEM instead of serverCsrPEM.
+    standaloneServerIssuanceDisabled:
+      summary: Submit a BYOC replacement through the renewal route
+      value:
+        status: ERROR
+        code: SERVER_CA_DISABLED
+        message: >-
+          This RA does not issue server certificates. Submit serverCertificatePEM
+          to POST /v2/ans/agents/{agentId}/certificates/server/renewal,
+          subject to that route's lifecycle requirements.
+
+  # ──────────────────────────────────────────────────────────────────
   # Schemas
   # ──────────────────────────────────────────────────────────────────
   schemas:
@@ -1491,10 +1576,18 @@ components:
             $ref: '#/components/schemas/AgentEndpoint'
         serverCsrPEM:
           type: string
+          description: >-
+            CSR for optional RA server issuance. Mutually exclusive with
+            serverCertificatePEM. A BYOC-only RA returns 422 SERVER_CA_DISABLED.
         serverCertificatePEM:
           type: string
+          description: >-
+            BYOC server certificate. Mutually exclusive with serverCsrPEM.
+            Required when the RA does not offer server issuance; subject to
+            domain-control proof and certificate validation.
         serverCertificateChainPEM:
           type: string
+          description: Optional chain accompanying serverCertificatePEM.
         identityCsrPEM:
           type: string
           description: >-
@@ -1507,6 +1600,9 @@ components:
         - version
         - agentHost
         - endpoints
+      oneOf:
+        - required: [serverCsrPEM]
+        - required: [serverCertificatePEM]
 
     AgentRevocationRequest:
       type: object
@@ -1888,10 +1984,18 @@ components:
       properties:
         serverCsrPEM:
           type: string
+          description: >-
+            CSR for optional RA server issuance. Mutually exclusive with
+            serverCertificatePEM. A BYOC-only RA returns 422 SERVER_CA_DISABLED.
         serverCertificatePEM:
           type: string
+          description: >-
+            BYOC server certificate. Mutually exclusive with serverCsrPEM.
+            Required when the RA does not offer server issuance; subject to
+            domain-control proof and certificate validation.
         serverCertificateChainPEM:
           type: string
+          description: Optional chain accompanying serverCertificatePEM.
       oneOf:
         - required: [serverCsrPEM]
         - required: [serverCertificatePEM]
