@@ -64,7 +64,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | **DNS pointer** | Authoritative DNS query for the records emitted per ANS-3, with DNSSEC validation when the zone is signed | Records exist, content matches TL-sealed expected values, and DNSSEC validates (when signed) | Always (against the record set the registration's discovery profiles emit, [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles)) |
 | **Server Certificate match** | TLS handshake to the operational endpoint, extract certificate fingerprint | Fingerprint matches the value sealed in the TL | When the anchor profile ties to TLS (FQDN; `did:web` resolved domain) |
 | **Identity Certificate match** | Verify identity certificate fingerprint against TL-sealed value (see §4 note below) | Fingerprint matches | Only when ANS-2 versioned registration |
-| **Schema integrity** | Fetch the selected endpoint's `metaDataUrl` and hash the exact bytes | For V3, match any digest in the exact `(protocol, agentUrl, metaDataUrl)` set; legacy singleton evidence retains its old meaning | When a metadata commitment is present; missing/empty sets never authorize arbitrary bytes |
+| **Schema integrity** | Fetch the selected endpoint's `metaDataUrl` and hash the exact bytes | Match any digest in the exact `(protocol, agentUrl, metaDataUrl)` set; legacy singleton evidence retains its old meaning | When a metadata commitment is present; missing/empty sets never authorize arbitrary bytes |
 | **Principal binding (ENS_ENSIP25)** | Resolve ENS name; verify `agent-registration[<registry>][<tokenId>]` text record; verify ERC-8004 registration file lists the ENS name | Both directions agree | Only when `principalBinding.type` is `ENS_ENSIP25` |
 | **Principal binding (ENS_ENSIP26)** | Resolve the ENS name from the agent's principal binding; verify its `agent-endpoint[ans]` text record (ENSIP-26) names one of the agent's ANSNames in URI form (`ans://…`) | Record matches the ANSName of an ACTIVE version of the agent | Only when `principalBinding.type` is `ENS_ENSIP26` |
 | **Principal binding (DID_WEB)** | Fetch `/.well-known/did.json` from the declared domain | DID document exists with a valid verification method | Only when `principalBinding.type` is `DID_WEB` |
@@ -72,7 +72,7 @@ The AIM verifies each ACTIVE registration independently. A third party must dete
 | **Principal binding (BIOMETRIC_HASH)** | Verify the biometric credential against the declared verifier's public key. The raw biometric data is never transmitted; only a hash or zero-knowledge proof | Credential verifies and matches the registered binding | Only when `principalBinding.type` is `BIOMETRIC_HASH` |
 | **On-chain identity (ERC-8004)** | Verify agentId ownership on the Identity Registry, check Reputation Registry for active feedback | Owner address matches `principalBinding.identifier` | Only when `onChainId` references an ERC-8004 registration |
 
-**DNS pointer record types.** `_ans` and `_ans-badge` (or `_ra-badge`) TXT records MUST be verified. TLSA and HTTPS/SVCB records SHOULD be verified when the registration's attestation includes them.
+**DNS pointer record types.** `_ans` and `_ans-badge` (or `_ra-badge`) TXT records MUST be verified. HTTPS/SVCB records SHOULD be verified when the current registration attestation includes them. TLSA is outside this check (ANS-3 §6.3).
 
 **DNS pointer content matching.** "Records exist and validate" means: (1) the record exists at the authoritative nameserver, (2) its content matches the TL-sealed expected value, and (3) the record's DNSSEC validation state is secure when the zone is signed. A record that exists but whose content does not match the sealed value is a `Mismatch` finding.
 
@@ -130,15 +130,12 @@ A verifier checks an agent through independent steps, each using a different tru
 | Step | Check | Trust channel | What it proves |
 | --- | --- | --- | --- |
 | 1 | PKI certificate validation | CA system | Standard TLS. Cannot detect a compromised CA |
-| 2 | DANE record validation (FQDN anchors) | DNS (DNSSEC) | The Server Certificate fingerprint matches the TLSA record at `_{port}._tcp.{agentHost}` for the endpoint's port ([ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)). A compromised CA alone cannot forge this record |
+| 2 | Optional independent DANE validation | Live DNSSEC-authenticated TLSA | Apply the client's DANE policy to the presented certificate at the actual host/port (ANS-6 §5.3); no comparison to an old TL TLSA string is required |
 | 3 | TL inclusion proof verification | TL (signed by KMS-rooted key) | The inclusion proof confirms the registration was sealed into the log. A tampered or deleted entry breaks the proof |
 | 4 | Live state match | DNS + TLS | The current DNS records and certificates match what was sealed |
 
-**TLSA parameters.** The RA specifies `TLSA 3 0 1 [sha256_hash]`: DANE-EE (usage 3), full Server Certificate (selector 0), SHA-256 (matching type 1). Selector 0 produces the same hash as the badge fingerprint in the TL, so a single SHA-256 computation of the Server Certificate serves both DANE and badge verification.
-
-**DNSSEC prerequisite for step 2.** DANE requires DNSSEC. Per RFC 6698 §4, a TLSA RRset whose DNSSEC validation state is not "secure" MUST be treated as unusable, and the client falls back to standard PKIX certificate validation. Without DNSSEC in the agent's zone, a client cannot verify the TLSA record, so the DANE and TL verification channels are unavailable to that client. The RA SHOULD verify
-DNSSEC status before provisioning TLSA records.
-
+Independent DANE verification follows ANS-6 §5.3; it compares the presented certificate with live
+DNSSEC-authenticated records rather than historical TL TLSA values.
 
 ## 7. Integrity reporting principles
 
