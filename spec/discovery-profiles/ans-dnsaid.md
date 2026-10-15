@@ -107,10 +107,10 @@ fails), never a false accept.
 
 ## 6. Lifecycle specifics
 
-The SVCB rows are per-registration: one row per endpoint for the registration's version. Version
+The SVCB rows are per-registration: one row per endpoint for the registration. Version
 coexistence across registrations and revocation cleanup are ANS-1/ANS-2 concerns
 ([ANS-1 §7](../ans-1-registration.md#7-lifecycle-operations)); on revocation of the last ACTIVE
-version the AHP removes the SVCB and family records the RA's revocation response lists.
+registration the AHP removes the SVCB and family records the RA's revocation response lists.
 
 ## 7. Coexistence and presentation safety
 
