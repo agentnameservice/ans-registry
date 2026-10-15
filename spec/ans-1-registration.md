@@ -26,7 +26,7 @@ ANS-1 does **not** specify the proof-of-control gate itself (ANS-0), the ANSName
 
 ## 2. Terminology
 
-- **Registration**: an aggregate the RA owns, identified by `agentId`, carrying the ANSName (`version` + `agentHost`), operational metadata, status, and lifecycle history.
+- **Registration**: an aggregate the RA owns, identified by `agentId`, carrying the ANSName (`agentHost` with an optional name-bound `version`), operational metadata, status, and lifecycle history.
 - **AHP (Agent Hosting Platform)**: the operator that hosts the agent's code and manages its DNS and certificates. Submits the registration request.
 - **Lifecycle event**: an event the RA emits to the TL when a registration changes state. The emitted set is `AGENT_REGISTERED` (at activation) and `AGENT_REVOKED` (at revocation). `AGENT_RENEWED` and `AGENT_DEPRECATED` are reserved event types — defined in the TL event enums and accepted at ingest, but not emitted by the reference RA (§6.3).
 - **Identity Certificate**: an optional certificate binding the registration's ANSName, issued from the RA's private CA against an operator-submitted CSR. A registration without one registers, activates, and operates on its Server Certificate alone (§7.2).
@@ -40,7 +40,7 @@ and identity-certificate rotation. The stored `LifecycleStatus` set is `PENDING_
 the pending-registration response as the derived phase while certificate issuance is in flight (it is not a
 distinct stored state).
 
-The `agentHost` field is the agent's operational FQDN: ANS-3 (DNS publication) consumes it for record generation, and together with `version` it derives the registration's ANSName.
+The `agentHost` field is the agent's operational FQDN: ANS-3 (DNS publication) consumes it for record generation, and an optional `version` derive the registration's ANSName.
 
 ## 4. Registration sequence
 
@@ -56,7 +56,7 @@ The AHP submits a registration request:
 | Group | Field | Required | Description |
 | --- | --- | --- | --- |
 | **Identity** | `agentHost` | Yes | Operational FQDN (RFC 1123) |
-| | `version` | Yes | Semantic version, bare semver (e.g., `1.0.0`) |
+| | `version` | No (V2); Yes (V1) | Optional bare semver (e.g., `1.0.0`); omission creates `ans://{agentHost}` |
 | | `agentDisplayName` | Yes | Human-readable name (max 64 chars) |
 | | `agentDescription` | No | Brief capability description (max 150 chars) |
 | **Endpoints** | per-endpoint `protocol` | Yes | `A2A`, `MCP`, or `HTTP_API` (minimum 1 endpoint) |
@@ -78,7 +78,7 @@ Pending-stage validations:
 3. Exactly one of `serverCsrPEM` and `serverCertificatePEM` MUST be present (CSR or BYOC, never both, never neither).
 4. The endpoint set MUST contain at least one endpoint with valid `protocol` and `agentUrl`, and at most one endpoint per protocol (`DUPLICATE_PROTOCOL`, 422).
 5. `agentDisplayName` and `agentDescription` length limits apply (64 and 150 chars respectively).
-6. The ANSName derived from `version` + `agentHost` MUST be globally unique; a taken name is rejected with `ANS_NAME_TAKEN` (409).
+6. The ANSName derived from `agentHost` and the optional `version` MUST be globally unique; a taken name is rejected with `ANS_NAME_TAKEN` (409).
 
 If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName per [ANS-2 §2](ans-2-versioned-naming.md), opens a certificate order at the configured server-certificate issuer, and sets the registration to `PENDING_VALIDATION`. The response relays the order's domain-control challenges (DNS-01 TXT and/or HTTP-01) verbatim to the AHP.
 
@@ -145,7 +145,7 @@ TL events fire only on the `ACTIVE` and `REVOKED` transitions. Everything before
 | **`ansId`** | UUID | RA | No | Issuing RA | Carried in every sealed TL event payload. In the reference implementation it is the same value as `agentId` |
 | **`logId`** | UUID v7 | TL at ingest | No | TL | The Transparency Log entry identifier, wrapped around the producer event when the TL seals it |
 | **`agentHost`** | RFC 1123 FQDN | AHP submits | No | Global | Operational endpoint where the agent terminates TLS |
-| **`ANSName`** | `ans://v{ver}.{host}` | Derived from `version` + `agentHost` | No | Global | Versioned identifier (see [ANS-2 §2](ans-2-versioned-naming.md)); globally unique per registration |
+| **`ANSName`** | `ans://{host}` or `ans://v{ver}.{host}` | Derived at registration | No | Global | Stable identifier (see [ANS-2 §2](ans-2-versioned-naming.md)); the assigned name remains unchanged during updates |
 | **`ownerId`** | RA-defined | RA from its authentication system | No | Issuing RA | The authenticated principal that owns the registration; scopes reads and lifecycle operations |
 
 The TL wire envelopes carry an optional `providerId` field on agent events, but the agent lane leaves it empty; `providerId` is populated on identity-lane events only ([ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)). Cross-RA correlation is by `agentHost`: an agent moves between RAs by updating DNS records, not by changing its name.
@@ -156,8 +156,8 @@ The RA emits the following events to the ANS-4 Transparency Log. Each event carr
 
 ### 6.1 `AGENT_REGISTERED`
 
-Emitted at activation (the verify-dns transition to `ACTIVE`). Payload follows the **V2 TL format**: `ansId`
-(the RA-assigned agent id), `ansName`, a nested `agent` object (`host`, `name`, `version`), `attestations` —
+Emitted at activation (the verify-dns transition to `ACTIVE`). New publications follow the **V3 TL format**: `ansId`
+(the RA-assigned agent id), `ansName`, a nested `agent` object (`host`, `name`, optional `version`), `attestations` —
 `identityCerts[]` (when the registration carries Identity Certificates) and `serverCerts[]`, each entry
 `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` records, each optionally
 carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC Authenticated-Data bit;
@@ -165,9 +165,10 @@ carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC 
 keyed by protocol token — plus `expiresAt` (the minimum of the latest `notAfter` in each required
 certificate group, calculated under [§7.3](#73-expiry)), `issuedAt`, `raId`, and `timestamp`.
 
-Registrations driven through the V1 paths (`/v1/agents/*`) seal **V1-format** payloads instead: a map-typed
-`dnsRecordsProvisioned` with no `dnssecVerified`, and `validIdentityCerts[]` / `validServerCerts[]`
-rotation arrays (§6.4's "V1 lane stays frozen" covers identity events; the V1 agent lane remains live).
+Historical V1 events use map-typed `dnsRecordsProvisioned` and `validIdentityCerts[]` /
+`validServerCerts[]`; V2 uses the typed DNS and certificate arrays retained by V3. Management-route
+version does not select the format of a newly constructed event: upgraded RAs publish V3 through
+existing V1/V2 management operations. Previously signed legacy retries retain their original format (§6.5).
 
 A worked example payload appears in the [ANS-1 worked examples](examples/ans-1-examples.md).
 
@@ -208,11 +209,26 @@ and **no identity operation writes to an agent's event history** (nor the revers
 detail response gains a computed, optional `identities[]` array (the current-links view) that is
 never stored on the registration; the list response carries no identities field.
 
+### 6.5 Publication compatibility
+
+Newly constructed agent events use the V3 ingest route and envelope defined in ANS-4 §4.1, including
+mutations of existing registrations through supported V1/V2 management routes. V1 registration requests
+still require a version; the V2 management API permits omission.
+
+A successful mutation preserves the registration ID, FQDN, assigned ANS name, name-bound version and
+established discovery identifier. It adopts V3 for subsequent publications; failed writes and no-ops
+do not commit adoption. Later events remain V3 across restart and configuration changes.
+
+Already-signed queued events and prepared activation retries retain their exact bytes, signatures and
+schema. The TL accepts exact historical retries under deduplication and rejects newly constructed
+schema downgrades. Publications remain ordered per registration so an older snapshot cannot become
+current after a newer one. Historical entries are immutable.
+
 ## 7. Lifecycle operations
 
 | Operation | Trigger | AHP submits | RA processes | RA seals | DNS effect |
 | --- | --- | --- | --- | --- | --- |
-| **Version bump** | Code or config change | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance, DNS verification | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
+| **Additional versioned registration** | Operator needs a separate registration identity | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance, DNS verification | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
 | **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | Nothing today (`AGENT_RENEWED` reserved — §6.3) | None |
 | **Identity-certificate rotation** | Key roll on an identity-bearing registration | A fresh `identityCsrPEM` | Issues a new Identity Certificate at the private CA. Additive: the prior certificate remains valid until it expires. No fresh domain-control proof. `ACTIVE` registrations only; a registration created without an Identity CSR is refused (`IDENTITY_CSR_NOT_PERMITTED`, 409) | Nothing | AHP updates any published fingerprint records per ANS-3 |
 | **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists `dnsRecordsToRemove`; the AHP removes them |
@@ -224,10 +240,8 @@ already-finalizing order likewise skip the artifact check by design.
 
 ### 7.1 Version coexistence
 
-Versions are independent registrations: uniqueness is on the full ANSName, so `v1.0.0` and `v2.0.0` of the
-same host are unrelated rows with independent statuses. During a bump both old and new versions are `ACTIVE`;
-a patch bump may coexist for hours, a major version for months. The RA imposes no retirement timeline, keeps
-no linkage between versions, and a failed new registration leaves the old version untouched.
+Separate versioned and versionless registrations have independent status, credentials and history,
+as defined in ANS-2 §2.3. Updating an existing registration uses the compatibility rules in §6.5.
 
 ### 7.2 Registrations without an Identity Certificate
 

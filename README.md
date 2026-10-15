@@ -5,10 +5,10 @@ invoicing agent. The payment agent must decide: does this agent actually belong 
 the supplier, or has someone stood up a convincing fake? And if the site is
 legitimate, has the supplier's code changed since my last transaction?
 
-ANS answers both questions. It anchors every agent's identity to a domain name
-whose ownership has been verified, issues a version-bound certificate that records
-which code is running, and seals every lifecycle event into a Transparency Log
-where entries cannot be altered after the fact. The standard is open and the
+ANS anchors an agent's identity to a domain name whose control has been verified,
+binds authorized certificates to its registration, and records published lifecycle
+events in an append-only Transparency Log. A version label does not prove which
+code, model or configuration is running. The standard is open and the
 services are federated, but the identity always anchors to a domain name.
 
 ## Specifications
@@ -19,7 +19,7 @@ The ANS protocol is split across seven layered specifications under [`spec/`](sp
 | --- | --- | --- |
 | ANS-0 | [`spec/ans-0-identity-anchor.md`](spec/ans-0-identity-anchor.md) | The proof-of-control gate, Verified Identities, identity profiles |
 | ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set |
-| ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | ANSName URI form, Identity Certificate URI SAN binding, mTLS |
+| ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | Stable ANS names, optional versions, certificate binding and mTLS |
 | ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
 | ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, checkpoints and tiles, HCS anchoring |
 | ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
@@ -48,6 +48,9 @@ compromise where domain-level authentication (DKIM/SPF/DMARC) passes but the
 sender is not who they claim. Not an ANS protocol feature.
 
 ## API
+
+- [Complete Transparency Log OpenAPI](api/api-spec-tl-v2.yaml), including V1/V2/V3 ingest and all verification/admin routes
+- [Registration Authority OpenAPI](api/api-spec-v2.yaml)
 
 - [OpenAPI specification](https://developer.godaddy.com/doc/endpoint/ans)
   (human-readable)

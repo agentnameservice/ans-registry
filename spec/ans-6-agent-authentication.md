@@ -984,33 +984,10 @@ parameters belong in the bound content or the bound path, never in the query (§
 
 ### 8.1 Version changes
 
-A version bump is a new registration under the same `agentHost`
-([ANS-2 §2.3](ans-2-versioned-naming.md#23-supersession)): both versions are ACTIVE with
-independent Identity Certificates, independent TL entries, and coexisting `_ans-badge` records.
-ANS imposes no retirement timeline; the AHP MAY mark the old version `DEPRECATED` to signal
-migration.
-
-- **Selecting the right badge**: the caller's certificate URI SAN (Method A) carries the version;
-  match it against the `version` field across the `_ans-badge` TXT records rather than fetching
-  every badge. Callers verifying a callee (whose Server Certificate carries no version) prefer an
-  ACTIVE record, or the record for the version they intend to call. Discovery records do not help
-  here: `ANS_DNSAID` SVCB rows carry no version discriminator — coexisting versions' rows share
-  one RRset at the bare FQDN — so version selection rides the badge record's `version` field (or
-  the URI SAN) regardless of discovery profile. Server Certificates cannot carry the version the
-  way Identity Certificates do — public CAs cannot issue the `ans://` URI SAN
-  ([ANS-2 §3](ans-2-versioned-naming.md#3-the-identity-certificate)) — so the callee-side version
-  signal is the SCITT tier: the callee's status token `ansName` names the exact version it is
-  serving (§5.2), the callee-side analogue of the caller's URI SAN.
-- **SCITT artifacts are per-version**: each version has its own receipt (its own leaf) and its
-  own status token (its own `ansName`). Certificate-fingerprint arrays absorb rotations *within*
-  a version; version changes produce separate artifacts, never merged arrays.
-
-| Scenario | Recommendation |
-| --- | --- |
-| Single ACTIVE badge matches | Accept |
-| Multiple records, version-selected badge ACTIVE | Accept |
-| Version-selected badge DEPRECATED | Accept with a migration warning |
-| No badge matches the presented certificate | Reject |
+Names and coexistence follow ANS-2 §2; event compatibility follows ANS-1 §6.5. Select evidence for the
+expected registration, FQDN and presented certificate. A version field can disambiguate a versioned
+name; its absence never authorizes another registration sharing that host. The status token and
+receipt must agree on the selected registration.
 
 ### 8.2 Certificate rotation
 
