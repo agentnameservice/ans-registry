@@ -184,7 +184,7 @@ paths:
         or validates provided (BYOC) server certificates.
 
         The identity CSR is optional. Exactly one of serverCsrPEM or
-        serverCertificatePEM is required. For V3, an
+        serverCertificatePEM is required. An
         ACTIVE registration can add an identity credential later through
         the dedicated identity-certificate operation.
       operationId: registerAgent
@@ -2329,10 +2329,17 @@ components:
       properties:
         renewalType:
           type: string
-          enum: [SERVER_CSR, SERVER_BYOC]
+          enum:
+            - SERVER_CSR
+            - SERVER_BYOC
         status:
           type: string
-          enum: [PENDING_VALIDATION, ISSUING_CERTIFICATE, COMPLETED, FAILED, EXPIRED]
+          enum:
+            - PENDING_VALIDATION
+            - ISSUING_CERTIFICATE
+            - COMPLETED
+            - FAILED
+            - EXPIRED
         csrId:
           type: string
           format: uuid
@@ -2346,8 +2353,10 @@ components:
             http01:
               $ref: '#/components/schemas/ChallengeInfo'
         tlsaDnsRecord:
-          $ref: '#/components/schemas/DnsRecord'
+          description: Optional historical TLSA instruction; current renewal responses omit this field.
           nullable: true
+          allOf:
+            - $ref: '#/components/schemas/DnsRecord'
         failureReason:
           type: string
           nullable: true
@@ -2367,14 +2376,19 @@ components:
       properties:
         status:
           type: string
-          enum: [VERIFIED, ISSUING_CERTIFICATE, COMPLETED]
+          enum:
+            - VERIFIED
+            - ISSUING_CERTIFICATE
+            - COMPLETED
         csrId:
           type: string
           format: uuid
           nullable: true
         tlsaDnsRecord:
-          $ref: '#/components/schemas/DnsRecord'
+          description: Optional historical TLSA instruction; current renewal responses omit this field.
           nullable: true
+          allOf:
+            - $ref: '#/components/schemas/DnsRecord'
         nextStep:
           $ref: '#/components/schemas/NextStep'
       required:

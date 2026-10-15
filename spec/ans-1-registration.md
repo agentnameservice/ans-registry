@@ -97,7 +97,9 @@ Conformant implementations MUST gate identity-certificate issuance on the presen
 
 ### 4.3 Step 3 — verify-dns (activation)
 
-After publishing the production records, the AHP calls `verifyDNS(agentId)`. The RA queries the records live; a DNSSEC-authenticated mismatch blocks activation. TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified`; TXT lookups do not carry the flag.
+After publishing the production records, the AHP calls `verifyDNS(agentId)`. The RA checks the
+ANS-managed discovery records under ANS-3 §4. SVCB and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
+result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified`; TXT lookups do not carry the flag.
 
 When the records verify, the RA records the ACTIVE transition and its signed `AGENT_REGISTERED` publication under the durability and replay requirements in §6.3–§6.5.
 
@@ -157,7 +159,7 @@ The RA emits the following events to the ANS-4 Transparency Log. Each event carr
 
 ### 6.1 `AGENT_REGISTERED`
 
-Emitted at activation (the verify-dns transition to `ACTIVE`). New publications follow the **V3 TL format**: `ansId`
+Emitted at activation (the verify-dns transition to `ACTIVE`). Publications follow the **V3 TL format**: `ansId`
 (the RA-assigned agent id), `ansName`, a nested `agent` object (`host`, `name`, optional `version` and `description`), `attestations` —
 `identityCerts[]` (when the registration carries Identity Certificates) and `serverCerts[]`, each entry
 `{fingerprint, type, notAfter}`; `dnsRecordsProvisioned[]` as `{name, type, data}` records, each optionally
@@ -167,10 +169,7 @@ carrying `dnssecVerified: true` when the verifying resolver returned the DNSSEC 
 is `[]`. A legacy `metadataHashes` entry is provided only for a protocol with one location and one digest.
 The event also carries `expiresAt` calculated under §7.3, `issuedAt`, `raId`, and `timestamp`.
 
-Historical V1 events use map-typed `dnsRecordsProvisioned` and `validIdentityCerts[]` /
-`validServerCerts[]`; V2 uses the typed DNS and certificate arrays retained by V3. Management-route
-version does not select the format of a newly constructed event: upgraded RAs publish V3 through
-existing V1/V2 management operations. Previously signed legacy retries retain their original format (§6.5).
+ANS-4 §4.1 defines historical payload formats; §6.5 defines publication compatibility.
 
 A worked example payload appears in the [ANS-1 worked examples](examples/ans-1-examples.md).
 
@@ -237,7 +236,7 @@ current after a newer one. Historical entries are immutable.
 | **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | `AGENT_RENEWED` with current certificate and metadata snapshots | None |
 | **Identity credential addition/rotation/removal** | Owner authorizes or retires a credential | `csrPEM` or BYOC leaf on the identity route; DELETE an individual binding by fingerprint | Owner/ACTIVE/admission checks; retain valid overlap; removing an external binding does not revoke its CA certificate (§7.2) | `AGENT_RENEWED` with the resulting certificate families | No automatic DNS publication |
 | **Profile/endpoint update** | Display text, metadata or endpoint changes | Complete replacement with the resource ETag in `If-Match` | Owner/lifecycle/precondition and full-result validation (§7.4) | `AGENT_UPDATED` | No DNS change for unmirrored display/hash edits; locator changes may require publication |
-| **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists `dnsRecordsToRemove`; the AHP removes them |
+| **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists ANS-managed `dnsRecordsToRemove`; the AHP removes them under ANS-3 |
 
 One exception to the renewal re-proof: a CSR renewal whose provider order arrives with no challenges (ACME
 authorization reuse inside the provider's validity window) finalizes directly — the re-proof is the

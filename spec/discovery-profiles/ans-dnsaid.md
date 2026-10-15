@@ -22,7 +22,7 @@ ANS-family trust records ([ANS-3 §6.3](../ans-3-dns-publication.md#63-family-tr
   ([ANS-3 §6.4](../ans-3-dns-publication.md#64-composition-ordering-dedup-and-the-required-flag-transition)).
 - **Records** (one per endpoint, emitted only when the registration has at least one endpoint):
   one **SVCB** row at the bare `{fqdn}` (apex), in ServiceMode.
-- Plus the family trust records — `_ans-badge` TXT and the server-cert TLSA (ANS-3 §6.3). This
+- Plus the required family `_ans-badge` TXT locator (ANS-3 §6.3). This
   profile emits **no** HTTPS RR; the SVCB row is itself the service binding.
 
 ## 2. Record assembly
@@ -88,10 +88,9 @@ The `cap` locator names the per-endpoint metadata document. For V3, integrity is
 | --- | --- | --- |
 | `{fqdn}` SVCB | **Yes**, alone; **No** in the `ANS_TXT` union | The profile emits `Required=true`; the walker flips it to `false` when `ANS_TXT` is also resolved, so the `_ans` TXT carries the required signal in the transition union (ANS-3 §6.4) |
 | `_ans-badge` TXT (family) | Yes | ANS-3 §6.3 |
-| `_{port}._tcp.{fqdn}` TLSA (family) | No | ANS-3 §6.3; verify-side enforces a match only when the zone is DNSSEC-validated |
 
-Every emitted record carries TTL `3600`. The composed set is sealed verbatim into the
-`AGENT_REGISTERED` attestation's `dnsRecordsProvisioned[]`
+Generated instructions carry TTL `3600`. The RA attests the observed applicable production
+records into the event's `dnsRecordsProvisioned[]`
 ([ANS-3 §3](../ans-3-dns-publication.md#3-record-set-and-child-label-structure)).
 
 ## 5. Freshness and ANS-5 monitoring
@@ -153,8 +152,7 @@ consults the default and stays pinned to `ANS_TXT`.
 
 A multi-protocol agent — one A2A endpoint with a `/.well-known/` metadata document plus its hash,
 and one MCP endpoint with neither — at version `1.0.0`, with a server certificate on file. The
-sample hash `SHA256:098d650cc6d280dee4c0f47489a75cf17b9bfbbae53051806d4e084108b2ff27` renders as the
-base64url digest below:
+metadata hash is carried in the signed endpoint/location set; no `key65401` mirror is emitted:
 
 ```text
 ; one SVCB row per endpoint, at the bare FQDN, in endpoint order
@@ -163,10 +161,9 @@ agent.example.com.            3600 IN SVCB  1 . alpn=mcp port=443 key65402=mcp
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
 _ans-badge.agent.example.com. 3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
-_443._tcp.agent.example.com.  3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
 The MCP row carries `alpn` / `port` / `bap` only: no `metadataUrl` means no `key65400` (cap) and no
-`key65409` (well-known), and V3 emits no `key65401` (cap-sha256). An off-`/.well-known/`
+`key65409` (well-known), and the profile omits `key65401` (cap-sha256). An off-`/.well-known/`
 `metadataUrl` (e.g. `https://agent.example.com/metadata/mcp.json`) would emit `key65400` but omit
-`key65409`. The sealed `dnsRecordsProvisioned[]` entry's `purpose` is `DISCOVERY` for the SVCB row.
+`key65409`. The RA attests observed SVCB records using `name`, `type`, `data` and optional `dnssecVerified`.
