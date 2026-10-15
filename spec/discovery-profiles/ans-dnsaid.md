@@ -30,7 +30,7 @@ ANS-family trust records ([ANS-3 §6.3](../ans-3-dns-publication.md#63-family-tr
 One SVCB row per endpoint, value composed in **ascending SvcParamKey order**:
 
 ```text
-1 . alpn={token} port={n} [key65400={metadataUrl}] [key65401={cap-sha256}] key65402={token} [key65409={wk-suffix}]
+1 . alpn={token} port={n} [key65400={metadataUrl}] key65402={token} [key65409={wk-suffix}]
 ```
 
 - `1 .` — SvcPriority `1` (ServiceMode), TargetName `.` (the origin — the owner name itself).
@@ -41,9 +41,9 @@ One SVCB row per endpoint, value composed in **ascending SvcParamKey order**:
   (http) when the URL omits one.
 - `key65400={metadataUrl}` (DNS-AID `cap`) — the endpoint's capability locator (`metadataUrl`),
   emitted **only** when the endpoint supplies one.
-- `key65401={cap-sha256}` (DNS-AID `cap-sha256`) — `base64url(raw SHA-256)` of the endpoint's
-  metadata document, derived from the endpoint's `metadataHash`. Absent when no hash is supplied
-  (or it is malformed).
+- `key65401` (DNS-AID `cap-sha256`) is omitted for V3. Its legacy single-digest form cannot
+  represent an accepted old/new set. V3 commitments are carried by the signed endpoint/location set.
+  Historical legacy rows retain `base64url(raw SHA-256)` semantics.
 - `key65402={token}` (DNS-AID `bap`) — the agent protocol, emitted on **every** row. It currently
   equals `alpn`, but DNS-AID consumers read `bap` as the authoritative agent-protocol field, so it
   is always present.
@@ -73,17 +73,14 @@ registry-sourced address hints go stale and are out of scope.
 - `port` ← the endpoint URL authority; `443` (https) / `80` (http) default. An out-of-range port is
   rejected at registration (`INVALID_ENDPOINT`).
 - `key65400` (cap) ← the endpoint's `metadataUrl`, emitted verbatim.
-- `key65401` (cap-sha256) ← the endpoint's `metadataHash` (`SHA256:<64 lowercase hex>`), converted
-  to `base64url(raw 32 bytes)`, no padding.
+- `key65401` is not generated for V3; legacy output derives its single value from `metadataHash`.
 - `key65409` (well-known) ← derived from the `metadataUrl` path, and only when the URL is exactly
   `https://{fqdn}/.well-known/{suffix}`: same scheme (https), same host as the agent FQDN
   (port-, case-, and trailing-dot-insensitive), and a single non-empty trailing path segment. Any
   other shape omits the SvcParam — the advertised well-known location is always derived from where
   the metadata document actually lives, never from the protocol.
 
-The `cap` / `cap-sha256` pair locates and digests the **per-endpoint** metadata document (the A2A
-AgentCard, the MCP ServerCard — DNS-AID's per-service capability descriptor), one descriptor per
-SVCB row.
+The `cap` locator names the per-endpoint metadata document. For V3, integrity is checked against the signed endpoint/location digest set, not a single SVCB hash.
 
 ## 4. Required flag and TL seal
 
@@ -161,7 +158,7 @@ base64url digest below:
 
 ```text
 ; one SVCB row per endpoint, at the bare FQDN, in endpoint order
-agent.example.com.            3600 IN SVCB  1 . alpn=a2a port=443 key65400=https://agent.example.com/.well-known/agent-card.json key65401=CY1lDMbSgN7kwPR0iadc8Xub-7rlMFGAbU4IQQiy_yc key65402=a2a key65409=agent-card.json
+agent.example.com.            3600 IN SVCB  1 . alpn=a2a port=443 key65400=https://agent.example.com/.well-known/agent-card.json key65402=a2a key65409=agent-card.json
 agent.example.com.            3600 IN SVCB  1 . alpn=mcp port=443 key65402=mcp
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
@@ -170,6 +167,6 @@ _443._tcp.agent.example.com.  3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
 The MCP row carries `alpn` / `port` / `bap` only: no `metadataUrl` means no `key65400` (cap) and no
-`key65409` (well-known), and no `metadataHash` means no `key65401` (cap-sha256). An off-`/.well-known/`
+`key65409` (well-known), and V3 emits no `key65401` (cap-sha256). An off-`/.well-known/`
 `metadataUrl` (e.g. `https://agent.example.com/metadata/mcp.json`) would emit `key65400` but omit
 `key65409`. The sealed `dnsRecordsProvisioned[]` entry's `purpose` is `DISCOVERY` for the SVCB row.

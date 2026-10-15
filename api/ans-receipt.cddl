@@ -1,0 +1,33 @@
+; SCITT receipt shared by V1/V2/V3 agent events and identity events.
+; Root: ans-receipt. The payload is attached JCS-canonical JSON bytes of
+; the sealed envelope; unlike a status-token payload, it is not CBOR.
+ans-receipt = #6.18([
+  protected: bstr .cbor receipt-protected,
+  unprotected: receipt-unprotected,
+  payload: bstr .size (1..18446744073709551615), ; nonempty attached leaf
+  signature: bstr .size 64       ; ES256 P1363 R || S, not ASN.1 DER
+])
+
+receipt-protected = {
+  1: -7,                        ; alg: ES256
+  4: bstr .size 4,              ; kid: first 4 bytes of SHA-256(SPKI DER)
+  15: {                         ; CWT claims
+    1: tstr,                    ; iss: TL origin
+    6: int                      ; iat: Unix seconds
+  },
+  395: 1                        ; vds: RFC9162_SHA256
+}
+
+receipt-unprotected = {
+  396: {                        ; vdp: inclusion proof
+    -1: uint,                   ; tree size
+    -2: uint,                   ; leaf index
+    -3: [* bstr .size 32],       ; sibling path; may be empty
+    ? -4: bstr .size 32          ; advisory root; reference encoder includes it
+  }
+}
+
+; COSE signs ["Signature1", protected, h'', payload]. The VDP is unprotected
+; and is not authenticated by that signature. Root/checkpoint trust follows
+; ANS-6, not the optional -4 field alone. CDDL cannot check JSON/JCS, signature
+; validity, leafIndex < treeSize, path correctness, or publication evidence.
