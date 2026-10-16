@@ -72,8 +72,8 @@ as resolution: an `AnchorResolver` fetched whatever key an identifier published 
 — resolving `did:web:google.com` returns Google's real key and says nothing about who is
 registering. v0.2.0 replaces resolution-as-identity with **proof-of-control-as-identity**: the
 authoritative key is still resolved, but resolution is only an internal step of a control proof,
-and nothing is sealed until the registrant demonstrates possession of that key bound to this
-operation. The resolver interface and the `IdentityClaim` type of v0.1.0 are retired; the
+and a Verified Identity is not sealed until the registrant demonstrates possession of its authoritative
+key bound to the operation. FQDN credential authorization follows the distinct registration rules in §3.1. The resolver interface and the `IdentityClaim` type of v0.1.0 are retired; the
 "FQDN-implicit" treatment is **narrowed, not removed** — it now applies only to an agent's FQDN
 primary anchor, never to Verified Identities (§9). §9 and §11 describe what replaces
 resolution-as-identity.
@@ -108,20 +108,23 @@ resolution-as-identity.
 
 ## 3. The proof-of-control gate
 
-The gate is the one mechanism every identity passes. FQDN's existing ANS-1 flow (ACME + a
-self-signed CSR) is its archetype; ANS-0 generalizes *exactly* that, per kind. The proof binds
-the **identity object**, never an agent; links carry no proof (§6).
+Each identity profile defines its applicable proof. Verified-Identity proofs bind the identity object;
+links carry no proof (§6). The FQDN primary anchor is proven on the agent registration path and its
+credential authorization is specified separately below.
 
 ### 3.1 The two axes
 
-Every identity seals only after **both** applicable axes pass:
+A Verified Identity seals only after its applicable control proofs pass. FQDN primary-anchor publication
+requires domain control and authorized credential admission; imported identity-key possession is checked
+at use time, rather than asserted about the owner at enrollment:
 
 | Axis | Question | FQDN primary (the what) | Verified Identity (the who) |
 | --- | --- | --- | --- |
 | **Identifier control** | "Can you act as the controller of this identifier?" | ACME DNS-01 (`_acme-challenge` TXT) | A *location challenge* — only for kinds with a writable location. No kind in this version's Verified-Identity set has one (§9, profiles). |
-| **Key control** | "Do you hold the key you will sign as?" | CSR self-signature, bound to the FQDN by the issued certificate | A *challenge-bound signature* over the canonical proof input (§3.2). |
+| **Key control** | "Do you hold the key you will sign as?" | CSR self-signature for issuance; owner authorization for imported identity bindings, with possession checked at use time (ANS-2/6) | A *challenge-bound signature* over the canonical proof input (§3.2). |
 
-A profile names which axes apply. The FQDN primary applies both on the ANS-1 registration path.
+FQDN credentials follow ANS-2's admission and authorization rules. Verified Identity profiles retain
+their identifier/key-control proofs; importing an agent credential does not satisfy those proofs.
 Today's Verified-Identity profiles (`did:web`, `did:key`, `lei`, `ens`) are **key-control only**:
 control of a DID *is* possession of its listed keys per DID Core, an LEI is proven by a vLEI
 credential chain plus a possession signature, and an ENS name by a signature from its resolved
@@ -173,8 +176,8 @@ bound to **this object and operation** (anti-replay, anti-cross-use).
 the `did:key` string, or established by an ACDC credential chain for `lei`. A key handed over in
 the request body would only prove "the registrant holds the key they sent," which says nothing
 about the identifier. The `kid` is a *selector* into the resolved key set; the signature is
-always checked against the resolved key. (FQDN is the apparent exception that proves the rule:
-its key arrives in a CSR but is trusted only after ACME binds it to the domain.) The `kid` lives
+always checked against the resolved key. (FQDN agent credentials use the separate domain-control and owner-authorization path; importing an
+identity certificate is not a Verified Identity proof.) The `kid` lives
 in the JWS protected header as a pragmatic choice (JWS is the envelope the DID/JOSE ecosystem
 emits; it keeps `alg`+`kid`+payload+signature one self-describing unit); a wrong selector
 fails closed against the wrong resolved key and can never redirect to another identifier's key,
@@ -679,8 +682,8 @@ exactly as specified.
 Every ANS-0 conformant RA:
 
 1. Proves the agent's FQDN primary anchor through the proof-of-control gate (§3) — sealing the
-   primary anchor only on proven control (the two-axis ACME + CSR form of the
-   [fqdn profile](identity-profiles/fqdn.md)), never on resolution alone.
+   primary anchor only on proven domain control and authorized credential admission under the
+   [fqdn profile](identity-profiles/fqdn.md), never on resolution or certificate possession alone.
 2. Whenever it seals *any* identity attestation — the agent's primary anchor always, a Verified
    Identity only where §12.2 is implemented — seals only after control is proven (§3), never on
    resolution.
