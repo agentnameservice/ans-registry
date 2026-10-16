@@ -1,0 +1,41 @@
+; V3 status token: the same COSE wrapper and labels 1..8 as V1/V2,
+; with optional endpoint commitments at label 9. No JSON is embedded.
+; Root: status-token. Use status-token-payload for an already-decoded payload.
+status-token = #6.18([
+  protected: bstr .cbor status-token-protected,
+  unprotected: {},
+  payload: bstr .cbor status-token-payload,
+  signature: bstr .size 64       ; ES256 P1363 R || S
+])
+
+status-token-protected = {
+  1: -7,
+  3: "application/ans-status-token+cbor",
+  4: bstr .size 4               ; kid: SHA-256(SPKI DER)[0:4]
+}
+
+status-token-payload = {
+  1: tstr,                       ; agentId
+  2: tstr,                       ; status
+  3: int,                        ; issued-at Unix seconds
+  4: int,                        ; expiry Unix seconds
+  ? 5: tstr,                     ; ansName
+  ? 6: [* certificate-binding],  ; identity certificates
+  ? 7: [* certificate-binding],  ; server certificates
+  ? 8: {* tstr => tstr},         ; legacy protocol -> single hash
+  ? 9: [* endpoint-metadata]
+}
+; Text is the reference encoding; raw bytes are the documented legacy
+; reader-compatibility form. Metadata hashes below are always raw bytes.
+certificate-binding = {1: certificate-fingerprint, 2: tstr}
+certificate-fingerprint = tstr / bstr .size 32
+endpoint-metadata = {
+  1: tstr,                       ; protocol
+  2: tstr,                       ; agentUrl
+  3: tstr,                       ; metaDataUrl; empty when absent
+  4: [* bstr .size 32]            ; accepted SHA-256 digest set
+}
+
+; COSE signs ["Signature1", protected, h'', payload]. Signature verification,
+; freshness/status, registration/endpoint binding and set semantics remain
+; ANS-6 checks; structural CDDL validation does not establish them.

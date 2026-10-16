@@ -51,6 +51,7 @@ sender is not who they claim. Not an ANS protocol feature.
 
 - [Complete Transparency Log OpenAPI](api/api-spec-tl-v2.yaml), including V1/V2/V3 ingest and all verification/admin routes
 - [Registration Authority OpenAPI](api/api-spec-v2.yaml)
+- Binary CDDL: [V1/V2 status tokens](api/ans-status-token-v1-v2.cddl), [V3 status tokens](api/ans-status-token-v3.cddl), and [SCITT receipts](api/ans-receipt.cddl)
 
 - [OpenAPI specification](https://developer.godaddy.com/doc/endpoint/ans)
   (human-readable)

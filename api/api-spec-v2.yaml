@@ -280,6 +280,158 @@ paths:
   # ──────────────────────────────────────────────────────────────────
   # Registration Validation
   # ──────────────────────────────────────────────────────────────────
+  /ans/agents/{agentId}/profile:
+    get:
+      tags:
+        - Management
+      summary: Read the owner-scoped profile resource and ETag
+      operationId: getAgentProfile
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Accepted local resource; it may still await TL publication.
+          headers:
+            ETag:
+              description: Strong ETag for this resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+    put:
+      tags:
+        - Management
+      summary: Replace the owner-scoped profile resource
+      description: Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
+        is durably accepted for publication as AGENT_UPDATED.
+      operationId: updateAgentProfile
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - $ref: '#/components/parameters/ResourceIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentProfile'
+      responses:
+        '202':
+          description: Accepted locally; publication is pending for a changed resource. No-op returns the same ETag
+            without another event.
+          headers:
+            ETag:
+              description: Strong ETag for this resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingPublication'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+        '409':
+          $ref: '#/components/responses/RegistrationUpdateConflict'
+        '412':
+          description: 'PROFILE_CHANGED: stale resource ETag.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/InvalidRegistrationUpdate'
+        '428':
+          $ref: '#/components/responses/UpdatePreconditionRequired'
+        '503':
+          $ref: '#/components/responses/PublicationUnavailable'
+
+  /ans/agents/{agentId}/endpoints:
+    get:
+      tags:
+        - Management
+      summary: Read the owner-scoped endpoints resource and ETag
+      operationId: getAgentEndpoints
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Accepted local resource; it may still await TL publication.
+          headers:
+            ETag:
+              description: Strong ETag for this resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointCollection'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+    put:
+      tags:
+        - Management
+      summary: Replace the owner-scoped endpoints resource
+      description: Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
+        is durably accepted for publication as AGENT_UPDATED.
+      operationId: updateAgentEndpoints
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - $ref: '#/components/parameters/ResourceIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndpointCollection'
+      responses:
+        '202':
+          description: Accepted locally; publication is pending for a changed resource. No-op returns the same ETag
+            without another event.
+          headers:
+            ETag:
+              description: Strong ETag for this resource.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingPublication'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+        '409':
+          $ref: '#/components/responses/RegistrationUpdateConflict'
+        '412':
+          description: 'ENDPOINTS_CHANGED: stale resource ETag.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/InvalidRegistrationUpdate'
+        '428':
+          $ref: '#/components/responses/UpdatePreconditionRequired'
+        '503':
+          $ref: '#/components/responses/PublicationUnavailable'
+
   /ans/agents/{agentId}/verify-acme:
     post:
       tags:
@@ -1348,6 +1500,14 @@ components:
   # Reusable parameters
   # ──────────────────────────────────────────────────────────────────
   parameters:
+    ResourceIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Strong ETag from GET of this resource; weak and wildcard tags are not accepted.
+      schema:
+        type: string
+
     IdentityIdPath:
       name: identityId
       in: path
@@ -1365,6 +1525,56 @@ components:
   # ──────────────────────────────────────────────────────────────────
   # Schemas
   # ──────────────────────────────────────────────────────────────────
+  responses:
+    PublicationUnavailable:
+      description: Durable signed publication is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UpdatePreconditionRequired:
+      description: 'PRECONDITION_REQUIRED: If-Match is missing.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InvalidRegistrationUpdate:
+      description: Invalid replacement, unknown fields or immutable fields.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    RegistrationUpdateConflict:
+      description: Registration is not eligible for this update.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    RegistrationNotFound:
+      description: Registration not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    RegistrationNotOwned:
+      description: Caller does not own the registration.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    ManagementAuthenticationRequired:
+      description: Authentication required.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
     # ── New: Cursor-paginated list response ──────────────────────
     AgentListResponse:
@@ -1472,6 +1682,46 @@ components:
         - PRIVILEGE_WITHDRAWN
         - AA_COMPROMISE
 
+    AgentProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - agentDisplayName
+        - agentDescription
+      properties:
+        agentDisplayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        agentDescription:
+          type: string
+          maxLength: 150
+
+    EndpointCollection:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoints
+      properties:
+        endpoints:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: Complete replacement; duplicate (protocol, agentUrl, metaDataUrl) tuples reject. Both
+            service and metadata hosts must equal the registered FQDN.
+          items:
+            $ref: '#/components/schemas/AgentEndpoint'
+
+    PendingPublication:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - PENDING_PUBLICATION
+
     AgentRegistrationRequest:
       type: object
       properties:
@@ -1494,6 +1744,8 @@ components:
         endpoints:
           type: array
           minItems: 1
+          maxItems: 16
+          description: Accepts distinct endpoint/location tuples with repeated protocols. Both service and metadata hosts must equal agentHost.
           items:
             $ref: '#/components/schemas/AgentEndpoint'
         serverCsrPEM:
@@ -1765,7 +2017,7 @@ components:
           format: uri
         metaDataHash:
           type: string
-          pattern: '^SHA256:[a-f0-9]{64}$'
+          pattern: ^SHA256:[a-f0-9]{64}$
         documentationUrl:
           type: string
           format: uri
@@ -1779,10 +2031,47 @@ components:
           type: array
           items:
             type: string
-            enum: [STREAMABLE-HTTP, SSE, JSON-RPC, GRPC, REST, HTTP]
+            enum:
+              - STREAMABLE-HTTP
+              - SSE
+              - JSON-RPC
+              - GRPC
+              - REST
+              - HTTP
+        metaDataHashes:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          description: Accepted SHA-256 set for this exact service/metadata location.  Empty
+            or absent means no verifiable metadata commitment. Mutually exclusive with metaDataHash.
+          items:
+            type: string
+            pattern: ^SHA256:[a-f0-9]{64}$
       required:
         - protocol
         - agentUrl
+      description: Permits repeated protocols at distinct service/metadata locations. Both URLs stay on
+        the registered FQDN and remain covered by its certificates; documentationUrl is informational.
+      allOf:
+        - not:
+            required:
+              - metaDataHash
+              - metaDataHashes
+        - anyOf:
+            - not:
+                required:
+                  - metaDataHash
+            - required:
+                - metaDataUrl
+        - anyOf:
+            - not:
+                required:
+                  - metaDataHashes
+            - properties:
+                metaDataHashes:
+                  maxItems: 0
+            - required:
+                - metaDataUrl
 
     AgentFunction:
       type: object

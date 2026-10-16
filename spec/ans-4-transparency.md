@@ -130,13 +130,25 @@ and merge accordingly
 **COSE receipt profile.** A receipt is a COSE_Sign1 (RFC 9052): protected header `{alg: ES256,
 kid: <4-byte SPKI key hash>, vds: 1 (RFC 9162 SHA-256), CWT claims: {iss, iat}}`; unprotected
 header `{396 (verifiable-data-structure proofs): {-1: treeSize, -2: leafIndex, -3: inclusion
-path, -4: rootHash}}`. The signature covers the leaf; a verifier recomputes the leaf hash from
-the envelope (§3) and walks the path to the signed root.
+path, optional -4: advisory rootHash}}`. The attached payload is the JCS-canonical sealed-envelope
+JSON bytes. The COSE signature authenticates the protected header and payload; the unprotected path
+yields a computed root. Checkpoint/publication trust follows ANS-6 §4.3, not the advisory root alone.
 
 **Status tokens.** `GET /v1/agents/{agentId}/status-token` returns a short-lived signed
 assertion of the agent's computed status (`application/ans-status-token+cbor`; default TTL one
 hour), signed by the same TL key. Verifiers that need a fresh liveness signal without walking
 proofs consume this; verifiers MUST check the token's expiry themselves.
+
+**Binary wire definitions.** These CDDL files describe the complete tagged COSE objects:
+
+| Artifact | CDDL | Root rule |
+| --- | --- | --- |
+| Existing status tokens, shared by V1/V2 events | [ans-status-token-v1-v2.cddl](../api/ans-status-token-v1-v2.cddl) | `status-token` |
+| Status tokens with endpoint commitments at label 9 | [ans-status-token-v3.cddl](../api/ans-status-token-v3.cddl) | `status-token` |
+| Receipts, shared across event versions | [ans-receipt.cddl](../api/ans-receipt.cddl) | `ans-receipt` |
+
+Status payloads are native CBOR; receipts attach canonical JSON bytes. CDDL checks structure;
+ANS-6 defines signature, freshness, registration binding and inclusion-proof verification.
 
 **Checkpoints and tiles.** The raw checkpoint at `GET /checkpoint` is a C2SP signed note. Its
 primary signature line carries `<4-byte keyhash> ‖ <ASN.1 DER ECDSA signature over SHA-256(note

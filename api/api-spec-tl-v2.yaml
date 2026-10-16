@@ -1434,6 +1434,9 @@ components:
           description: Semantic version of the agent
           pattern: ^\d+\.\d+\.\d+$
           type: string
+        description:
+          type: string
+          maxLength: 150
       required:
         - host
       type: object
@@ -1560,6 +1563,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CertificateBinding'
+        endpointMetadata:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            properties:
+              protocol:
+                type: string
+              agentUrl:
+                type: string
+              metaDataUrl:
+                type: string
+              metaDataHashes:
+                type: array
+                maxItems: 8
+                uniqueItems: true
+                items:
+                  type: string
+                  pattern: ^SHA256:[a-f0-9]{64}$
+            required:
+              - protocol
+              - agentUrl
+              - metaDataUrl
+              - metaDataHashes
 
     ProducerEventV1:
       allOf:
@@ -1597,6 +1624,7 @@ components:
                 - AGENT_RENEWED
                 - AGENT_DEPRECATED
                 - AGENT_REVOKED
+                - AGENT_UPDATED
             agent:
               $ref: '#/components/schemas/AgentV3'
             attestations:

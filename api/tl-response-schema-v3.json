@@ -20,6 +20,10 @@
           "description": "Semantic version of the agent",
           "pattern": "^\\d+\\.\\d+\\.\\d+$",
           "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 150
         }
       },
       "required": [
@@ -66,6 +70,39 @@
             "$ref": "#/definitions/CertificateExtended"
           },
           "type": "array"
+        },
+        "endpointMetadata": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "properties": {
+              "protocol": {
+                "type": "string"
+              },
+              "agentUrl": {
+                "type": "string"
+              },
+              "metaDataUrl": {
+                "type": "string"
+              },
+              "metaDataHashes": {
+                "type": "array",
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^SHA256:[a-f0-9]{64}$"
+                }
+              }
+            },
+            "required": [
+              "protocol",
+              "agentUrl",
+              "metaDataUrl",
+              "metaDataHashes"
+            ]
+          }
         }
       },
       "required": [],
@@ -243,7 +280,7 @@
       "type": "object"
     }
   },
-  "description": "V3 payload inside the existing signed envelope. Agent version is optional; historical V2 payloads retain their original schema.",
+  "description": "V3 agent payload: optional versions, mutable display text and endpoint-scoped accepted metadata sets. The existing signed envelope is retained.",
   "properties": {
     "logId": {
       "description": "Unique identifier for this log entry (UUIDv7)",
