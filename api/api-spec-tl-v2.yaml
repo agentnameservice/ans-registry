@@ -3,31 +3,15 @@ info:
   title: ANS Transparency Log API
   version: "2.0.0"
   description: |
-    OpenAPI contract for the ANS Transparency Log (`ans-tl`). Paths
-    match the reference TL's swagger byte-for-byte — `/v1/agents/*`,
-    `/v1/log/*`, `/v1/internal/*`, C2SP tlog-tiles at root
-    (`/checkpoint`, `/root-keys`, `/tile/*`), and
-    `/internal/v1/producer-keys/*` for admin CRUD.
+    Complete ANS Transparency Log API. This file includes the V1, V2 and V3
+    agent ingest routes, identity ingest, all public reads, producer-key
+    management, health/readiness and the checkpoint/tile surface.
 
-    Behavioral parity with the reference TL:
-
-      - Event envelope is the V2 shape — nested `{payload:{logId,
-        producer:{event, keyId, signature}}, schemaVersion:"V2",
-        signature, status}`. V2 evolves the reference V1 with
-        unified `identityCerts[]` / `serverCerts[]` arrays, typed
-        `dnsRecordsProvisioned[]` records, and `SHA256:`-prefixed
-        fingerprints. V0 + V1 schemas are served for historical
-        verifier backwards compatibility (never emitted).
-      - Receipts are SCITT COSE_Sign1 (RFC 8152 tag 18) with VDS 1
-        (RFC 9162_SHA256) and the VDP inclusion proof in the
-        unprotected header (label 396). See
-        `internal/tl/receipt/constants.go` for the concrete labels.
-      - `/root-keys` emits the sumdb-note verification format
-        byte-for-byte compatible with the reference.
-      - `/internal/v1/producer-keys` admin routes match the reference
-        swagger.yaml snake_case DTOs; the only ans-only extension is
-        `GET /internal/v1/producer-keys/{key_id}` (reference doesn't
-        expose single-record lookup).
+    The V1/V2 event formats remain readable and available for historical
+    retries. New V3 publications use /v3/internal/agents/event. Badge and
+    audit responses retain their existing envelope and select the appropriate
+    payload model by schemaVersion and event family. All route models and
+    references are local to this file; receipts and status tokens remain CBOR.
 
 servers:
   - url: http://localhost:18081
@@ -60,26 +44,37 @@ paths:
   # ──────────────────────────────────────────────────────────────
   /v1/internal/agents/event:
     post:
-      tags: [Transparency Log]
-      summary: Append a signed event to the log
-      description: |
-        Accepts a JCS-canonicalized producer-event body signed with a
-        detached JWS (`X-Signature` header). Successful appends return
-        the Tessera-assigned leaf index and hash; duplicate submissions
-        (same SHA-256(inner event JCS)) return 200 with the original
-        leaf so outbox retries are idempotent.
+      tags:
+        - Transparency Log
+      summary: Append a signed V1 agent event
+      description: Appends a signed event using this route’s schema version. Identical signed retries are idempotent.
       operationId: appendEvent
       parameters:
-        - name: X-Signature
-          in: header
-          required: true
-          description: |
-            Detached JWS compact serialization over the raw request
-            body. Header shape:
-            `{alg:ES256, kid:<producer-keyId>, typ:JWT, timestamp:<unix-seconds>, raid:<raId>}`.
-            The `raid` value must match the `raId` in the body.
-          schema:
-            type: string
+        - $ref: '#/components/parameters/ProducerSignature'
+      requestBody:
+        required: true
+        description: JCS-canonicalized inner producer event (≤ 256 KiB).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerEventV1'
+      responses:
+        '200':
+          $ref: '#/components/responses/EventAppended'
+        '413':
+          $ref: '#/components/responses/EventTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidProducerEvent'
+
+  /v2/internal/agents/event:
+    post:
+      tags:
+        - Transparency Log
+      summary: Append a signed V2 agent event
+      description: Appends a signed event using this route’s schema version. Identical signed retries are idempotent.
+      operationId: appendV2Event
+      parameters:
+        - $ref: '#/components/parameters/ProducerSignature'
       requestBody:
         required: true
         description: JCS-canonicalized inner producer event (≤ 256 KiB).
@@ -89,36 +84,36 @@ paths:
               $ref: '#/components/schemas/ProducerEvent'
       responses:
         '200':
-          description: |
-            Event logged. On a duplicate submission (identical
-            inner-event JCS hash) the response carries
-            `duplicate: true` + the pre-existing leaf so retries are
-            idempotent. Matches the reference TL's status-code and
-            body shape.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppendResponse'
+          $ref: '#/components/responses/EventAppended'
         '413':
-          description: Request body exceeds 256 KiB.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
+          $ref: '#/components/responses/EventTooLarge'
         '422':
-          description: |
-            Body fails validation. Codes include
-            `NO_PRODUCER_SIGNATURE`, `INVALID_SIGNATURE_HEADER`,
-            `NOT_FOUND_PRODUCER_KEY`, `INVALID_PRODUCER_KEY`,
-            `MISMATCH_SIGNATURE`, `RAID_MISMATCH`, `INVALID_EVENT`.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
+          $ref: '#/components/responses/InvalidProducerEvent'
 
-  # ──────────────────────────────────────────────────────────────
-  # Transparency Log — verifier reads (public under public-read)
-  # ──────────────────────────────────────────────────────────────
+  /v3/internal/agents/event:
+    post:
+      tags:
+        - Transparency Log
+      summary: Append a signed V3 agent event
+      description: Appends a signed event using this route’s schema version. Identical signed retries are idempotent.
+      operationId: appendV3Event
+      parameters:
+        - $ref: '#/components/parameters/ProducerSignature'
+      requestBody:
+        required: true
+        description: JCS-canonicalized inner producer event (≤ 256 KiB).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerEventV3'
+      responses:
+        '200':
+          $ref: '#/components/responses/EventAppended'
+        '413':
+          $ref: '#/components/responses/EventTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidProducerEvent'
+
   /v1/agents/{agentId}:
     get:
       tags: [Transparency Log]
@@ -671,7 +666,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [V0, V1, V2]
+            enum: [V0, V1, V2, V3]
       responses:
         '200':
           description: Embedded JSON schema document.
@@ -960,6 +955,20 @@ components:
         when `cfg.auth.public-read: true`.
 
   parameters:
+    ProducerSignature:
+      name: X-Signature
+      in: header
+      required: true
+      description: 'Detached JWS over the raw JCS request body. Header: {alg:ES256, kid:<producer-keyId>, typ:JWT, timestamp:<unix-seconds>,
+        raid:<raId>}. raid must match the event raId.'
+      schema:
+        type: string
+
+    IdentityIdPath:
+      name: identityId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     AgentIdPath:
       name: agentId
       in: path
@@ -969,34 +978,51 @@ components:
         type: string
         format: uuid
 
+  responses:
+    InvalidProducerEvent:
+      description: Invalid event or producer signature. Codes include NO_PRODUCER_SIGNATURE, INVALID_SIGNATURE_HEADER,
+        NOT_FOUND_PRODUCER_KEY, INVALID_PRODUCER_KEY, MISMATCH_SIGNATURE, RAID_MISMATCH and INVALID_EVENT.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+    EventTooLarge:
+      description: Request body exceeds 256 KiB.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+    EventAppended:
+      description: 'Event logged. An identical signed-event retry returns the original leaf with duplicate: true.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AppendResponse'
+
   schemas:
     # ── Ingest ─────────────────────────────────────────────────
     ProducerEvent:
-      type: object
-      description: |
-        The canonical inner-event shape an RA POSTs. Must be
-        JCS-canonicalized when signed; the server validates the
-        signature over the raw request body and re-canonicalizes.
-      required: [ansId, ansName, eventType, timestamp, raId, agent]
-      properties:
-        ansId:      { type: string, format: uuid }
-        ansName:    { type: string, example: "ans://v1.0.0.agent.example.com" }
-        eventType:
-          type: string
-          enum: [AGENT_REGISTRATION, DOMAIN_VALIDATION, AGENT_ACTIVE, AGENT_REVOCATION]
-        raId:       { type: string, example: "ans-ra-local" }
-        issuedAt:   { type: string, format: date-time }
-        timestamp:  { type: string, format: date-time }
-        agent:
-          type: object
-          required: [host, name, version]
+      allOf:
+        - $ref: '#/components/schemas/AgentEventCommon'
+        - type: object
           properties:
-            host:    { type: string }
-            name:    { type: string }
-            version: { type: string }
-        attestations:
-          type: object
-          description: Event-type specific attestation payload.
+            ansName:
+              type: string
+              example: ans://v1.0.0.agent.example.com
+              pattern: ^ans://v\d+\.\d+\.\d+\..+$
+            eventType:
+              type: string
+              enum:
+                - AGENT_REGISTERED
+                - AGENT_RENEWED
+                - AGENT_DEPRECATED
+                - AGENT_REVOKED
+            agent:
+              $ref: '#/components/schemas/VersionedAgent'
+            attestations:
+              $ref: '#/components/schemas/AttestationsV2'
 
     AppendResponse:
       type: object
@@ -1008,89 +1034,23 @@ components:
         receipt without a second round-trip.
       required: [leafIndex, leafHashHex, duplicate, treeSize]
       properties:
-        logId:       { type: string, format: uuid, description: "UUIDv7 assigned on first append; echoed on duplicate retry." }
-        message:     { type: string, description: "Human-readable status message." }
-        success:     { type: boolean, description: "Always true for 200 responses." }
-        leafIndex:   { type: integer, format: int64 }
+        logId: { type: string, format: uuid, description: "UUIDv7 assigned on first append; echoed on duplicate retry." }
+        message: { type: string, description: "Human-readable status message." }
+        success: { type: boolean, description: "Always true for 200 responses." }
+        leafIndex: { type: integer, format: int64 }
         leafHashHex: { type: string, description: "RFC 6962 leaf hash (hex)" }
-        duplicate:   { type: boolean }
-        treeSize:    { type: integer, format: int64 }
+        duplicate: { type: boolean }
+        treeSize: { type: integer, format: int64 }
 
     # ── Badge + audit ─────────────────────────────────────────
     TransparencyLog:
-      type: object
-      description: |
-        Reference-shaped envelope carrying one event + its inclusion
-        proof. The `payload` field matches the signed-envelope
-        payload shape (`logId` + `producer`).
-      required: [payload, schemaVersion, signature, status, merkleProof]
-      properties:
-        merkleProof:
-          $ref: '#/components/schemas/MerkleProof'
-        payload:
-          type: object
-          required: [logId, producer]
-          properties:
-            logId: { type: string, format: uuid }
-            producer:
-              type: object
-              required: [event, keyId, signature]
-              properties:
-                event:     { $ref: '#/components/schemas/ProducerEvent' }
-                keyId:     { type: string }
-                signature: { type: string, description: "Detached JWS" }
-        schemaVersion: { type: string, enum: [V2] }
-        signature:     { type: string, description: "TL attestation (detached JWS)" }
-        status:
-          type: string
-          enum: [ACTIVE, REVOKED, DEPRECATED, EXPIRED, WARNING, VERIFIED]
-        identities:
-          type: array
-          description: |
-            Agent badges only — the COMPUTED read-time join of the
-            agent's currently-linked verified identities, under the
-            visibility predicate (link LINKED AND agent live). A
-            REVOKED identity stays visible with identityStatus
-            REVOKED and no keys[] — a verifier must see the who was
-            revoked. Covered by the TL's response signature, never by
-            any seal; identity rotation/revocation is visible here
-            immediately with zero agent-stream writes. Embeds at most
-            a small safety cap of entries; identitiesTotal carries
-            the full count and /v1/agents/{agentId}/identities is the
-            paginated overflow target.
-          items:
-            $ref: '#/components/schemas/LinkedIdentityView'
-        identitiesTotal:
-          type: integer
-          description: |
-            Agent badges only — the full count of visible links when
-            identities[] is present (the embedded array is capped).
-        identitiesUnavailable:
-          type: boolean
-          description: |
-            Agent badges only — set when the identities join could
-            not be computed. Join failure is explicit, never silent:
-            an absent or empty identities[] always means "no visible
-            links", never "the join failed".
-        keys:
-          type: array
-          description: |
-            Identity badges only — the CURRENT proven key set quoted
-            VERBATIM from the latest sealed proof event
-            (IDENTITY_VERIFIED / IDENTITY_UPDATED): the latest stream
-            entry may be a link/unlink/revocation carrying no key
-            material, so the badge answers "what are the attested
-            keys" directly. Verification methods only — the
-            signedProof evidence lives in the seal at keysLogId, one
-            hop away. Omitted when the identity is REVOKED.
-          items:
-            type: object
-            description: A sealed verification method, member-for-member verbatim
-        keysLogId:
-          type: string
-          description: |
-            Identity badges only — the sealed proof event keys[] is
-            quoted from. Omitted when the identity is REVOKED.
+      description: Agent V1/V2/V3 and identity V2 reads share the existing envelope; payloads retain their
+        own schema. Audit histories may contain multiple versions.
+      oneOf:
+        - $ref: '#/components/schemas/AgentLogV1'
+        - $ref: '#/components/schemas/AgentLogV2'
+        - $ref: '#/components/schemas/AgentLogV3'
+        - $ref: '#/components/schemas/IdentityLogV2'
 
     TransparencyLogAudit:
       type: object
@@ -1105,10 +1065,10 @@ components:
       type: object
       required: [leafIndex, treeSize, leafHash, rootHash, path]
       properties:
-        leafIndex:   { type: integer, format: int64 }
-        treeSize:    { type: integer, format: int64 }
-        leafHash:    { type: string, description: "hex" }
-        rootHash:    { type: string, description: "standard base64" }
+        leafIndex: { type: integer, format: int64 }
+        treeSize: { type: integer, format: int64 }
+        leafHash: { type: string, description: "hex" }
+        rootHash: { type: string, description: "standard base64" }
         path:
           type: array
           items:
@@ -1121,12 +1081,12 @@ components:
       type: object
       required: [key_id, public_key_pem, algorithm, ra_id, valid_from, expires_at]
       properties:
-        key_id:         { type: string }
+        key_id: { type: string }
         public_key_pem: { type: string, description: "PEM-wrapped SPKI" }
-        algorithm:      { type: string, enum: [ES256] }
-        ra_id:          { type: string }
-        valid_from:     { type: string, format: date-time }
-        expires_at:     { type: string, format: date-time }
+        algorithm: { type: string, enum: [ES256] }
+        ra_id: { type: string }
+        valid_from: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
         metadata:
           $ref: '#/components/schemas/ProducerKeyMetadata'
 
@@ -1134,20 +1094,20 @@ components:
       type: object
       required: [key_id, status, fingerprint, created_at]
       properties:
-        key_id:         { type: string }
-        key_id_opaque:  { type: string, nullable: true }
-        ra_id_opaque:   { type: string, nullable: true }
-        status:         { type: string, enum: [active, revoked] }
-        fingerprint:    { type: string, example: "SHA256:<hex>" }
-        created_at:     { type: string, format: date-time }
+        key_id: { type: string }
+        key_id_opaque: { type: string, nullable: true }
+        ra_id_opaque: { type: string, nullable: true }
+        status: { type: string, enum: [active, revoked] }
+        fingerprint: { type: string, example: "SHA256:<hex>" }
+        created_at: { type: string, format: date-time }
         # Fields repeated on the full record (returned by GET-by-id
         # + present on list items — matches reference §1481).
         public_key_pem: { type: string }
-        algorithm:      { type: string }
-        ra_id:          { type: string }
-        valid_from:     { type: string, format: date-time }
-        expires_at:     { type: string, format: date-time }
-        revoked_at:     { type: string, format: date-time, nullable: true }
+        algorithm: { type: string }
+        ra_id: { type: string }
+        valid_from: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
         metadata:
           $ref: '#/components/schemas/ProducerKeyMetadata'
 
@@ -1157,7 +1117,7 @@ components:
       additionalProperties: true
       properties:
         environment: { type: string, enum: [production, stage, development, testing] }
-        region:      { type: string }
+        region: { type: string }
         rotation_of: { type: string, nullable: true }
 
     ProducerKeysListResponse:
@@ -1177,10 +1137,10 @@ components:
       type: object
       required: [logSize, rootHash, originName, checkpointFormat, checkpointText, createdAt, signatures]
       properties:
-        logSize:          { type: integer, format: int64 }
-        treeHeight:       { type: integer }
-        rootHash:         { type: string, description: "standard base64" }
-        originName:       { type: string }
+        logSize: { type: integer, format: int64 }
+        treeHeight: { type: integer }
+        rootHash: { type: string, description: "standard base64" }
+        originName: { type: string }
         checkpointFormat: { type: string, example: "c2sp-tlog/v1" }
         checkpointText:
           type: string
@@ -1218,17 +1178,17 @@ components:
         entries. `valid` is the read-time verification result.
       required: [signerName, signatureType, algorithm, rawSignature]
       properties:
-        algorithm:     { type: string, example: ES256 }
-        jwsHeader:     { description: "Decoded JWS protected header (jws entries only)" }
-        jwsPayload:    { description: "Decoded JWS payload (jws entries only)" }
-        jwsSignature:  { type: string, description: "Full compact JWS `header.payload.signature` (jws entries only)" }
-        keyHash:       { type: string, description: "`0x`-prefixed 8-char hex keyhash; matches the `/root-keys` entry" }
-        kmsKeyId:      { type: string, description: "Opaque key identifier on jws entries (same value the JWS `kid` header carries)" }
-        rawSignature:  { type: string, description: "base64-encoded raw signature bytes (`<keyhash:4> || <sig>`)" }
+        algorithm: { type: string, example: ES256 }
+        jwsHeader: { description: "Decoded JWS protected header (jws entries only)" }
+        jwsPayload: { description: "Decoded JWS payload (jws entries only)" }
+        jwsSignature: { type: string, description: "Full compact JWS `header.payload.signature` (jws entries only)" }
+        keyHash: { type: string, description: "`0x`-prefixed 8-char hex keyhash; matches the `/root-keys` entry" }
+        kmsKeyId: { type: string, description: "Opaque key identifier on jws entries (same value the JWS `kid` header carries)" }
+        rawSignature: { type: string, description: "base64-encoded raw signature bytes (`<keyhash:4> || <sig>`)" }
         signatureType: { type: string, enum: [c2sp, jws] }
-        signerName:    { type: string }
-        timestamp:     { type: string, format: date-time, description: "Timestamp claim from the JWS (jws entries only)" }
-        valid:         { type: boolean, description: "Signature verified against the TL signing key at read time." }
+        signerName: { type: string }
+        timestamp: { type: string, format: date-time, description: "Timestamp claim from the JWS (jws entries only)" }
+        valid: { type: boolean, description: "Signature verified against the TL signing key at read time." }
 
     CheckpointHistoryResponse:
       type: object
@@ -1242,7 +1202,7 @@ components:
           type: object
           required: [total]
           properties:
-            total:      { type: integer, format: int64 }
+            total: { type: integer, format: int64 }
             nextOffset: { type: integer, nullable: true }
 
     # ── Errors ────────────────────────────────────────────────
@@ -1250,10 +1210,10 @@ components:
       type: object
       description: RFC 7807 problem details.
       properties:
-        type:   { type: string, example: "about:blank" }
-        title:  { type: string }
+        type: { type: string, example: "about:blank" }
+        title: { type: string }
         status: { type: integer }
-        code:   { type: string, pattern: "^[A-Z_][A-Z0-9_]*$" }
+        code: { type: string, pattern: "^[A-Z_][A-Z0-9_]*$" }
         detail: { type: string }
 
     IdentityProducerEvent:
@@ -1275,7 +1235,7 @@ components:
         kind:
           type: string
           enum: ['did:web', 'did:key', 'lei']
-        value:      { type: string, example: "did:web:identity.acme-corp.com" }
+        value: { type: string, example: "did:web:identity.acme-corp.com" }
         providerId: { type: string, description: "The owning principal — the WHO's owner" }
         proofMethod:
           type: string
@@ -1296,10 +1256,10 @@ components:
           description: Linked agents' ids (IDENTITY_LINKED / IDENTITY_UNLINKED only)
           items: { type: string }
         previousValue: { type: string, description: "Pre-rotation identifier (IDENTITY_UPDATED)" }
-        verifiedAt:    { type: string, format: date-time }
-        revokedAt:     { type: string, format: date-time }
-        raId:          { type: string, example: "ans-ra-local" }
-        timestamp:     { type: string, format: date-time }
+        verifiedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+        raId: { type: string, example: "ans-ra-local" }
+        timestamp: { type: string, format: date-time }
 
     ProvenKey:
       type: object
@@ -1353,9 +1313,9 @@ components:
         visible — the attestation rule withholds only its keys).
       required: [identityId, kind, value, identityStatus]
       properties:
-        identityId:     { type: string }
-        kind:           { type: string, enum: ['did:web', 'did:key', 'lei'] }
-        value:          { type: string }
+        identityId: { type: string }
+        kind: { type: string, enum: ['did:web', 'did:key', 'lei'] }
+        value: { type: string }
         identityStatus:
           type: string
           enum: [VERIFIED, REVOKED]
@@ -1376,7 +1336,7 @@ components:
         keysLogId:
           type: string
           description: The sealed proof event keys[] is quoted from — fetch for signedProofs / offline evidence. Omitted when REVOKED.
-        linkedAt:  { type: string, format: date-time }
+        linkedAt: { type: string, format: date-time }
         linkLogId:
           type: string
           description: The sealed IDENTITY_LINKED entry on the identity stream — fetch for link evidence
@@ -1386,8 +1346,8 @@ components:
       description: One reverse-join entry (identity → agents).
       required: [ansId]
       properties:
-        ansId:       { type: string }
-        linkedAt:    { type: string, format: date-time }
+        ansId: { type: string }
+        linkedAt: { type: string, format: date-time }
         agentStatus:
           type: string
           enum: [ACTIVE, DEPRECATED, WARNING]
@@ -1399,3 +1359,450 @@ components:
             the audit chain).
 
     # ── Admin: producer keys ───────────────────────────────────
+
+    AgentEventCommon:
+      type: object
+      description: Common registration identifiers, timestamps and lifecycle fields shared by the versioned
+        agent event models.
+      required:
+        - ansId
+        - ansName
+        - eventType
+        - agent
+        - attestations
+        - issuedAt
+        - raId
+        - timestamp
+      properties:
+        ansId:
+          type: string
+          format: uuid
+        raId:
+          type: string
+          example: ans-ra-local
+        issuedAt:
+          type: string
+          format: date-time
+        timestamp:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+        revocationReasonCode:
+          type: string
+        renewalStatus:
+          type: string
+          enum:
+            - FAILED
+            - PENDING
+            - SUCCESS
+
+    VersionedAgent:
+      type: object
+      required:
+        - host
+        - version
+      properties:
+        host:
+          type: string
+          format: hostname
+        name:
+          type: string
+        version:
+          type: string
+          pattern: ^\d+\.\d+\.\d+$
+        providerId:
+          type: string
+
+    AgentV3:
+      properties:
+        host:
+          description: Host domain for the agent
+          format: hostname
+          type: string
+        name:
+          description: Human readable agent name
+          type: string
+        providerId:
+          description: Provider/organization identifier
+          type: string
+        version:
+          description: Semantic version of the agent
+          pattern: ^\d+\.\d+\.\d+$
+          type: string
+      required:
+        - host
+      type: object
+
+    CertificateBinding:
+      type: object
+      required:
+        - fingerprint
+        - type
+      properties:
+        fingerprint:
+          type: string
+          pattern: ^SHA256:[a-f0-9]+$
+        type:
+          type: string
+          enum:
+            - X509-DV-SERVER
+            - X509-EV-CLIENT
+            - X509-EV-SERVER
+            - X509-OV-CLIENT
+            - X509-OV-SERVER
+        notAfter:
+          type: string
+          format: date-time
+
+    DNSRecord:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - HTTPS
+            - SVCB
+            - TLSA
+            - TXT
+        data:
+          type: string
+        dnssecVerified:
+          type: boolean
+
+    AttestationsV1:
+      type: object
+      properties:
+        domainValidation:
+          type: string
+          enum:
+            - ACME-DNS-01
+            - ACME-HTTP-01
+            - ACME-TLS-ALPN-01
+        metadataHashes:
+          type: object
+          additionalProperties:
+            type: string
+            pattern: ^SHA256:[a-f0-9]+$
+        dnsRecordsProvisioned:
+          type: object
+          additionalProperties:
+            type: string
+        identityCert:
+          $ref: '#/components/schemas/CertificateBinding'
+        serverCert:
+          $ref: '#/components/schemas/CertificateBinding'
+        validIdentityCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+        validServerCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+
+    AttestationsV2:
+      type: object
+      properties:
+        domainValidation:
+          type: string
+          enum:
+            - ACME-DNS-01
+            - ACME-HTTP-01
+            - ACME-TLS-ALPN-01
+        metadataHashes:
+          type: object
+          additionalProperties:
+            type: string
+            pattern: ^SHA256:[a-f0-9]+$
+        dnsRecordsProvisioned:
+          type: array
+          items:
+            $ref: '#/components/schemas/DNSRecord'
+        identityCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+        serverCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+
+    AttestationsV3:
+      type: object
+      properties:
+        domainValidation:
+          type: string
+          enum:
+            - ACME-DNS-01
+            - ACME-HTTP-01
+            - ACME-TLS-ALPN-01
+        metadataHashes:
+          type: object
+          additionalProperties:
+            type: string
+            pattern: ^SHA256:[a-f0-9]+$
+        dnsRecordsProvisioned:
+          type: array
+          items:
+            $ref: '#/components/schemas/DNSRecord'
+        identityCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+        serverCerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateBinding'
+
+    ProducerEventV1:
+      allOf:
+        - $ref: '#/components/schemas/AgentEventCommon'
+        - type: object
+          properties:
+            ansName:
+              type: string
+              example: ans://v1.0.0.agent.example.com
+              pattern: ^ans://v\d+\.\d+\.\d+\..+$
+            eventType:
+              type: string
+              enum:
+                - AGENT_REGISTERED
+                - AGENT_RENEWED
+                - AGENT_DEPRECATED
+                - AGENT_REVOKED
+            agent:
+              $ref: '#/components/schemas/VersionedAgent'
+            attestations:
+              $ref: '#/components/schemas/AttestationsV1'
+
+    ProducerEventV3:
+      allOf:
+        - $ref: '#/components/schemas/AgentEventCommon'
+        - type: object
+          properties:
+            ansName:
+              type: string
+              pattern: ^ans://[A-Za-z0-9.-]+$
+            eventType:
+              type: string
+              enum:
+                - AGENT_REGISTERED
+                - AGENT_RENEWED
+                - AGENT_DEPRECATED
+                - AGENT_REVOKED
+            agent:
+              $ref: '#/components/schemas/AgentV3'
+            attestations:
+              $ref: '#/components/schemas/AttestationsV3'
+
+    TransparencyLogCommon:
+      type: object
+      description: Common sealed-envelope and computed-read fields. Version-specific variants constrain payload and
+        schemaVersion.
+      required:
+        - payload
+        - schemaVersion
+        - signature
+        - status
+        - merkleProof
+      properties:
+        merkleProof:
+          $ref: '#/components/schemas/MerkleProof'
+        signature:
+          type: string
+          description: TL attestation (detached JWS)
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - REVOKED
+            - DEPRECATED
+            - EXPIRED
+            - WARNING
+            - VERIFIED
+        identities:
+          type: array
+          description: |
+            Agent badges only — the COMPUTED read-time join of the
+            agent's currently-linked verified identities, under the
+            visibility predicate (link LINKED AND agent live). A
+            REVOKED identity stays visible with identityStatus
+            REVOKED and no keys[] — a verifier must see the who was
+            revoked. Covered by the TL's response signature, never by
+            any seal; identity rotation/revocation is visible here
+            immediately with zero agent-stream writes. Embeds at most
+            a small safety cap of entries; identitiesTotal carries
+            the full count and /v1/agents/{agentId}/identities is the
+            paginated overflow target.
+          items:
+            $ref: '#/components/schemas/LinkedIdentityView'
+        identitiesTotal:
+          type: integer
+          description: |
+            Agent badges only — the full count of visible links when
+            identities[] is present (the embedded array is capped).
+        identitiesUnavailable:
+          type: boolean
+          description: |
+            Agent badges only — set when the identities join could
+            not be computed. Join failure is explicit, never silent:
+            an absent or empty identities[] always means "no visible
+            links", never "the join failed".
+        keys:
+          type: array
+          description: |
+            Identity badges only — the CURRENT proven key set quoted
+            VERBATIM from the latest sealed proof event
+            (IDENTITY_VERIFIED / IDENTITY_UPDATED): the latest stream
+            entry may be a link/unlink/revocation carrying no key
+            material, so the badge answers "what are the attested
+            keys" directly. Verification methods only — the
+            signedProof evidence lives in the seal at keysLogId, one
+            hop away. Omitted when the identity is REVOKED.
+          items:
+            type: object
+            description: A sealed verification method, member-for-member verbatim
+        keysLogId:
+          type: string
+          description: |
+            Identity badges only — the sealed proof event keys[] is
+            quoted from. Omitted when the identity is REVOKED.
+
+    AgentLogV1:
+      allOf:
+        - $ref: '#/components/schemas/TransparencyLogCommon'
+        - type: object
+          properties:
+            schemaVersion:
+              type: string
+              enum:
+                - V1
+            payload:
+              type: object
+              required:
+                - logId
+                - producer
+              properties:
+                logId:
+                  type: string
+                  format: uuid
+                producer:
+                  type: object
+                  required:
+                    - event
+                    - keyId
+                    - signature
+                  properties:
+                    event:
+                      $ref: '#/components/schemas/ProducerEventV1'
+                    keyId:
+                      type: string
+                    signature:
+                      type: string
+                      description: Detached producer JWS.
+
+    AgentLogV2:
+      allOf:
+        - $ref: '#/components/schemas/TransparencyLogCommon'
+        - type: object
+          properties:
+            schemaVersion:
+              type: string
+              enum:
+                - V2
+            payload:
+              type: object
+              required:
+                - logId
+                - producer
+              properties:
+                logId:
+                  type: string
+                  format: uuid
+                producer:
+                  type: object
+                  required:
+                    - event
+                    - keyId
+                    - signature
+                  properties:
+                    event:
+                      $ref: '#/components/schemas/ProducerEvent'
+                    keyId:
+                      type: string
+                    signature:
+                      type: string
+                      description: Detached producer JWS.
+
+    AgentLogV3:
+      allOf:
+        - $ref: '#/components/schemas/TransparencyLogCommon'
+        - type: object
+          properties:
+            schemaVersion:
+              type: string
+              enum:
+                - V3
+            payload:
+              type: object
+              required:
+                - logId
+                - producer
+              properties:
+                logId:
+                  type: string
+                  format: uuid
+                producer:
+                  type: object
+                  required:
+                    - event
+                    - keyId
+                    - signature
+                  properties:
+                    event:
+                      $ref: '#/components/schemas/ProducerEventV3'
+                    keyId:
+                      type: string
+                    signature:
+                      type: string
+                      description: Detached producer JWS.
+
+    IdentityLogV2:
+      allOf:
+        - $ref: '#/components/schemas/TransparencyLogCommon'
+        - type: object
+          properties:
+            schemaVersion:
+              type: string
+              enum:
+                - V2
+            payload:
+              type: object
+              required:
+                - logId
+                - producer
+              properties:
+                logId:
+                  type: string
+                  format: uuid
+                producer:
+                  type: object
+                  required:
+                    - event
+                    - keyId
+                    - signature
+                  properties:
+                    event:
+                      $ref: '#/components/schemas/IdentityProducerEvent'
+                    keyId:
+                      type: string
+                    signature:
+                      type: string
+                      description: Detached producer JWS.
