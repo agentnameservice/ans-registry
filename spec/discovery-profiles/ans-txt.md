@@ -24,10 +24,9 @@ service mode.
 - **Records** (emitted only when the registration has at least one endpoint):
   - one `_ans.{fqdn}` **TXT** discovery record per endpoint, at the `_ans` child label;
   - one **HTTPS** RR at the bare `{fqdn}` (apex), as the connection hint `_ans` TXT cannot carry.
-- Plus the family trust records — `_ans-badge` TXT and the server-cert TLSA (ANS-3 §6.3).
-- A registration with **zero endpoints** emits no `_ans` TXT and no HTTPS RR (it emits only the
-  TLSA when a server certificate is present). A bare HTTPS RR with no `_ans` companions — a service
-  binding for a non-existent agent — is never emitted.
+- Plus the required family `_ans-badge` TXT locator (ANS-3 §6.3).
+- A profile with no eligible endpoints emits no `_ans` TXT or HTTPS RR. A bare HTTPS RR with no
+  `_ans` companions is not emitted. V3 registration itself still requires at least one endpoint.
 
 ## 2. Record assembly
 
@@ -73,10 +72,9 @@ One `_ans` TXT row is emitted per endpoint, in endpoint order; the HTTPS RR is e
 | `_ans.{fqdn}` TXT | **Yes** | The discovery record. verify-dns blocks activation until it resolves to the announced content |
 | `{fqdn}` HTTPS RR | No | A CNAME at the apex precludes publishing an HTTPS RR (RFC 1034 §3.6.2); its absence is non-fatal |
 | `_ans-badge` TXT (family) | Yes | ANS-3 §6.3 |
-| `_{port}._tcp.{fqdn}` TLSA (family) | No | ANS-3 §6.3; verify-side enforces a match only when the zone is DNSSEC-validated |
 
-Every emitted record carries TTL `3600`. The composed set is sealed verbatim into the
-`AGENT_REGISTERED` attestation's `dnsRecordsProvisioned[]`
+Generated instructions carry TTL `3600`. The RA attests the observed applicable production
+records into the event's `dnsRecordsProvisioned[]`
 ([ANS-3 §3](../ans-3-dns-publication.md#3-record-set-and-child-label-structure)). When the resolved
 set also includes `ANS_DNSAID`, the `_ans` TXT rows keep `Required=true` and carry the operator's
 required signal for the transition union, while the sibling SVCB rows ride along as `Required=false`
@@ -140,9 +138,7 @@ agent.example.com.             3600 IN HTTPS 1 . alpn=h2
 
 ; family trust records (ANS-3 §6.3) — shared with any sibling profile, deduped once
 _ans-badge.agent.example.com.  3600 IN TXT   "v=ans-badge1; version=v1.0.0; url=https://transparency-log.example.com/v1/agents/{agentId}"
-_443._tcp.agent.example.com.   3600 IN TLSA  3 0 1 {server-cert-sha256}
 ```
 
-The sealed `dnsRecordsProvisioned[]` entries carry the same `{name, type, value, purpose, required,
-ttl}` shape the operator publishes; `purpose` is `DISCOVERY` for the `_ans` TXT and HTTPS RR, `BADGE`
-for `_ans-badge`, and `CERTIFICATE_BINDING` for the TLSA.
+The RA's DNS instructions include publication details such as TTL and required flags. Sealed records use `name`, `type`, `data` and optional `dnssecVerified` for observed production
+state.

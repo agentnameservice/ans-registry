@@ -281,7 +281,7 @@
       "type": "object"
     }
   },
-  "description": "V3 agent payload: optional versions, mutable endpoint metadata sets and owner-authorized external identity credentials. The existing signed envelope is retained.",
+  "description": "V3 agent payload with optional versions, endpoint metadata sets and external identity credentials, inside the existing signed envelope.",
   "properties": {
     "logId": {
       "description": "Unique identifier for this log entry (UUIDv7)",

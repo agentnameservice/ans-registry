@@ -55,18 +55,17 @@ Every discovery-profile document specifies, in this order (ANS-3 §6.2):
 9. Status and requirement.
 10. Object schemas — worked record examples.
 
-All ANS-family profiles share the two **family trust records** — the `_ans-badge` TXT and the
-server-cert TLSA (ANS-3 §6.3) — emitted by every profile and deduped to a single instance at the
-composition walker. A profile only ever varies the **discovery records** layered on top of that
-shared base.
+All ANS-family profiles share the required `_ans-badge` TXT locator (ANS-3 §6.3), deduplicated
+by the composition walker. Profiles vary the discovery records above this locator; TLSA responsibilities
+are defined in ANS-3 §6.3.
 
 ## Conformance artifacts
 
 The `discoveryProfiles` request field and the `DiscoveryProfile` enum — the closed `ANS_DNSAID` /
 `ANS_TXT` set, `minItems: 1`, `uniqueItems: true`, default `["ANS_DNSAID"]` — are specified in
 [ANS-3 §6](../ans-3-dns-publication.md#6-discovery-profiles) and carried as the `DiscoveryProfile`
-schema and `discoveryProfiles[]` field in the RA's OpenAPI document. The composed record set is
-sealed verbatim into the `AGENT_REGISTERED` attestation as `dnsRecordsProvisioned[]`; its
+schema and `discoveryProfiles[]` field in the RA's OpenAPI document. The RA attests the applicable observed production records
+in `dnsRecordsProvisioned[]`; its
 field-by-field contract is
 [ANS-3 §3](../ans-3-dns-publication.md#3-record-set-and-child-label-structure). A registry/enum
 coherence check runs at RA start

@@ -1,4 +1,4 @@
-# ANS-1 worked examples (registration request, AGENT_REGISTERED event, revocation)
+# ANS-1 worked examples (registration, lifecycle and metadata updates)
 
 Non-normative worked examples for ans-1-registration. Implementers MAY use these as fixtures or schema cross-checks.
 
@@ -8,19 +8,18 @@ Identifier conventions, by surface (these are distinct identifiers, not aliases)
 - **`ansId`** (TL event payload): the agent identifier carried inside the sealed event payload; in the reference implementation it is the same value as `agentId`.
 - **`logId`** (TL envelope, UUIDv7): the *Transparency Log entry* identifier the TL assigns when it seals the event.
 
-TL event payloads below follow the **V2 TL response format**: certificates are carried as `identityCerts[]` / `serverCerts[]` arrays of `{fingerprint, type, notAfter}`, and `dnsRecordsProvisioned` is an array of `{name, type, data}` objects.
+Current event payloads below follow the **V3 TL response format**: certificates are carried as `identityCerts[]` / `serverCerts[]` arrays of `{fingerprint, type, notAfter}`, and `dnsRecordsProvisioned` is an array of `{name, type, data}` objects.
 
-## A.1 `AGENT_REGISTERED` event (V2 TL format)
+## A.1 `AGENT_REGISTERED` event (V3 TL format)
 
 ```json
 {
   "ansId": "550e8400-e29b-41d4-a716-446655440000",
-  "ansName": "ans://v1.5.0.support.example.com",
+  "ansName": "ans://support.example.com",
   "eventType": "AGENT_REGISTERED",
   "agent": {
     "host": "support.example.com",
-    "name": "Acme Support Agent",
-    "version": "1.5.0"
+    "name": "Acme Support Agent"
   },
   "attestations": {
     "identityCerts": [
@@ -41,24 +40,25 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
       {
         "name": "_ans.support.example.com",
         "type": "TXT",
-        "data": "v=ans1; version=v1.5.0; p=a2a; mode=direct; url=wss://support.example.com/a2a"
+        "data": "v=ans1; p=a2a; mode=direct; url=wss://support.example.com/a2a"
       },
       {
         "name": "_ans-badge.support.example.com",
         "type": "TXT",
-        "data": "v=ans-badge1; version=v1.5.0; url=https://transparency.ra.ansregistry.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
-      },
-      {
-        "name": "_443._tcp.support.example.com",
-        "type": "TLSA",
-        "data": "3 0 1 d2b71bc02f119a61611b77eadc44c23670917ac4f435fe4e1095d4e5209087ea",
-        "dnssecVerified": true
+        "data": "v=ans-badge1; url=https://transparency.ra.ansregistry.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
       }
     ],
     "domainValidation": "ACME-DNS-01",
-    "metadataHashes": {
-      "A2A": "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b"
-    }
+    "endpointMetadata": [
+      {
+        "protocol": "A2A",
+        "agentUrl": "wss://support.example.com/a2a",
+        "metaDataUrl": "https://support.example.com/.well-known/agent-card.json",
+        "metaDataHashes": [
+          "SHA256:3b4f2c1a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b"
+        ]
+      }
+    ]
   },
   "expiresAt": "2026-10-05T18:00:00Z",
   "issuedAt": "2025-10-05T18:00:00.000000Z",
@@ -67,12 +67,9 @@ TL event payloads below follow the **V2 TL response format**: certificates are c
 }
 ```
 
-The `version=` field in TXT record data carries the `v`-prefixed form (`v1.5.0`), matching the ANSName's
-version segment and ANS-3's record syntax. `agent.version` in the event payload and the registration
-request's `version` field carry the bare semver (`1.5.0`). `dnssecVerified` appears on a provisioned TLSA, SVCB, or
-HTTPS record when the verifying resolver returned the DNSSEC Authenticated-Data bit for that record's query;
-it is absent otherwise, and TXT records never carry it. `metadataHashes` carries the AHP-declared per-endpoint metadata digests keyed by protocol token,
-present only for endpoints that submitted a `metaDataHash`.
+Versionless names omit `version` and the TXT `version=` pair. Versioned registrations remain valid and
+retain their assigned name. V3 DNS attestations contain only applicable observed non-TLSA records;
+metadata commitments are scoped to the service/metadata tuple. Historical V1/V2 entries are unchanged.
 
 ## A.2 Registration request — V1 RA format
 
