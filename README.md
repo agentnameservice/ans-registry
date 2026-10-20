@@ -27,12 +27,6 @@ The ANS protocol is split across seven layered specifications under [`spec/`](sp
 
 Worked examples for ANS-1 live at [`spec/examples/ans-1-examples.md`](spec/examples/ans-1-examples.md). [`DESIGN.md`](DESIGN.md) is a pointer to the layered specs and to the IETF draft.
 
-**[TRUST_INDEX_SPEC.md](TRUST_INDEX_SPEC.md)** — Trust evaluation. How a Trust
-Index crawls sealed data from federated Registration Authorities, combines it with
-external signals, and scores agents across five dimensions: integrity, identity,
-solvency, behavior, and safety. Trust Manifest schema, credential formats,
-identity grades, federation, and security considerations.
-
 **[MAESTRO.md](MAESTRO.md)** — Security analysis. Applies the CSA
 [MAESTRO](https://cloudsecurityalliance.org/blog/2025/02/06/agentic-ai-threat-modeling-framework-maestro)
 threat modeling framework to the ANS architecture. Maps threats and mitigations
@@ -40,6 +34,14 @@ across all seven layers, from foundation models through the agent ecosystem,
 using a concrete multi-agent travel-booking scenario.
 
 ## Related
+
+**[trust-index-spec](https://github.com/agentnameservice/trust-index-spec)** —
+Trust evaluation. How a Trust Index crawls sealed data from federated
+Registration Authorities, combines it with external signals, and scores agents
+across five dimensions: integrity, identity, solvency, behavior, and safety.
+Trust Manifest schema, credential formats, identity grades, federation, and
+security considerations. Maintained in its own repository; not an ANS protocol
+layer.
 
 **[SENDER_VERIFICATION_SPEC.md](SENDER_VERIFICATION_SPEC.md)** — Per-sender
 email verification. JWS header-only signing with key bindings sealed in a

@@ -110,7 +110,7 @@ its possession proof, and §5 provides its identity and liveness checks. The met
 in how the **caller** proves itself.
 
 For consumers scoring interaction strength: the Trust Index's interaction-context model
-([TRUST_INDEX_SPEC.md Appendix C](../TRUST_INDEX_SPEC.md#appendix-c-interaction-context-model-informational-implementation-recommended))
+([TRUST_INDEX_SPEC.md Appendix C](https://github.com/agentnameservice/trust-index-spec/blob/main/TRUST_INDEX_SPEC.md#appendix-c-interaction-context-model-informational-implementation-recommended))
 classifies authentication methods for profile adjustment. In its terms Method A is the `MTLS_*`
 family and Method B corresponds to `JWT_CERT` — a proof signed by the agent's Identity
 Certificate. The mapping is informative: ANS-6 defines the wire procedures, the Trust Index
@@ -1281,7 +1281,7 @@ line, a complete Method-B request/response exchange) live at
 - ANS-3 [`ans-3-dns-publication.md`](ans-3-dns-publication.md): `_ans-badge` and TLSA family trust records.
 - ANS-4 [`ans-4-transparency.md`](ans-4-transparency.md): TL public API, receipts, key distribution, checkpoint anchoring.
 - ANS-5 [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md): out-of-band verification checks and channels.
-- Trust Index [`TRUST_INDEX_SPEC.md`](../TRUST_INDEX_SPEC.md): interaction-context authentication-strength classes (Appendix C, informative mapping in §3.3).
+- Trust Index [`TRUST_INDEX_SPEC.md`](https://github.com/agentnameservice/trust-index-spec/blob/main/TRUST_INDEX_SPEC.md): interaction-context authentication-strength classes (Appendix C, informative mapping in §3.3).
 - [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449): OAuth 2.0 Demonstrating Proof of Possession (DPoP).
 - [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515): JWS (`x5c` header, compact serialization).
 - [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) / [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518): JWK and JWA (EC keys, ES256).
