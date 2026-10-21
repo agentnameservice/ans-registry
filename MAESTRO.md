@@ -17,7 +17,7 @@ it is CSA-led, not a joint effort.
 
 The Registration Authority (RA) verifies domain control, issues certificates,
 and seals registration events into an append-only Transparency Log.
-A companion Trust Index open specification (TRUST_INDEX_SPEC.md)
+A companion Trust Index open specification ([`trust-index-spec`](https://github.com/agentnameservice/trust-index-spec))
 defines how a Trust Index provider consumes those sealed events, certificates, and DNS records,
 combines them with external signals, and produces a Trust Vector:
 five independent scores, each 0-100,
