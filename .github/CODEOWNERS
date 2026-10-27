@@ -1,2 +1,2 @@
-# Repository Maintainers; see /MAINTAINERS.md.
-* @agentnameservice/spec-maintainers
+# Repository Maintainers and TSC fallback reviewers; see /MAINTAINERS.md.
+* @agentnameservice/spec-maintainers @agentnameservice/tsc
