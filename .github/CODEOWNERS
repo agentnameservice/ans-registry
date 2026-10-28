@@ -1,2 +1,2 @@
 # Review routing; merge permissions are managed separately.
-* @agentnameservice/spec-maintainers @agentnameservice/tsc-owners
+* @agentnameservice/spec-maintainers @agentnameservice/tsc @agentnameservice/tsc-owners
