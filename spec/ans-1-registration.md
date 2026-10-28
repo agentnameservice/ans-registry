@@ -29,7 +29,7 @@ ANS-1 does **not** specify the proof-of-control gate itself (ANS-0), the ANSName
 - **Registration**: an aggregate the RA owns, identified by `agentId`, carrying the ANSName (`agentHost` with an optional name-bound `version`), operational metadata, status, and lifecycle history.
 - **AHP (Agent Hosting Platform)**: the operator that hosts the agent's code and manages its DNS and certificates. Submits the registration request.
 - **Lifecycle event**: an event the RA emits to the TL when a registration changes state. The emitted set is `AGENT_REGISTERED` (activation), `AGENT_REVOKED` (revocation), `AGENT_RENEWED` (certificate changes) and `AGENT_UPDATED` (profile/endpoint changes). `AGENT_DEPRECATED` remains reserved (§6.3).
-- **Identity Certificate**: an optional certificate binding the registration's ANSName, issued from the RA's private CA against an operator-submitted CSR. A registration without one registers, activates, and operates on its Server Certificate alone (§7.2).
+- **Identity Certificate**: an optional owner-authorized certificate binding, either RA-issued from a CSR or imported through the identity-certificate operation. The leaf must cover the registered FQDN; runtime possession follows ANS-6. A registration without one registers, activates, and operates on its Server Certificate alone (§7.2).
 
 ## 3. The `RegistrationService` interface
 
@@ -68,7 +68,7 @@ The AHP submits a registration request:
 | | per-endpoint `functions` | No | Function declarations: `id`, `name`, optional `tags` |
 | | per-endpoint `transports` | No | `STREAMABLE_HTTP`, `SSE`, `JSON_RPC`, `GRPC`, `REST`, `HTTP` |
 | **Discovery** | `discoveryProfiles` | No | The DNS record families the RA emits for this registration, per [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles). Defaults to `ANS_DNSAID` |
-| **Certificates** | `identityCsrPEM` | No | CSR for the Identity Certificate. When omitted, the agent registers without one and cannot add one later (§7.2) |
+| **Certificates** | `identityCsrPEM` | No | Optional CSR for private identity issuance. A server-only registration may add an identity credential after activation (§7.2) |
 | | `serverCsrPEM` | Conditional | CSR for the RA-issued Server Certificate |
 | | `serverCertificatePEM` (+ optional `serverCertificateChainPEM`) | Conditional | BYOC Server Certificate. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present |
 
@@ -235,7 +235,7 @@ current after a newer one. Historical entries are immutable.
 | --- | --- | --- | --- | --- | --- |
 | **Additional versioned registration** | Operator needs a separate registration identity | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance, DNS verification | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
 | **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | `AGENT_RENEWED` with current certificate and metadata snapshots | None |
-| **Identity-certificate rotation** | Key roll on an identity-bearing registration | A fresh `identityCsrPEM` | Issues a new Identity Certificate at the private CA. Additive: the prior certificate remains valid until it expires. No fresh domain-control proof. `ACTIVE` registrations only; a registration created without an Identity CSR is refused (`IDENTITY_CSR_NOT_PERMITTED`, 409) | `AGENT_RENEWED` | AHP updates any applicable published discovery values per ANS-3 |
+| **Identity credential addition/rotation/removal** | Owner authorizes or retires a credential | `csrPEM` or BYOC leaf on the identity route; DELETE an individual binding by fingerprint | Owner/ACTIVE/admission checks; retain valid overlap; removing an external binding does not revoke its CA certificate (§7.2) | `AGENT_RENEWED` with the resulting certificate families | No automatic DNS publication |
 | **Profile/endpoint update** | Display text, metadata or endpoint changes | Complete replacement with the resource ETag in `If-Match` | Owner/lifecycle/precondition and full-result validation (§7.4) | `AGENT_UPDATED` | No DNS change for unmirrored display/hash edits; locator changes may require publication |
 | **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists `dnsRecordsToRemove`; the AHP removes them |
 
@@ -249,13 +249,28 @@ already-finalizing order likewise skip the artifact check by design.
 Separate versioned and versionless registrations have independent status, credentials and history,
 as defined in ANS-2 §2.3. Updating an existing registration uses the compatibility rules in §6.5.
 
-### 7.2 Registrations without an Identity Certificate
+### 7.2 Identity credential management
 
-`identityCsrPEM` is optional. When omitted, the agent registers, activates, and operates on its Server
-Certificate alone: verify-acme succeeds with no identity issuance, renewal covers the Server Certificate
-exactly as for any other registration, and revocation finds no Identity Certificates to revoke. The choice is
-permanent for that registration — the rotation operation refuses agents that registered without an Identity
-CSR (§7 table); the path to an Identity Certificate is a new versioned registration.
+An ACTIVE registration's owner may add an identity credential using
+`POST /v2/ans/agents/{agentId}/certificates/identity`, including when no identity CSR was supplied at
+registration. Supply exactly one of `csrPEM` or `identityCertificatePEM`; the certificate may include
+`identityCertificateChainPEM`. A chain alone or a CSR combined with BYOC material rejects.
+
+CSR submission returns `202 {csrId, message?}`. BYOC returns
+`202 {status: "PENDING_PUBLICATION"}` under the durable-publication rule in §6.3. Admission follows
+ANS-2 §3; no enrollment possession challenge is required. The resulting `AGENT_RENEWED` snapshot retains
+valid overlap and current metadata. A renewed leaf needs a new fingerprint binding even when its key
+is unchanged. Use begins when the verifier's authenticated evidence includes that binding (§7.4).
+
+The owner retires a binding through
+`DELETE /v2/ans/agents/{agentId}/certificates/identity/{fingerprint}`, using the 64 lowercase hex digest
+without `SHA256:`. It requires ACTIVE state and returns 202 pending publication. Repeating removal of a
+known retired binding is idempotent; an unknown fingerprint returns 404. This removes ANS authorization,
+not the externally issued certificate at its CA. Fresh evidence excludes the binding; cached tokens
+retain their existing acceptance window.
+
+Retiring the final identity binding leaves a server-only registration and disables ANS caller
+authentication. Credential removal preserves domain-proof age.
 
 ### 7.3 Expiry
 
@@ -272,8 +287,10 @@ Compare RFC 3339 timestamps as instants, normalizing offsets to UTC. Certificate
 `notAfter` (RFC 5280 §4.1.2.5); a group has lapsed when the current instant is later than its latest
 `notAfter`. “Latest” means furthest expiry, not most recent issuance.
 
-Server Certificates are required. Identity Certificates are required when the registration has opted
-into them; otherwise `expiresAt = serverExpiry` (§7.2). Every required group MUST be nonempty at activation.
+Server Certificates are required. The identity group also participates while the registration carries
+identity bindings. Explicit retirement of the final identity binding (§7.2) makes subsequent snapshots
+server-only, with `expiresAt = serverExpiry`; expiry alone is not retirement. Every required group MUST
+be nonempty at activation.
 A new snapshot MUST retain expiry evidence for a lapsed required group rather than omit it or invent a
 value for an undefined `max()`. Historical snapshots and their sealed `expiresAt` are immutable.
 

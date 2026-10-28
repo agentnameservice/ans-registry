@@ -128,7 +128,8 @@
             "X509-EV-CLIENT",
             "X509-EV-SERVER",
             "X509-OV-CLIENT",
-            "X509-OV-SERVER"
+            "X509-OV-SERVER",
+            "X509-EXTERNAL"
           ],
           "type": "string"
         }
@@ -280,7 +281,7 @@
       "type": "object"
     }
   },
-  "description": "V3 agent payload: optional versions, mutable display text and endpoint-scoped accepted metadata sets. The existing signed envelope is retained.",
+  "description": "V3 agent payload: optional versions, mutable endpoint metadata sets and owner-authorized external identity credentials. The existing signed envelope is retained.",
   "properties": {
     "logId": {
       "description": "Unique identifier for this log entry (UUIDv7)",

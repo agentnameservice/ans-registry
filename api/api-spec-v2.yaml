@@ -183,9 +183,10 @@ paths:
         submitted information, then interacts with the CA to issue certificates
         or validates provided (BYOC) server certificates.
 
-        The request MUST include an identity CSR. The request can optionally
-        include a server CSR (for RA-issued server cert) or a BYOC server
-        certificate with its chain.
+        The identity CSR is optional. Exactly one of serverCsrPEM or
+        serverCertificatePEM is required. For V3, an
+        ACTIVE registration can add an identity credential later through
+        the dedicated identity-certificate operation.
       operationId: registerAgent
       requestBody:
         description: Agent registration request
@@ -901,6 +902,67 @@ paths:
   # ──────────────────────────────────────────────────────────────────
   # Certificate Management — Identity
   # ──────────────────────────────────────────────────────────────────
+  /ans/agents/{agentId}/certificates/identity/{fingerprint}:
+    delete:
+      tags:
+        - Certificate Management
+      summary: Retire an ANS identity certificate binding
+      description: Owner-authorized retirement of one identity binding. Known retired bindings are idempotent. Fresh
+        evidence reflects retirement after publication; cached evidence retains its freshness window. See ANS-1 §7.2.
+      operationId: removeIdentityBinding
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+        - name: fingerprint
+          in: path
+          required: true
+          description: 'Leaf SHA-256 hex digest without the SHA256: prefix.'
+          schema:
+            type: string
+            pattern: ^[a-f0-9]{64}$
+      responses:
+        '202':
+          description: Binding removal accepted; a changed binding is pending publication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingPublication'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller does not own the registration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Registration or fingerprint not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Registration is not eligible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid certificate fingerprint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Durable signed publication is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /ans/agents/{agentId}/certificates/identity:
     get:
       tags:
@@ -946,8 +1008,10 @@ paths:
     post:
       tags:
         - Certificate Management
-      summary: Submit identity certificate CSR
-      description: Submits a CSR for the agent's identity certificate.
+      summary: Submit an identity CSR or owner-authorized BYOC certificate
+      description: For an ACTIVE registration, submit one DNS-covered identity CSR or an owner-authorized certificate.
+        BYOC returns pending publication and requires no enrollment possession challenge. Certificate admission and
+        use follow ANS-2 and ANS-6.
       operationId: submitIdentityCsr
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -956,14 +1020,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CsrSubmissionRequest'
+              $ref: '#/components/schemas/IdentityCertificateSubmission'
       responses:
         '202':
-          description: CSR accepted
+          description: CSR accepted, or BYOC binding committed and pending publication.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CsrSubmissionResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/CsrSubmissionResponse'
+                  - $ref: '#/components/schemas/PendingPublication'
         '401':
           description: Authentication failed
           content:
@@ -994,10 +1060,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Registration is not eligible, or the certificate has already been enrolled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Durable signed publication is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
-  # ──────────────────────────────────────────────────────────────────
-  # CSR Status
-  # ──────────────────────────────────────────────────────────────────
   /ans/agents/{agentId}/csrs/{csrId}/status:
     get:
       tags:
@@ -1759,8 +1834,9 @@ components:
           description: >-
             Optional. When supplied, the RA issues an identity certificate
             from this CSR at verify-acme. When omitted, the agent registers
-            without an identity certificate and cannot add one later — it
-            must register a new version instead.
+            without an identity certificate. An ACTIVE
+            registration can add an identity credential later through its
+            dedicated certificate operation. Legacy restrictions still apply.
       required:
         - agentDisplayName
         - agentHost
@@ -2137,6 +2213,28 @@ components:
           type: string
       required:
         - csrPEM
+
+    IdentityCertificateSubmission:
+      type: object
+      additionalProperties: false
+      properties:
+        csrPEM:
+          type: string
+          minLength: 1
+        identityCertificatePEM:
+          type: string
+          minLength: 1
+        identityCertificateChainPEM:
+          type: string
+      oneOf:
+        - required:
+            - csrPEM
+        - required:
+            - identityCertificatePEM
+      not:
+        required:
+          - csrPEM
+          - identityCertificateChainPEM
 
     CsrSubmissionResponse:
       type: object

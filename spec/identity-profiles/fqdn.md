@@ -23,33 +23,17 @@ proven on the agent-registration path, not through the `/v2/ans/identities` API.
   profile (ANS-0 §9). FQDN-primacy is policy (`a registration's primary anchor MUST be fqdn`),
   not a structural limit on the gate.
 
-## 2. Control proof — both axes
+## 2. Domain control and credential authorization
 
-`fqdn` is the one identity in this version exercising **both** axes of the gate
-([ANS-0 §3.1](../ans-0-identity-anchor.md#31-the-two-axes)). The proof is the ACME-based domain
-validation and certificate issuance already specified by
-[ANS-3 §7 (DNS verification modes)](../ans-3-dns-publication.md#7-dns-verification-modes) and
-[ANS-2 §3 (The Identity Certificate)](../ans-2-versioned-naming.md#3-the-identity-certificate);
-this profile only states how it maps onto the gate. Checks, in order:
-
-1. **Identifier control (ACME DNS-01).** The registrant provisions the `_acme-challenge.<host>`
-   TXT record the ACME order names, and the CA validates control of the FQDN. This is the
-   *location challenge* of [ANS-0 §3.3](../ans-0-identity-anchor.md#33-identifier-control-the-location-challenge)
-   — the single live instance of an identifier-control round-trip in this version.
-2. **Key control (CSR self-signature).** The registrant submits a PKCS#10 CSR; its
-   self-signature proves possession of the private key. The CA binds that key to the FQDN by
-   issuing the certificate. Key trust derives entirely from the ACME binding — the key arrives in
-   the CSR but is trusted only because step 1 proved the domain (ANS-0 §3.2, "the apparent
-   exception that proves the rule").
-
-Both axes clean → the agent's primary anchor is proven; the registration may activate
-(seal-before-success, ANS-1 §4.2). No `IdentityProofInput`/JWS round-trip applies here — the
-cert binding *is* the proof. `fqdn` is therefore cert-bound, not challenge-signature-bound.
+Prove the FQDN through ANS-1's registration/renewal domain-control flow (DNS-01 or HTTP-01).
+A CA's cached authorization for a shared RA account is not proof of the current owner's control.
+Credential admission and owner authorization follow ANS-2 §3; runtime possession follows ANS-6.
+The scope of these agent-credential rules versus Verified Identity proofs is defined in ANS-0 §3.1.
 
 ## 3. Key source and selection
 
-The authoritative key is the one bound to the FQDN by the issued certificate (the CSR public key
-for self-signed/ACME issuance, or the leaf key for BYOC). No `kid` selector applies; there is one
+The authorized key is the leaf key whose full certificate fingerprint the RA binds to this registration
+after its domain-control and owner-authorization checks. A CA signature or DNS SAN match alone is not that authorization. No `kid` selector applies; there is one
 key per certificate.
 
 ## 4. Seal tier
@@ -62,9 +46,9 @@ sealed as an `IDENTITY_*` event and never appears on the identity read surface.
 
 ## 5. Freshness and monitoring
 
-Freshness is the certificate lifetime plus the renewal lifecycle (ANS-3). ANS-5 monitors the
-agent's served TLS material and DNS state against the sealed attestation; the FQDN's continuity
-is the certificate chain, not a re-proof cadence.
+Registration and server renewal follow ANS-1's domain-validation rules; identity enrollment requires an
+ACTIVE owner-controlled registration. Metadata edits and binding removal preserve domain-proof age.
+ANS-5 monitors current signed certificate and DNS evidence.
 
 ## 6. Lifecycle specifics
 
