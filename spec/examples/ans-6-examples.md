@@ -18,10 +18,10 @@ _ans-badge.agent.example.com. IN TXT "v=ans-badge1; version=v1.0.0; url=https://
 _ans-badge.agent.example.com. IN TXT "v=ans-badge1; version=v1.0.1; url=https://transparency-log.example.com/v1/agents/019be7f3-5720-77c9-9672-adae3394502f"
 ```
 
-A callee authenticating a Method-A caller whose Identity Certificate URI SAN is
-`ans://v1.0.1.agent.example.com` selects the second record by its `version` field and fetches
-only that badge. The badge response shape is the V2 TL envelope shown in
-[ANS-4 example A.2](ans-4-examples.md#a2-tl-badge-response).
+A Method-A verifier configured for registration `019be7f3-5720-77c9-9672-adae3394502f`
+selects that registration's badge and verifies the peer certificate's fingerprint and DNS coverage.
+The certificate need not carry an ANS URI; a version selector cannot establish the caller's identity.
+The badge response shape is illustrated in [ANS-4 A.2](ans-4-examples.md#a2-tl-badge-response).
 
 ## A.2 SCITT receipt structure
 
@@ -132,7 +132,7 @@ The `DPoP` value is a compact JWS. Decoded JOSE header — exactly four paramete
 ```
 
 `x5c[0]` is the caller's Identity Certificate (DER, standard base64); its public key equals the
-`jwk` byte-for-byte, its `ans://` URI SAN names the caller, and its SHA-256 fingerprint appears
+`jwk` byte-for-byte, its DNS SAN covers the caller FQDN, and its SHA-256 fingerprint appears
 in the status token's `validIdentityCerts`.
 
 Decoded payload:
@@ -144,7 +144,8 @@ Decoded payload:
   "iat": 1787529605,
   "jti": "4b6ff43ff44e3f65a4f8f3aad4b6f0e2",
   "ath": "fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo",
-  "ans_profile": 1,
+  "ans_profile": 2,
+  "ans_agent_id": "7a4b2e91-83f6-4c12-9d58-bf1e6a3c9d07",
   "ans_content_digest": "wT8MhptL9zBd-WXZkYTjY7AHo1vNNfPYZzVifJEzPJc"
 }
 ```
@@ -249,3 +250,22 @@ The status evidence must name that registration, authorize the presented leaf fi
 fresh/nonterminal. The leaf's DNS SANs must cover the authenticated caller FQDN. No ANS URI SAN is
 required. A proof for another registration fails even if the same leaf is listed there. OAuth token
 binding, receipt verification where required, request/content binding and replay checks remain in force.
+
+## A.7 Optional mTLS with a DNS-covered SPIFFE credential
+
+The caller's leaf contains `DNS:agent.example.com` and
+`URI:spiffe://example.org/workload/agent`, with eligible key usage and client-authentication purpose.
+It contains no `ans://` URI. The operator submits it through the existing identity BYOC operation;
+the RA checks owner/domain eligibility and its issuer-admission policy and publishes the fingerprint.
+
+On a connection selecting mTLS, the callee validates the peer under its configured SPIFFE/TLS trust
+policy. The caller sends the existing receipt and status-token headers. Under ANS-6 §6.3, the callee
+verifies the selected trusted TL and registration, matches the actual peer leaf to `validIdentityCerts`,
+and checks DNS coverage of the authenticated registration host plus current validity/status. It then
+applies application authorization. It does not require a DPoP proof on this explicitly selected method.
+
+Removing the DNS SAN makes this SVID ineligible under the current ANS rule; `example.org` in the SPIFFE
+URI does not cover `agent.example.com`. Future URI-only support would need an explicit identity-coverage
+relaxation. Normal server TLS hostname verification remains unchanged. At SVID renewal, publish the new
+full-leaf fingerprint before use and retain the registration ID; an old open TLS session cannot bypass
+the evidence-refresh/retirement rules.

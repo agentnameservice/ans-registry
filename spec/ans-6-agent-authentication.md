@@ -91,8 +91,8 @@ The SCITT tier is RECOMMENDED for new implementations: a verifier holding the TL
 (§4.5, fetched once and cached) verifies peers with no DNS lookup and no TL query in the request
 path. The only recurring network dependency is each agent refreshing its **own** status token in
 the background (§4.6). The badge tier remains fully supported and is sufficient where online TL
-queries are acceptable. The tiers compose: a SCITT-tier verifier falls back to the badge tier
-when a peer presents no artifacts (§9).
+queries are acceptable. Method A may explicitly select either tier (§6); Method B always requires its signed status
+evidence. Missing or invalid caller artifacts do not trigger an automatic tier or method change.
 
 ### 3.3 Possession-proof methods
 
@@ -102,7 +102,7 @@ when a peer presents no artifacts (§9).
 | Survives TLS-terminating proxies | No — the L7 hop drops the client identity | Yes — the proof rides the HTTP request end to end |
 | Channel binding | Yes — the proof is the channel | No — the channel is server-authenticated HTTPS only |
 | Request binding | No — the handshake authenticates the connection, not individual requests | Yes — each proof binds one HTTP method + URL + content, single-use |
-| Trust anchor for the caller's certificate | Chain to the RA's Private CA ([ANS-2 §3](ans-2-versioned-naming.md#3-the-identity-certificate)) | Status token's `validIdentityCerts` fingerprint set (§7.5) |
+| Trust anchor for the caller's certificate | Deployment-configured TLS trust plus the ANS registration/fingerprint binding (§6) | Status token's `validIdentityCerts` fingerprint set (§7.5) |
 | Callee-side state | None beyond TLS | Replay cache (§7.6) |
 
 In both methods the **callee** is authenticated the same way: TLS server authentication provides
@@ -548,93 +548,101 @@ for where DANE sits among the verification channels.
 
 ## 6. Authenticating a caller — Method A: mTLS
 
-Method A uses the URI-bound, clientAuth/private-CA credential profile. DNS-only credentials use
-Method B revision 2; they are not automatically compatible with this method. The caller presents its
-Identity Certificate in the TLS handshake per
-[ANS-2 §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates). The handshake proves
-possession; this section specifies the identity and liveness verification the callee runs before
-processing application data.
+Method A authenticates the connection using the Identity Certificate and then verifies its ANS
+registration binding. It requires no `ans://` URI SAN or RA-issued certificate. The TLS peer must
+satisfy the deployment's trust and certificate-purpose policy as well as ANS-2 admission and DNS
+coverage. A successful TLS handshake alone does not establish current ANS authorization.
 
-### 6.1 Handshake and identity extraction
+### 6.1 Handshake and registration selection
 
-1. The TLS layer validates the client certificate chain against the RA Private CA trust anchor.
-   No chain → reject at the TLS layer.
-2. Extract from the validated certificate:
-   - **DNS SAN** (CN is not a substitute): the caller's FQDN, e.g. `caller.example.com`.
-   - **URI SAN**: the full ANSName, e.g. `ans://v1.0.0.caller.example.com` ([ANS-2
-     §3](ans-2-versioned-naming.md#3-the-identity-certificate)). No URI SAN → not a Method A credential.
-3. Parse the assigned ANS name from the URI SAN under ANS-2, including its optional version; do not invent a version for a versionless name. For legacy names, strip the leading `ans://` and the trailing `.{FQDN}`
-   (using the DNS SAN's FQDN); the remainder is the `v`-prefixed version.
+1. Validate the actual TLS peer leaf and chain under the deployment's configured trust anchors,
+   certificate validity, Key Usage and `clientAuth` policy. For SPIFFE, enforce the selected SPIFFE
+   identity/trust-domain rules as well. The TLS handshake MUST prove possession of the leaf's key.
+2. Select the expected `(trusted TL, agentId)` from deployment configuration or the authenticated
+   status token in §6.3. Token fields may be routing hints before verification but MUST NOT select a
+   new trusted TL or become an authenticated principal until signature/binding checks pass (§4.2).
+   An independently configured expected registration MUST agree. Do not select the first DNS SAN,
+   first badge record or certificate URI as the ANS identity.
+3. Verify the selected evidence tier (§6.2 or §6.3), requiring the exact peer leaf fingerprint,
+   registration ID/name agreement and DNS SAN coverage of the registration's authenticated FQDN.
+   A Common Name cannot substitute. Existing `ans://` or `spiffe://` URIs cannot replace this binding.
+   A credential authorized for several registrations does not make their artifacts interchangeable.
 
-The handshake completes before verification, but the callee MUST NOT process application requests
-until verification finishes. Cache verified results per §6.4.
+Complete these checks before processing application data. A TLS terminator MAY perform verification
+and forward the result only over a deployment-controlled trusted path that binds it to the same
+connection/request. Strip untrusted identity headers; a caller-supplied certificate or forwarded
+identity string is not proof of a TLS peer. Do not accept client requests in TLS early data before
+client authentication and ANS verification complete.
 
-Chain validation carries no revocation signal today: ANS-1 revocation revokes Identity
-Certificates at the issuing private CA ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)),
-but the CA publishes no CRL or OCSP endpoint, so a revoked certificate still chains cleanly. The
-TL is the revocation channel — the badge computes `REVOKED` and the status-token endpoint returns
-`410` (§4.4) — which is why the §6.2/§6.3 verification is REQUIRED even after a successful
-handshake. Where a deployment's CA does publish revocation, the TLS layer MAY check it as defense
-in depth.
+The RA's issuer-admission policy does not install trust at the peer. Private or public issuer
+acceptance is deployment policy; ANS does not mandate distributing every RA's roots. CA revocation
+checks, where configured, are additional to ANS binding retirement and registration-status checks.
+Neither a clean chain nor an unexpired certificate proves that its ANS binding remains authorized.
 
 ### 6.2 Badge tier
 
-1. Query `_ans-badge.{callerFQDN}` TXT. For a versioned name, its version can select a matching
-   record; a versionless name has no version pair. Apply the trusted-TL check (§4.2), then require the
-   returned full ANS name and credential fingerprint to match the selected registration. A shared host
-   or absent version never makes unrelated registrations interchangeable.
-2. Fetch the badge and validate:
+This tier requires a configured expected `(trusted TL, agentId, agent FQDN)`. Fetch that registration's
+badge under §4.2's trusted-TL policy. DNS discovery may locate the badge, but version hints or a shared
+host MUST NOT select a different registration. Require:
 
-| Client certificate | Badge field | Requirement |
+| Input | Badge field | Requirement |
 | --- | --- | --- |
-| DNS SAN | `.payload.producer.event.agent.host` | Equal |
-| URI SAN | `.payload.producer.event.ansName` | Equal |
-| Fingerprint (`SHA-256(cert.Raw)`) | `.payload.producer.event.attestations.identityCerts[]` | Matches any entry |
-| — | `.status` | `ACTIVE`, `WARNING`, or `DEPRECATED` |
+| Expected registration ID | `.payload.producer.event.ansId` | Equal |
+| Expected FQDN | `.payload.producer.event.agent.host` | Equal; authenticated ANSName agrees under ANS-2 |
+| TLS peer leaf | `.payload.producer.event.agent.host` | Passes standard DNS SAN hostname matching |
+| `SHA-256(peer leaf DER)` | `.payload.producer.event.attestations.identityCerts[]` | Matches an authorized entry |
+| — | `.status` | Eligible under §4.4; terminal/certificate-lapsed registrations reject |
+
+Enforce the applicable evidence freshness and certificate validity at use time. A configured badge
+tier is not permission to discard invalid supplied signed artifacts or bypass a determinate rejection.
 
 ### 6.3 SCITT tier
 
-The caller sends its receipt and status token in the request headers (§4.6). The callee verifies
-both artifacts locally (§4.3, §4.4) and binds them to the presented certificate:
+The caller supplies its receipt and status token in the existing headers (§4.6). Verify them under
+§4.3–§4.4, then require:
 
-| Client certificate | Artifact field | Requirement |
+| Input | Authenticated evidence | Requirement |
 | --- | --- | --- |
-| Fingerprint | Status token `validIdentityCerts` | Matches any entry |
-| DNS SAN | Receipt event `agent.host` | Equal |
-| URI SAN | Receipt event `ansName` / status token `ansName` | Equal |
-| — | Status token `status` | Not terminal |
-| — | Status token `exp` | Not expired |
+| Selected registration ID | Status token `agentId` and receipt event `ansId` | Equal |
+| Registration name | Status token `ansName` and receipt event `ansName` | Agree as the full ANS name; host agrees with receipt `agent.host` |
+| `SHA-256(TLS peer leaf DER)` | Status token `validIdentityCerts` | Matches an authorized entry |
+| TLS peer leaf | Authenticated registration FQDN | Passes standard DNS SAN hostname matching |
+| — | Current status, evidence freshness and leaf validity | All eligible |
 
-Either header absent → fall back to the badge tier (§6.2).
+An independently configured expected FQDN MUST also agree. Historical receipts prove registration,
+not current credential authorization; the status token supplies the current fingerprint set. Missing
+required artifacts reject under this tier. Badge-only operation requires prior explicit configuration
+under §6.2; failure is not a signal to switch tiers or caller-authentication methods.
 
 ### 6.4 Timing and caching
 
-- **First request (slow path)**: handshake completes, then verification runs before any
-  application data is processed.
-- **Subsequent requests (fast path)**: reuse the cached verification for the same certificate.
-- **Background refresh**: refresh cached badges before staleness; under the SCITT tier the
-  caller's own headers deliver fresh artifacts on every request, so the callee simply re-verifies
-  when the presented token changes.
+Cache verification results by `(trusted TL, agentId, peer leaf fingerprint)`, not just the connection
+or issuer. At every use, enforce current leaf validity and the evidence-acceptance deadline; refresh
+before it expires. Retiring a binding does not recall already-issued tokens, but a refreshed snapshot
+excluding that fingerprint MUST stop further ANS-authorized use, even on an established connection.
+
+Long-lived sessions MUST revalidate before their permitted evidence window ends or stop ANS-authorized
+use. TLS session resumption MUST retain the authenticated leaf identity and repeat current ANS checks;
+if the resumed session cannot supply that binding, require a fresh client-authenticated handshake.
+Changing a short-lived SVID changes its full-leaf fingerprint: publish its replacement binding before
+use, retain intentional overlap and retire old bindings through the RA.
 
 ### 6.5 Authorization placement
 
-ANS verification answers "is this a validly registered agent?", never "may it do this?". The
-recommended order fails fast: mTLS handshake → callee's own authorization check on the extracted
-identity (allowlist, RBAC — application-specific, out of ANS scope) → ANS verification →
-application processing. Where authorization decisions depend on registered properties (status,
-attestations), run them after ANS verification instead.
+Validate the TLS peer, its selected ANS registration and current evidence, then apply the application's
+authorization policy before processing the request. ANS authenticates a registration; it does not
+grant application permissions. Unverified identifiers MUST NOT become the authorization principal.
 
 ### 6.6 Outcomes
 
 | Condition | Result |
 | --- | --- |
-| Certificate does not chain to the Private CA | Reject at TLS layer |
-| No URI SAN | Not a Method A credential; Method B revision 2 uses a different binding |
-| No `_ans-badge` record for the caller's FQDN (badge tier) | NXDOMAIN → reject (§9.1 — revocation removes the record, so determinate absence is adverse); SERVFAIL/timeout → apply failure policy |
-| Badge URL host not a trusted TL | Reject |
-| Status terminal (`EXPIRED` / `REVOKED`) | Reject |
-| Fingerprint matches no identity-cert entry | Reject (badge tier: refresh once first, §8.2) |
-| DNS SAN ≠ `agent.host` or URI SAN ≠ `ansName` | Reject |
+| TLS chain, certificate purpose, validity or possession fails | Reject |
+| No ANS URI SAN, but all other selected-method checks pass | Accept authentication; apply application authorization |
+| URI-only SVID without DNS coverage | Reject under the current ANS-2 coverage rule |
+| Expected registration is absent, ambiguous or disagrees with evidence | Reject |
+| Trusted TL, signature, fingerprint, hostname, lifecycle or freshness check fails | Reject |
+| TLS session remains open after its permitted ANS evidence window | Revalidate or stop ANS-authorized use |
 
 ## 7. Authenticating a caller — Method B: application-layer proof of possession
 
@@ -1123,7 +1131,7 @@ A conformant ANS-6 verifier (callee side):
    signature), status token (signature, `exp`, terminal-status handling), root-key handling with
    `kid` cross-reference.
 3. Under the badge tier, enforces the trusted-TL allowlist (§4.2) before every badge fetch and
-   the §6.2 match set, including version selection.
+   the §6.2 registration, fingerprint and hostname match set.
 4. Treats every procedure's result as authentication only, applying authorization separately.
 
 A conformant ANS-6 caller:
@@ -1271,7 +1279,7 @@ line, a complete Method-B request/response exchange) live at
 ## 12. References
 
 - ANS-1 [`ans-1-registration.md`](ans-1-registration.md): registration aggregate, lifecycle, rotation.
-- ANS-2 [`ans-2-versioned-naming.md`](ans-2-versioned-naming.md): ANSName, Identity Certificate URI SAN, mTLS handshake shapes.
+- ANS-2 [`ans-2-versioned-naming.md`](ans-2-versioned-naming.md): ANSName, certificate admission, registration binding and mTLS.
 - ANS-3 [`ans-3-dns-publication.md`](ans-3-dns-publication.md): `_ans-badge` and TLSA family trust records.
 - ANS-4 [`ans-4-transparency.md`](ans-4-transparency.md): TL public API, receipts, key distribution, checkpoint anchoring.
 - ANS-5 [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md): out-of-band verification checks and channels.

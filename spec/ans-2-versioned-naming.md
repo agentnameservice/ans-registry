@@ -80,16 +80,34 @@ Parse an optional BYOC chain when supplied. Imported identity leaves use informa
 `X509-EXTERNAL`, which does not assert OV/EV identity assurance or external CA revocation status.
 Method B's X.509 trust policy is defined in ANS-6 §7.5; server TLS retains ordinary chain validation.
 
+The RA MUST document and enforce its issuer-admission policy, including the accepted trust anchors
+and required chain validation. Qualifying public or private issuers MAY be accepted; an RA-operated
+identity CA is not required. Admission does not add an issuer to a peer's TLS trust store. Domain
+proof and owner authorization remain separate requirements; a certificate or CA signature is not
+evidence that its submitter currently controls the registration.
+
 Private identity CSRs require a valid self-signature and FQDN DNS SAN coverage. The issued leaf carries
-the FQDN subject/DNS SAN. Credentials for Method A also require its URI/clientAuth profile; existing
-URI-bound issuance continues to validate the assigned ANS name. Older credentials lacking DNS coverage
-must be replaced or retired before an operation requiring that coverage.
+the FQDN subject/DNS SAN. No ANS-specific URI SAN is required for registration, CSR submission,
+issuance, BYOC, renewal/replacement, or the revised authentication methods. Existing `ans://` URIs
+may remain, but MUST NOT override the authenticated registration binding. Older credentials lacking
+DNS coverage must be replaced or retired before an operation requiring that coverage.
 
 ### 3.2 Method-specific certificate use
 
 Method B revision 2 binds the signed registration ID and TL-authorized fingerprint (ANS-6 §7.5), without
-requiring an ANS URI SAN. Method A retains its URI binding, clientAuth purpose and private-CA trust rules.
-A certificate admitted for Method B is not automatically suitable for Method A.
+requiring an ANS URI SAN. Its key must support the selected signature algorithm; when Key Usage is
+present, `digitalSignature` is required. TLS `clientAuth` EKU is not a prerequisite for DPoP.
+Method A validates the peer certificate under the deployment's configured trust, Key Usage and
+`clientAuth` purpose rules, then binds its fingerprint to the selected registration (ANS-6 §6).
+A certificate admitted for Method B is not automatically suitable for Method A. Neither method
+derives ANS identity from a certificate URI.
+
+SPIFFE X.509-SVIDs require exactly one `spiffe://` URI SAN and may also contain DNS SANs. A qualifying
+SVID with DNS coverage can use Method A without adding an incompatible second `ans://` URI. The SPIFFE
+trust domain is not a DNS hostname assertion; a URI-only SVID fails the current coverage rule even if
+its URI resembles the registered FQDN. Future support would require explicit relaxation of identity
+coverage and corresponding admission, verification and migration rules. Server TLS hostname validation
+would remain. See the [X.509-SVID profile](https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#2-spiffe-id).
 
 ### 3.3 Rotation and removal
 
@@ -97,21 +115,19 @@ ANS-1 §7.2 defines full-leaf fingerprint updates, valid overlap and retirement 
 
 ## 4. mTLS with Identity Certificates
 
-Method A uses URI-bound Identity Certificates issued by a trusted private CA; their `clientAuth` EKU
-and applicable key usage make them suitable for presentation at the TLS layer. This section applies to
-that certificate profile, not automatically to every BYOC or DNS-only identity credential. The
-handshake authenticates each party's ANSName, and a separate badge check (step 6 of the handshake sequence
-below) confirms the registration sealed in the TL. The handshake itself runs between agents; ANS components issue
-and attest the certificates but are not in the connection path.
+Method A uses an Identity Certificate accepted by the deployment's TLS trust and client-authentication
+policy. The handshake proves possession of its key; ANS-6 §6 binds the certificate to the selected
+registration and checks current ANS status. Neither an ANS URI SAN nor issuance by the RA is required.
+ANS components authorize and attest credentials but are not in the connection path.
 
 ### 4.1 Mutual TLS handshake
 
 1. Caller sends `ClientHello`.
 2. Server returns Server Certificate plus `CertificateRequest`.
 3. Caller presents its Identity Certificate.
-4. Server verifies the caller's Identity Certificate against the ANS Private CA's published trust anchor.
-5. mTLS tunnel established. The caller knows the server's FQDN; the server knows the caller's ANSName.
-6. Caller verifies the server's registered identity via `_ans-badge` TXT record or TL query.
+4. Server validates the caller's certificate and possession under its configured TLS/SPIFFE trust and purpose policy.
+5. Before processing application data, server verifies the selected ANS registration and matches the TLS peer certificate's fingerprint and DNS coverage to its current evidence (ANS-6 §6).
+6. Caller verifies the server's hostname, certificate binding and ANS status (ANS-6 §5).
 
 ### 4.2 Handshake scenarios across registration shapes
 
@@ -121,8 +137,8 @@ an identity credential for its own outbound calls does not change the certificat
 
 | Caller credential | Connection authentication |
 | --- | --- |
-| URI-bound identity credential meeting Method A purpose/trust requirements | TLS client authentication plus the required ANS binding/status checks |
-| DNS-only identity credential supported by Method B revision 2 | Server-authenticated TLS plus the signed application-layer Method B proof |
+| DNS-covered identity credential meeting Method A purpose/trust requirements | TLS client authentication plus the required ANS registration/fingerprint/status checks; no ANS URI required |
+| DNS-covered identity credential supported by Method B revision 2 | Server-authenticated TLS plus the signed application-layer Method B proof; no ANS URI required |
 | No applicable ANS identity credential | Server-authenticated TLS; caller authorization requires another supported application mechanism |
 
 DANE (`_443._tcp` TLSA) remains an optional additional pinning check across all scenarios.
@@ -139,7 +155,7 @@ A conformant ANS-2 implementation:
 2. Enforces DNS SAN coverage for both certificate roles and the admission rules in §3.1.
 3. Supports owner-authorized identity BYOC without an enrollment possession ceremony; private issuance
    is optional and enforces the selected CSR/certificate profile.
-4. Retains method-specific mTLS rules and uses ANS-6 revision 2 for URI-independent Method B binding.
+4. Binds both revised caller methods to authenticated ANS registration evidence without requiring an ANS URI SAN, retaining each method's purpose and trust checks.
 5. Publishes credential overlap/removal through the existing certificate snapshot lifecycle.
 
 ## 6. Security considerations
