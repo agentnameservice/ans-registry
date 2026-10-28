@@ -28,7 +28,7 @@ ANS-3 defines:
 - The `ProfileEmitter` / `ProfileRegistry` code-interface contract: given a `Registration` and the
   registry of wired profiles, return the records the operator must publish (§2).
 - The record set and child-label structure, including the **family trust records** (`_ans-badge`
-  TXT and the server-cert TLSA) every ANS-family profile shares (§3, §6.3).
+  TXT) every ANS-family profile shares (§3, §6.3).
 - The activation validations the RA runs against the announced records before a registration
   transitions from `PENDING_DNS` to `ACTIVE` (§4).
 - The discovery-profile registry, the profile template, and the composition rules — set semantics,
@@ -38,10 +38,9 @@ ANS-3 defines:
 Every record is generated for the agent's `agentHost` — the FQDN primary anchor every registration
 carries ([ANS-1](ans-1-registration.md)) — and the child labels under it.
 
-ANS-3 specifies **DNS record generation and publication orchestration**. DANE verification (the
-verifier-side procedure of validating TLSA records and matching Server Certificates) spans ANS-3 and
-ANS-5. ANS-3 defines the DNS record formats and emission rules; ANS-5 specifies the verifier worker
-procedure that consults those records during verification.
+ANS-3 specifies ANS discovery record generation and publication orchestration. Operator-managed DANE
+is independent of the registry lifecycle; ANS-6 §5.3 defines the optional connection-time check and
+ANS-5 distinguishes it from comparison against ANS-managed DNS evidence.
 
 ANS-3 does **not** specify:
 
@@ -88,7 +87,6 @@ continue to follow the A, AAAA, or CNAME.
 | Discovery (SVCB) | `{agentHost}` | SVCB | `ANS_DNSAID` (default) | One per endpoint: DNS-AID SvcParams ([ans-dnsaid](discovery-profiles/ans-dnsaid.md)) | Yes (No in the `ANS_TXT` union, §6.4) |
 | Connection hint (HTTPS RR) | `{agentHost}` | HTTPS | `ANS_TXT` | `1 . alpn=h2` service binding | No (CNAME at apex precludes it) |
 | Badge | `_ans-badge.{agentHost}` | TXT | family (every profile) | TL badge URL for verification (§6.3) | Yes |
-| Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate fingerprint (`3 0 1`, selector 0); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
 
 When the last ACTIVE registration for an `agentHost` is revoked, the AHP removes all ANS records it
 provisioned for that FQDN. The RA's revocation response lists the records to delete (see
@@ -123,20 +121,18 @@ into `dnsRecordsProvisioned[]` for this registration.
 | --- | --- | --- | --- |
 | Discovery (the `_ans.{agentHost}` TXT for `ANS_TXT`, the `{agentHost}` SVCB for `ANS_DNSAID`, per §6) | RA performs a DNS lookup for each announced discovery record at its label | Each required discovery record resolves to the announced content | Registration stays in `PENDING_DNS`; the RA retries on schedule and the registrant reconciles by publishing the announced record |
 | Badge TXT | RA performs a DNS lookup for `_ans-badge.{agentHost}` | Record resolves to the announced URL | The badge is emitted `Required` (§6.3); a missing badge keeps the registration in `PENDING_DNS` until reconciled |
-| Server DANE TLSA (DNSSEC-signed zones only) | RA performs a DNS lookup for each `_{port}._tcp.{agentHost}` TLSA and validates the DNSSEC chain | No DNSSEC-validated TLSA record contradicts the expected fingerprint (presence is not required; authenticated absence passes) | The TLSA is emitted `Required=false`; in a signed zone a DNSSEC-validated TLSA that does **not** match the expected fingerprint is an attack signal and blocks activation. The check is skipped in unsigned zones; the registration activates without it |
 
-**DNSSEC result.** TLSA, SVCB, and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
+**DNSSEC result.** SVCB and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
 result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified` — `true` when the
 record's query returned the AD bit, absent otherwise; TXT lookups never carry the flag
 ([ANS-1 §6.1](ans-1-registration.md#61-agent_registered)). A DNSSEC-validated record that
-contradicts the announced content is an attack signal and blocks activation (per the TLSA row
-above).
+contradicts the required ANS discovery content blocks activation. TLSA is outside this activation gate.
 
 ## 5. DNS management roles
 
 | Actor | Initial registration tasks | Ongoing lifecycle tasks | Deregistration tasks |
 | --- | --- | --- | --- |
-| **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates | Autonomous DNS updates, monitors renewals, submits config changes | Submits deregistration request, revokes RA access |
+| **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates | Autonomous DNS updates, monitors renewals, submits config changes | Submits revocation and removes the listed ANS-managed records |
 | **RA** | Generates ACME challenge, verifies record, generates permanent record content | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE registration is deregistered |
 | **DNS provider** | Hosts authorization endpoint, processes AHP's API requests to provision ANS records | Processes AHP's modification requests | Processes deletion requests from the AHP |
 
@@ -194,30 +190,15 @@ A profile only ever varies the **discovery records** layered on the shared famil
 
 ### 6.3 Family trust records
 
-Both ANS-family profiles emit two shared trust records, deduped to a single instance at the
-composition walker (§6.4). They are emitted by whichever profile(s) the registration selects, so a
-profile registered alone still produces them:
+Both discovery profiles emit `_ans-badge.{agentHost}` TXT with `Required=true`, deduplicated when
+profiles are composed. Its value is `v=ans-badge1; version=v{version}; url={badgeURL}`; versionless
+registrations omit the `version=` pair. The locator is `{tlPublicBaseURL}/v1/agents/{agentId}`.
+The `_ans` TXT profile likewise omits `version=` when the registration has no version; SVCB has no
+software-version field.
 
-- **Badge** — `_ans-badge.{agentHost}` TXT, value `v=ans-badge1; version=v{version}; url={badgeURL}`,
-  where `{version}` is the registration's semver (the value carries the `v` prefix, matching the ANSName's version segment) and `{badgeURL}` is the
-  Transparency Log badge endpoint for the agent (`{tlPublicBaseURL}/v1/agents/{agentId}`), falling
-  back to the agent's first endpoint URL when no public TL URL is configured. Emitted only when the
-  registration has at least one endpoint. **`Required=true`**: a badge-verifying client will not
-  trust an agent whose discovery records publish without a paired badge.
-- **Server DANE TLSA** — `_{port}._tcp.{agentHost}` TLSA, value `3 0 1 {fingerprint}` (DANE-EE,
-  full-certificate selector 0, SHA-256 — the fingerprint is SHA-256 over the full DER Server
-  Certificate, matching the badge fingerprint in the TL). One record per **distinct TLS endpoint
-  port** (ports sorted ascending; plaintext `http` endpoints skipped; an empty port set falls back
-  to `443`), so a DANE client connecting to a non-443 endpoint finds a record at `_{its-port}._tcp`.
-  Emitted only when the registration has a server certificate. **`Required=false`**: a TLSA is only
-  meaningful in a DNSSEC-signed zone, a runtime property the record set cannot know; the verify layer
-  enforces the stricter rule that a DNSSEC-validated TLSA MUST match the expected fingerprint
-  (§4).
-
-For a versionless registration, omit the entire `version=` pair from `_ans` and `_ans-badge`
-TXT values. Retain the format marker, owner name, endpoint values and badge locator. Existing versioned
-records retain their `v`-prefixed version value. A missing version is not a placeholder or permission to
-select an arbitrary registration on the host. DNS-AID SVCB rows continue to have no software-version field.
+The RA MUST omit TLSA from ANS DNS instructions and new DNS attestations. TLSA is not an activation
+or renewal prerequisite. Revocation cleanup MUST exclude operator-managed TLSA records. Clients MAY
+validate live DNSSEC-authenticated TLSA under ANS-6 §5.3.
 
 ### 6.4 Composition: ordering, dedup, and the required-flag transition
 
@@ -231,13 +212,11 @@ The RA composes `dnsRecordsProvisioned[]` by walking the registry:
 2. **Walk in wiring order.** Iterate the registry's `IDs()` (the bundled wiring is
    `[ANS_TXT, ANS_DNSAID]`, so emission proceeds TXT-first, then SVCB) and collect each resolved
    profile's full record list. Request order on `discoveryProfiles` has no effect.
-3. **Dedup by `(name, type, value)`.** The family trust records (`_ans-badge`, the Server TLSA)
-   that overlap across sibling profiles emit once; first-seen wins. The dedup key omits `Required`,
-   so sibling profiles MUST agree on the flag for a shared record (both do — badge `true`, TLSA
-   `false`).
+3. **Dedup by `(name, type, value)`.** The family trust record (`_ans-badge`)
+   shared across sibling profiles is emitted once; first-seen wins. The dedup key omits `Required`,
+   so sibling profiles MUST agree on its `Required=true` flag.
 4. **Group discovery-then-trust.** Discovery records first (in walker order), then the trust records
-   (badge, TLSA). The canonical wire order for the union case is `[TXT×N, HTTPS, SVCB×N, badge,
-   TLSA]`; this pins the TL `dnsRecordsProvisioned[]` canonical bytes.
+   (badge). The canonical wire order for the union case is `[TXT×N, HTTPS, SVCB×N, badge]`; this pins the TL `dnsRecordsProvisioned[]` canonical bytes.
 5. **Required-flag transition.** SVCB rows arrive from the `ANS_DNSAID` adapter with
    `Required=true`. When `ANS_TXT` is also in the resolved set, every SVCB row is flipped to
    `Required=false`: in the transition union the `_ans` TXT family carries the operator's
@@ -252,7 +231,7 @@ rather than rejecting. The wired registry and the valid `DiscoveryProfile` enum 
 the RA asserts this coherence at server start and refuses to start on drift.
 
 Hash-only and display-only updates do not change DNS when those values are not mirrored there.
-V3 omits the optional SVCB single-hash mirror; signed endpoint/location sets carry metadata integrity.
+The optional SVCB single-hash mirror is omitted; signed endpoint/location sets carry metadata integrity.
 Endpoint, port and locator changes can still require operator DNS publication. `discoveryProfiles`
 changes are not generic profile edits and require a separately coordinated DNS transition.
 
@@ -278,16 +257,8 @@ any deployment exposed to external verifiers.
 
 ### 8.1 RA-DNS privilege separation
 
-The RA's DNS permissions MUST exclude TLSA write access. A compromised RA that could write the
-`_{port}._tcp.{agentHost}` (Server DANE) TLSA record plus issue a fraudulent Server Certificate
-could compromise DANE's defense-in-depth in a single action. The RA generates the expected Server
-TLSA *content* from the issued Server Certificate; the AHP publishes it to DNS. The split keeps the
-DANE record under AHP authority while the certificate-issuance authority stays with the RA, and
-preserves DANE as an independent verification channel.
-
-A compromise of either party alone is detectable through a mismatch in the verification record
-(mismatched fingerprints, DNSSEC signature failures, or divergent TL evidence). Compromise of both
-parties simultaneously requires detection by external scoring services and is out of scope for ANS.
+The AHP/operator publishes DNS. The RA MUST NOT have TLSA write access. Independent DANE operators
+manage their certificate/key rollover under ANS-6 §5.3; ANS record responsibilities are defined in §6.3.
 
 ### 8.2 Public discoverability of DNS records
 
@@ -335,9 +306,7 @@ A conformant ANS-3 implementation:
    default.
 3. Runs the activation validations (§4) before transitioning a registration from `PENDING_DNS` to
    `ACTIVE`.
-4. Emits the family trust records (§6.3): the `_ans-badge` TXT (`Required`) and one Server DANE TLSA
-   per distinct TLS endpoint port (`Required=false`), deduped to a single instance across sibling
-   profiles.
+4. Emits the family badge locator and follows the TLSA responsibilities in §6.3.
 5. For `ANS_DNSAID`, emits one SVCB row per endpoint at the FQDN with the DNS-AID SvcParams in the
    RFC 9460 §14.3.1 Private Use `keyNNNNN` presentation form, never the named DNS-AID forms.
 6. Validates `discoveryProfiles` (`INVALID_DISCOVERY_PROFILE` on an unknown element) and asserts
@@ -349,9 +318,15 @@ A conformant ANS-3 implementation:
 
 **Optional surface.** Discovery-profile choice (`ANS_TXT`, `ANS_DNSAID`, or the union); DNS
 verification mode (lookup vs noop-bypass, with noop-bypass non-conformant for external-facing
-deployments); the TLSA-write duty split (per §8.1, the RA generates TLSA content but MUST NOT write
-it; the AHP publishes it). A conforming verifier MUST NOT downgrade integrity scoring solely because
+deployments); and independent operator-managed DANE (§6.3). A conforming verifier MUST NOT downgrade
+integrity scoring solely because
 an operator chose `ANS_TXT` over `ANS_DNSAID` (or vice versa).
+
+### 9.1 Existing TLSA evidence
+
+After a registration publishes the revised record set, monitors MUST stop treating historical TLSA
+attestations as current expectations. Existing operator-managed DNS remains in place. Event/retry
+compatibility follows ANS-1 §6.5.
 
 ## References
 
@@ -379,8 +354,8 @@ annotated.
 ; Registration: versioned (v2.1.0); discoveryProfiles: ["ANS_DNSAID", "ANS_TXT"]
 ;
 ; Record ownership legend:
-;   [RA-content]: RA generates the expected content; AHP publishes the record (discovery, badge, Server DANE)
-;   [AHP]: AHP both generates content and publishes the record (A/AAAA)
+;   [RA-content]: RA generates the expected content; AHP publishes the record (discovery and badge)
+;   [AHP]: AHP both generates content and publishes the record (A/AAAA and optional DANE)
 
 ; A/AAAA records (AHP)
 ai-agent.acmecorp.com.        300  IN A        203.0.113.42
@@ -401,20 +376,20 @@ ai-agent.acmecorp.com.        3600 IN SVCB     1 . alpn=mcp port=8443 key65402=m
 ; Badge TXT [RA-content] — family record; one per registration; points at the TL badge endpoint
 _ans-badge.ai-agent.acmecorp.com. 3600 IN TXT  "v=ans-badge1; version=v2.1.0; url=https://transparency-log.example.com/v1/agents/550e8400-e29b-41d4-a716-446655440000"
 
-; Server DANE TLSA [RA-content] — family record; one per distinct TLS port (443 and 8443); 3 0 1 over the full Server Certificate
+; Optional operator-managed DANE — outside the ANS-generated/attested record set
 _443._tcp.ai-agent.acmecorp.com.  3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 _8443._tcp.ai-agent.acmecorp.com. 3600 IN TLSA 3 0 1 a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 ```
 
 **Record ownership summary:**
 
-- RA generates expected content for: `ANS_TXT` `_ans` TXT, `ANS_TXT` HTTPS RR, `ANS_DNSAID` SVCB, `_ans-badge` TXT, Server DANE TLSA.
-- AHP publishes all DNS records (using RA-generated content where applicable) and additionally generates content for: A/AAAA. The RA has no DNS write access.
-- Both may set: TTL, record management cadence (update/delete).
+- RA generates expected content for: `ANS_TXT` `_ans` TXT, `ANS_TXT` HTTPS RR, `ANS_DNSAID` SVCB, `_ans-badge` TXT. TLSA shown above is independent operator-managed data.
+- AHP publishes all DNS records (using RA-generated content where applicable) and additionally generates content for: A/AAAA and optional independent DANE. The RA has no DNS write access.
+- The RA provides ANS record instructions; the AHP controls DNS publication, TTLs and independent DANE rollover.
 
 **Union and version notes:**
 
 - With `["ANS_DNSAID", "ANS_TXT"]`, both families' discovery records coexist; the `_ans` TXT rows carry the required signal and the SVCB rows are `Required=false` (§6.4).
-- The composed canonical order sealed into `dnsRecordsProvisioned[]` is `[_ans TXT×N, HTTPS, SVCB×N, badge, TLSA×ports]`.
-- Server DANE TLSA is per distinct TLS port; both 443 and 8443 carry the same full-certificate fingerprint (the cert is FQDN-scoped, not per-port).
+- The composed canonical order sealed into `dnsRecordsProvisioned[]` is `[_ans TXT×N, HTTPS, SVCB×N, badge]`.
+- Optional DANE records use the actual connection port and are outside the ANS record set.
 - When v2.1.0 is revoked, the RA's revocation response lists the v2.1.0 `_ans`, SVCB, and `_ans-badge` records to delete.

@@ -535,7 +535,7 @@ sequenceDiagram
 
 Where the callee's zone is DNSSEC-signed, the caller MAY additionally validate the Server
 Certificate against the `_{port}._tcp.{agentHost}` TLSA record set (`3 1 1` or `3 0 1` — DANE-EE,
-SHA-256; [ANS-3 §6.3](ans-3-dns-publication.md#63-family-trust-records)), evaluating each record
+SHA-256), evaluating each record
 under its own selector and matching type: selector 1 is SHA-256 over the Server Certificate's
 SubjectPublicKeyInfo DER, selector 0 is SHA-256 over the full DER certificate and equals the
 fingerprint the badge and status token carry. The `{port}` label is the port the connection
@@ -544,7 +544,10 @@ URL's port. Check against **all** TLSA records — multiple records coexist duri
 match on any one of them suffices. Per RFC
 6698 §4, a TLSA RRset that does not DNSSEC-validate as "secure" is unusable and MUST be ignored
 rather than trusted. See [ANS-5 §5](ans-5-integrity-monitoring.md#5-verification-procedure-verifier-facing)
-for where DANE sits among the verification channels.
+for where DANE sits among the verification channels. This check uses live operator-managed DNS;
+a secure usable set with no match is rejected under the enabled DANE policy. Optional policy may
+proceed when DANE is unavailable; required-DANE policy rejects when its requirements cannot be met.
+An ACTIVE ANS registration can still fail this independent check.
 
 ## 6. Authenticating a caller — Method A: mTLS
 
