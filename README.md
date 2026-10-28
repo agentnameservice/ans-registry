@@ -51,15 +51,18 @@ sender is not who they claim. Not an ANS protocol feature.
 
 ## API
 
-- [OpenAPI specification](https://developer.godaddy.com/doc/endpoint/ans)
-  (human-readable)
-- [Machine-readable OpenAPI](https://developer.godaddy.com/swagger/swagger_ans.json)
+The OpenAPI contracts and conformance schemas live under [`api/`](api/):
+
+- [`api/api-spec-v2.yaml`](api/api-spec-v2.yaml) — Registration Authority management API
+- [`api/api-spec-tl-v2.yaml`](api/api-spec-tl-v2.yaml) — Transparency Log API
+- [`api/identity-event-schema-v2.json`](api/identity-event-schema-v2.json) — sealed Verified-Identity event (V2)
+- [`api/tl-response-schema-v2.json`](api/tl-response-schema-v2.json) — Transparency Log entry (V2)
 
 ## SDKs
 
-- [ans-sdk-rust](https://github.com/godaddy/ans-sdk-rust)
-- [ans-sdk-go](https://github.com/godaddy/ans-sdk-go)
-- [ans-sdk-java](https://github.com/godaddy/ans-sdk-java)
+- [ans-sdk-rust](https://github.com/agentnameservice/ans-sdk-rust)
+- [ans-sdk-go](https://github.com/agentnameservice/ans-sdk-go)
+- [ans-sdk-java](https://github.com/agentnameservice/ans-sdk-java)
 
 ## Origin
 
