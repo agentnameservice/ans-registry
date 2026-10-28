@@ -99,7 +99,7 @@ A representative request payload (the AHP submits this to the RA's `POST /v1/age
 }
 ```
 
-`version`, `agentHost`, `agentDisplayName`, and at least one endpoint are required. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it registers the agent without an Identity Certificate ([ANS-1 §7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
+`agentHost`, `agentDisplayName`, and at least one endpoint are required. V2 may omit `version` to create `ans://{agentHost}`; the versioned example above remains valid, and V1 still requires a version. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present. `identityCsrPEM` is optional — omitting it registers the agent without an Identity Certificate ([ANS-1 §7.2](../ans-1-registration.md#72-registrations-without-an-identity-certificate)).
 
 ## A.3 Revocation request
 

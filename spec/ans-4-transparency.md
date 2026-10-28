@@ -77,6 +77,21 @@ Per-object reads serve one agent's or identity's sealed state: the badge (latest
 
 Bulk reads are the checkpoint endpoints plus the static C2SP tile surface (§5.2): consumers that want the whole log walk the tiles; there is no separate paginated range API.
 
+### 4.1 Agent event versions
+
+The [TL OpenAPI contract](../api/api-spec-tl-v2.yaml) contains all routes and models:
+
+| Agent ingest route | Envelope schema | Payload |
+| --- | --- | --- |
+| `POST /v1/internal/agents/event` | V1 | Certificate singleton/rotation arrays and DNS map |
+| `POST /v2/internal/agents/event` | V2 | Certificate arrays and typed DNS records |
+| `POST /v3/internal/agents/event` | V3 | Optional version and endpoint metadata extensions |
+
+Badge and audit readers select the payload model using `schemaVersion`. The existing signature, leaf,
+receipt and checkpoint formats apply to every version. `GET /v1/log/schema/V3` serves the
+[V3 payload schema](../api/tl-response-schema-v3.json). ANS-1 §6.5 defines adoption and historical retries;
+the RA authorizes management callers and the TL authenticates RA producers.
+
 ## 5. Public verification API
 
 A conforming TL MUST expose the following REST API surface (HTTPS; JSON unless noted):

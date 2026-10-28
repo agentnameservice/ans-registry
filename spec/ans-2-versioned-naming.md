@@ -1,50 +1,47 @@
-# ANS-2: Versioned Naming
+# ANS-2: Naming and Certificate Binding
 
 Status: DRAFT v1.0
-Spec: ANS-2 (Versioned Naming)
+Spec: ANS-2 (Naming and Certificate Binding)
 Version: 0.2.0
 Date: 2026-07-15
-Audience: implementers adding semantic-version naming and Identity Certificate binding to an ANS Registration Authority
+Audience: implementers adding stable naming and Identity Certificate binding to an ANS Registration Authority
 
 ## 1. Scope
 
-Every registration declares a `version` and derives an ANSName ([ANS-1
-§4.1](ans-1-registration.md#41-step-1--pending-registration)). What is **optional** is the Identity
-Certificate: a registration MAY omit its Identity CSR and operate on its Server Certificate alone ([ANS-1
-§7.2](ans-1-registration.md#72-registrations-without-an-identity-certificate)). The identity-certificate
-surface of ANS-2 — the URI SAN binding and the mTLS semantics — applies when the certificate is
-present. An identity-bearing registration MAY roll its Identity Certificate via the rotation operation ([ANS-1
-§7](ans-1-registration.md#7-lifecycle-operations)); the registration's `agentId`, `agentHost`, and ANSName are
-unchanged across a roll, and a registration created without an Identity CSR cannot add one later.
-
-ANS-2 specifies:
-
-- The ANSName URI form (`ans://v<MAJOR>.<MINOR>.<PATCH>.<host>`) and version-coexistence rules.
-- The version field carried on emitted DNS records and Transparency Log events.
-- The Identity Certificate URI SAN binding, including the CSR-side requirement.
-- mTLS handshake semantics that consume the Identity Certificate.
-
-ANS-2 is FQDN-shaped. The Identity Certificate URI SAN encodes an ANSName whose host component is an FQDN — true by construction, since every ANSName is derived from the registration's `agentHost`.
+ANS-2 defines the FQDN-based ANS name, its optional software version, and Identity Certificate binding.
+Registration and lifecycle operations are defined in ANS-1; runtime authentication is defined in ANS-6.
+The Identity Certificate is optional. Its certificate and authentication rules apply when present.
 
 ## 2. The ANSName
 
-`ans://v{version}.{agentHost}`
+A V2 registration request that omits `version` constructs `ans://{agentHost}`. When `version` is
+supplied, its existing bare-semver validation applies and the name is `ans://v{version}.{agentHost}`.
+The RA MUST NOT invent a placeholder version such as `0.0.0` or emit an empty version label. V1 request
+validation remains versioned. Responses and V3 events omit `version` for versionless registrations.
 
-Example: `ans://v1.0.0.sentiment-analyzer.example.com`
-
-Every registration declares a version, so every registration has an ANSName; the name is constructed at registration ([ANS-1 §4.1](ans-1-registration.md#41-step-1--pending-registration)) and is consumed **permanently** — uniqueness is checked against all registration rows regardless of status, so a FAILED, EXPIRED, or cancelled attempt still holds its version and a retry must use a new one.
+Examples: `ans://sentiment-analyzer.example.com` and `ans://v1.0.0.sentiment-analyzer.example.com`.
 
 | Component | Constraints | Example |
 | --- | --- | --- |
-| **protocol** | Fixed. Always `ans` | `ans` |
-| **version** | Semantic version, numeric only: `major.minor.patch`. No pre-release or build-metadata suffixes. Prefixed with `v` | `v1.0.0` |
-| **agentHost** | FQDN per RFC 1123. Each label is at most 63 octets, uses LDH characters (letters, digits, hyphens), and does not begin or end with a hyphen | `sentiment-analyzer.example.com` |
+| **protocol** | Fixed `ans` scheme | `ans` |
+| **version** | Optional; numeric `major.minor.patch`, with no prerelease/build suffix; `v` appears only in the name and legacy TXT value | `v1.0.0` |
+| **agentHost** | FQDN per RFC 1123; lowercase LDH labels of at most 63 octets, with no leading/trailing hyphen | `sentiment-analyzer.example.com` |
+
+Name construction and parsing MUST agree with the signed `agent.host` and, when present,
+`agent.version`. V3 `agent.version` is bare semver. The parser reserves a leading
+`v<digits>.<digits>.<digits>.` for legacy names: a new versionless FQDN with that prefix is rejected
+with `422 AMBIGUOUS_ANS_NAME`. If a reserved-prefix input fails legacy-semver parsing, it MUST NOT
+fall back to versionless interpretation.
+
+The assigned name, `agentId` and FQDN are immutable. Exact-name uniqueness applies across registration
+statuses. Reclaiming a consumed terminal name requires a separate recovery policy. Publication
+compatibility follows ANS-1 §6.5.
 
 ### 2.1 Length limits
 
 `agentHost` MUST NOT exceed 253 octets (the RFC 1035 §2.3.4 domain-name limit) and MUST contain at
 least two labels. The ANSName has no separate length cap; its bound is derived — the fixed
-`ans://v` prefix, the version segment, and the host.
+`ans://` prefix, an optional `v{version}.` segment, and the host.
 
 ### 2.2 Registration metadata accompanying the ANSName
 
@@ -55,17 +52,19 @@ Two fields accompany the ANSName at registration but are not part of the identif
 | `agentDisplayName` | 64 chars | Yes | No | `Acme Sentiment Analyzer` |
 | `agentDescription` | 150 chars | No | No | `Classifies customer-feedback prose as positive, neutral, or negative.` |
 
-The display name is the human-readable label shown in discovery UIs. It supports spaces, capitalization, and special characters. The ANSName is the unique identifier; display names need not be unique, and the FQDN is shared by every version registered under it.
+The display name is the human-readable label shown in discovery UIs. It supports spaces, capitalization, and special characters. The ANSName is the unique identifier; display names need not be unique, and a shared FQDN does not make independent registrations or their credentials interchangeable.
 
 ### 2.3 Supersession
 
-Versions are independent registrations: a version bump is a new registration under the same `agentHost` with a new `version` ([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)). Consumers of the TL event stream reconstruct the version history for an `agentHost` by filtering the log on the host — each version's `AGENT_REGISTERED` event carries the full ANSName.
-
-A patch bump may coexist for hours; a major version change may coexist for months. ANS-2 does not impose a retirement timeline. If the new registration fails validation, the old version remains ACTIVE.
+A software version is a release label, not evidence of the code, model or configuration serving a request.
+Software releases can retain the registration; incompatible APIs can use paths such as `/v1/a2a` and
+`/v2/a2a` on the same FQDN. An operator may create a separate versioned registration when a separate
+identity is needed. Each registration has independent status, credentials and history, with no automatic
+merging or retirement. A failed new registration leaves existing registrations intact.
 
 ## 3. The Identity Certificate
 
-When a registrant submits a `version` and `identityCsrPEM`, the RA's Private CA issues an Identity Certificate. The binding runs through both artifacts:
+When a registrant submits `identityCsrPEM`, the RA's Private CA issues an Identity Certificate. The binding runs through both artifacts:
 
 - **The CSR MUST carry the registration's full ANSName as a `uniformResourceIdentifier` SAN.** The RA validates the CSR's URI SAN against the expected ANSName before signing; a CSR naming any other identifier is rejected. (Server CSRs differ: they carry the agent's FQDN as a DNS SAN, the TLS server-auth convention.)
 - **The issued certificate carries the same ANSName URI SAN**, with `digitalSignature` key usage and the `clientAuth` extended key usage — it is minted as a TLS client certificate — and a CA-configured validity window.
@@ -74,9 +73,9 @@ When a registrant submits a `version` and `identityCsrPEM`, the RA's Private CA 
 | --- | --- |
 | Issuer | Private CA operated by the RA |
 | SAN type | `uniformResourceIdentifier` |
-| SAN value | The full ANSName (`ans://v{version}.{agentHost}`), validated against the CSR |
+| SAN value | The assigned ANSName, versioned or versionless, validated against the CSR |
 | Key usage | `digitalSignature`; EKU `clientAuth` |
-| Purpose | Binds the certificate to a specific software version, presentable as a TLS client certificate |
+| Purpose | Binds the certificate to the registration; presentable as a TLS client certificate |
 
 The Identity Certificate requires a URI SAN. The `ans://` scheme is syntactically valid per RFC 3986 §3.1 and permitted in URI SANs per RFC 5280 §4.2.1.6. CA/B Forum Baseline Requirements prohibit `uniformResourceIdentifier` SANs in publicly trusted server certificates (BR §7.1.2.7.12). A Public CA cannot issue this certificate. Only a Private CA, operating under its own issuance policy, can.
 Identity Certificates MUST NOT be brought-your-own (BYOC): a rogue CA could otherwise issue an Identity Certificate for `ans://v1.0.0.payments.example.com`, and the TL would seal it as if the RA had validated it. The registration request accepts no identity-certificate BYOC input — only a CSR.
@@ -86,7 +85,7 @@ Identity Certificates MUST NOT be brought-your-own (BYOC): a rogue CA could othe
 The RA's Private CA issues Identity Certificates that ANS-aware callers and callees present during the mTLS
 handshake — the `clientAuth` EKU (§3) is what makes the certificate presentable at the TLS layer. The
 handshake authenticates each party's ANSName, and a separate badge check (step 6 of the handshake sequence
-below) confirms the version sealed in the TL. The handshake itself runs between agents; ANS components issue
+below) confirms the registration sealed in the TL. The handshake itself runs between agents; ANS components issue
 and attest the certificates but are not in the connection path.
 
 ### 4.1 Mutual TLS handshake
@@ -96,7 +95,7 @@ and attest the certificates but are not in the connection path.
 3. Caller presents its Identity Certificate.
 4. Server verifies the caller's Identity Certificate against the ANS Private CA's published trust anchor.
 5. mTLS tunnel established. The caller knows the server's FQDN; the server knows the caller's ANSName.
-6. Caller verifies the server's versioned identity via `_ans-badge` TXT record or TL query.
+6. Caller verifies the server's registered identity via `_ans-badge` TXT record or TL query.
 
 ### 4.2 Handshake scenarios across registration shapes
 

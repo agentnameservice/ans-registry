@@ -39,7 +39,7 @@ v=ans1; version=v{version}; p={protocol-token}; mode=direct; url={agentUrl}
 
 - `v` — always `ans1`.
 - `version` — the registration's semantic version, **prefixed with `v`** (e.g. `v1.0.0`), matching
-  the ANSName's version segment (ANS-2).
+  the ANSName's version segment (ANS-2). Omit this entire pair for a versionless registration.
 - `p` — the protocol token (§3): `a2a`, `mcp`, or `http-api`.
 - `mode` — always `direct` on every emitted row.
 - `url` — the endpoint's `agentUrl`, verbatim.
@@ -55,7 +55,7 @@ SvcPriority `1` (ServiceMode), TargetName `.` (the origin — the owner name its
 
 ## 3. Parameter sources and selection
 
-- `version` ← the registration's version (ANS-2), rendered without a `v` prefix.
+- `version` ← the optional registration version (ANS-2), rendered with a `v` prefix when present; otherwise omit the pair.
 - `p` ← the endpoint's protocol, mapped to the `_ans` token: `A2A`→`a2a`, `MCP`→`mcp`,
   `HTTP_API`→`http-api`. (A future protocol added to the domain layer passes through unchanged.)
   The `ANS_DNSAID` profile maps `HTTP_API` to `x-http` instead; the two families share `a2a`/`mcp`
@@ -93,8 +93,8 @@ expected records through the ANS-3 composition contract ([ANS-5 §4](../ans-5-in
 The `_ans` records are per-registration: one row per endpoint for the registration's version. Version
 coexistence across registrations is an ANS-1/ANS-2 concern
 ([ANS-1 §7](../ans-1-registration.md#7-lifecycle-operations)); every `_ans` family row carries its
-registration's version. On revocation of the last
-ACTIVE version the AHP removes the `_ans`, HTTPS, and family records the RA's revocation response
+optional registration version. On revocation of the last
+ACTIVE registration the AHP removes the `_ans`, HTTPS, and family records the RA's revocation response
 lists.
 
 ## 7. Coexistence and presentation safety

@@ -3,6 +3,9 @@ info:
   title: Agent Name Service (ANS) Management API
   description: |
     Management API for the Agent Name Service (ANS) — v2.
+    These management routes support versionless registrations. Newly constructed
+    registration and lifecycle publications use V3, including successful updates
+    to existing registrations; previously signed retries keep their original format.
 
     This API provides authenticated, ownership-scoped operations for managing
     ANS agent registrations, certificates, and lifecycle. It replaces the
@@ -1321,7 +1324,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
 
-
 components:
   # ──────────────────────────────────────────────────────────────────
   # Security schemes — both providers (static API key + OIDC) accept
@@ -1346,6 +1348,11 @@ components:
   # Reusable parameters
   # ──────────────────────────────────────────────────────────────────
   parameters:
+    IdentityIdPath:
+      name: identityId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     AgentIdPath:
       name: agentId
       in: path
@@ -1410,7 +1417,6 @@ components:
               - ansName
               - agentId
               - agentDisplayName
-              - version
               - agentHost
               - status
               - endpoints
@@ -1477,6 +1483,7 @@ components:
           type: string
           maxLength: 150
         version:
+          description: Optional; omission creates ans://{agentHost}.
           type: string
           pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
           example: 1.2.0
@@ -1504,7 +1511,6 @@ components:
             must register a new version instead.
       required:
         - agentDisplayName
-        - version
         - agentHost
         - endpoints
 
@@ -1601,7 +1607,6 @@ components:
         - agentId
         - ansName
         - agentDisplayName
-        - version
         - endpoints
         - agentHost
         - agentStatus

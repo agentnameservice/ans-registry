@@ -90,7 +90,7 @@ continue to follow the A, AAAA, or CNAME.
 | Badge | `_ans-badge.{agentHost}` | TXT | family (every profile) | TL badge URL for verification (§6.3) | Yes |
 | Server DANE | `_{port}._tcp.{agentHost}` | TLSA | family (every profile) | Server Certificate fingerprint (`3 0 1`, selector 0); one per distinct TLS endpoint port (§6.3) | No (verify-side enforces a match when DNSSEC-validated) |
 
-When the last ACTIVE version for an `agentHost` is revoked, the AHP removes all ANS records it
+When the last ACTIVE registration for an `agentHost` is revoked, the AHP removes all ANS records it
 provisioned for that FQDN. The RA's revocation response lists the records to delete (see
 [ANS-1 §6.2](ans-1-registration.md#62-agent_revoked) for the revoke event payload).
 
@@ -137,7 +137,7 @@ above).
 | Actor | Initial registration tasks | Ongoing lifecycle tasks | Deregistration tasks |
 | --- | --- | --- | --- |
 | **AHP** | Owns domain, obtains DNS write credential, manages A/AAAA records. Provisions ANS records using content the RA generates | Autonomous DNS updates, monitors renewals, submits config changes | Submits deregistration request, revokes RA access |
-| **RA** | Generates ACME challenge, verifies record, generates permanent record content | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE version is deregistered |
+| **RA** | Generates ACME challenge, verifies record, generates permanent record content | Re-runs ACME challenge at each renewal and version bump; updates record content | Specifies records for deletion when last ACTIVE registration is deregistered |
 | **DNS provider** | Hosts authorization endpoint, processes AHP's API requests to provision ANS records | Processes AHP's modification requests | Processes deletion requests from the AHP |
 
 A CNAME at the agent's FQDN blocks apex-level HTTPS and SVCB records (RFC 1034 §3.6.2) but does not
@@ -213,6 +213,11 @@ profile registered alone still produces them:
   meaningful in a DNSSEC-signed zone, a runtime property the record set cannot know; the verify layer
   enforces the stricter rule that a DNSSEC-validated TLSA MUST match the expected fingerprint
   (§4).
+
+For a versionless registration, omit the entire `version=` pair from `_ans` and `_ans-badge`
+TXT values. Retain the format marker, owner name, endpoint values and badge locator. Existing versioned
+records retain their `v`-prefixed version value. A missing version is not a placeholder or permission to
+select an arbitrary registration on the host. DNS-AID SVCB rows continue to have no software-version field.
 
 ### 6.4 Composition: ordering, dedup, and the required-flag transition
 
