@@ -42,10 +42,49 @@ distinct stored state).
 
 The `agentHost` field is the agent's operational FQDN: ANS-3 (DNS publication) consumes it for record generation, and together with `version` it derives the registration's ANSName.
 
+### 3.1 Optional Server Certificate issuance
+
+An RA MUST support operator-provided Server Certificates (BYOC) for registration and renewal. An RA MAY
+additionally issue Server Certificates from operator-submitted CSRs. A BYOC-only RA is conformant: an
+operator can use its existing certificate provider, and the RA does not need to maintain a server-CA
+integration, issuer accounts, or issuance rate-limit and failure handling. The Server Certificate itself
+remains required; only issuance by the RA is optional.
+
+For an otherwise valid, authorized request selecting server CSR issuance, an RA that does not offer it
+MUST return HTTP `422` with code `SERVER_CA_DISABLED` and an explanation directing the caller to BYOC.
+This applies to registration, server-certificate renewal, and standalone server-CSR submission. The RA
+MUST reject the request before creating a registration, CSR, renewal, or provider order, and MUST NOT
+modify an existing registration or its certificates as a result of that rejection.
+
+| Registration or renewal input | RA with server issuance | BYOC-only RA |
+| --- | --- | --- |
+| `serverCsrPEM` only | Process CSR issuance | `422 SERVER_CA_DISABLED`; use `serverCertificatePEM` |
+| `serverCertificatePEM` only | Process BYOC | Process BYOC |
+| Neither | `422`: missing certificate input | `422`: missing certificate input |
+| Both | `422`: ambiguous certificate input | `422`: ambiguous certificate input |
+
+Acceptance remains subject to the applicable request, ownership, domain-control, and certificate checks.
+A disabled-issuance error is not a missing-field error: a CSR selects a valid input alternative that this
+RA does not offer. Clients MUST use the error code for programmatic handling, not parse the explanation.
+No capability-discovery request is required.
+
+The response uses the API's existing error envelope; the [worked example](examples/ans-1-examples.md#a6-server-issuance-disabled)
+shows the V2 response. Standalone server-CSR submission accepts `csrPEM`, not `serverCertificatePEM`:
+its error explanation MUST direct the caller to the server-certificate renewal route for BYOC replacement.
+Where an RA also exposes the V1 routes, the same status and code apply within that API's error envelope.
+
+`SERVER_CA_DISABLED` MUST NOT report a temporary failure of an enabled issuer. Temporary provider
+unavailability MUST use HTTP `503` with a distinct, documented code; the RA SHOULD include `Retry-After`
+when it can give a retry interval. Clients MUST NOT treat such a failure as a requirement to switch to BYOC.
+
+BYOC remains subject to domain-control proof and the applicable certificate trust-chain, validity, and
+DNS-name coverage checks. Server issuance support does not determine Identity Certificate issuance support.
+
 ## 4. Registration sequence
 
 Registration is a three-step flow driven by the AHP: the RA accepts the request and returns the domain-control
-challenges (`PENDING_VALIDATION`), verify-acme proves domain control and issues certificates (`PENDING_DNS`),
+challenges (`PENDING_VALIDATION`), verify-acme proves domain control and completes certificate issuance or
+BYOC validation (`PENDING_DNS`),
 and verify-dns confirms the published records and activates the agent (`ACTIVE`). ANS never writes DNS on the
 operator's behalf — every DNS step is the AHP publishing records the RA hands it.
 
@@ -68,19 +107,23 @@ The AHP submits a registration request:
 | | per-endpoint `transports` | No | `STREAMABLE_HTTP`, `SSE`, `JSON_RPC`, `GRPC`, `REST`, `HTTP` |
 | **Discovery** | `discoveryProfiles` | No | The DNS record families the RA emits for this registration, per [ANS-3 §6](ans-3-dns-publication.md#6-discovery-profiles). Defaults to `ANS_DNSAID` |
 | **Certificates** | `identityCsrPEM` | No | CSR for the Identity Certificate. When omitted, the agent registers without one and cannot add one later (§7.2) |
-| | `serverCsrPEM` | Conditional | CSR for the RA-issued Server Certificate |
+| | `serverCsrPEM` | Conditional | CSR for the RA-issued Server Certificate; only accepted when the RA offers server issuance (§3.1) |
 | | `serverCertificatePEM` (+ optional `serverCertificateChainPEM`) | Conditional | BYOC Server Certificate. Exactly one of `serverCsrPEM` / `serverCertificatePEM` MUST be present |
 
 Pending-stage validations:
 
 1. `agentHost` MUST be a syntactically valid FQDN (RFC 1123).
 2. Each endpoint's `agentUrl` MUST carry `agentHost` as its hostname (case-insensitive). The constraint keeps endpoint URLs reachable through the same TLS certificate that anchors the agent's identity.
-3. Exactly one of `serverCsrPEM` and `serverCertificatePEM` MUST be present (CSR or BYOC, never both, never neither).
+3. Exactly one of `serverCsrPEM` and `serverCertificatePEM` MUST be present (CSR or BYOC, never both, never neither). A BYOC-only RA rejects the CSR alternative with `SERVER_CA_DISABLED` (422, §3.1).
 4. The endpoint set MUST contain at least one endpoint with valid `protocol` and `agentUrl`, and at most one endpoint per protocol (`DUPLICATE_PROTOCOL`, 422).
 5. `agentDisplayName` and `agentDescription` length limits apply (64 and 150 chars respectively).
 6. The ANSName derived from `version` + `agentHost` MUST be globally unique; a taken name is rejected with `ANS_NAME_TAKEN` (409).
 
-If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName per [ANS-2 §2](ans-2-versioned-naming.md), opens a certificate order at the configured server-certificate issuer, and sets the registration to `PENDING_VALIDATION`. The response relays the order's domain-control challenges (DNS-01 TXT and/or HTTP-01) verbatim to the AHP.
+If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName per [ANS-2 §2](ans-2-versioned-naming.md),
+and sets the registration to `PENDING_VALIDATION`. For CSR issuance, it opens an order at the configured
+server-certificate issuer and relays the order's domain-control challenges (DNS-01 TXT and/or HTTP-01)
+verbatim to the AHP. For BYOC, the RA supplies its own domain-control challenges; no server-CA issuance
+order is needed. Both paths retain the verify-acme gate in §4.2.
 
 ### 4.2 Step 2 — verify-acme (domain control and certificate issuance)
 
@@ -107,7 +150,7 @@ When the records verify, the RA transitions the registration to `ACTIVE` and enq
                 │ PENDING_VALIDATION │──────────────┐
                 └──────────┬─────────┘              │
                            │ domain control proven, │ lapses to EXPIRED /
-                           │ certificates issued    │ cancel to REVOKED
+                           │ certificates ready     │ cancel to REVOKED
                            ▼                        ▼
                     ┌──────────────┐         ┌───────────────────┐
                     │ PENDING_DNS  │────────▶│ EXPIRED / REVOKED │
@@ -212,8 +255,8 @@ never stored on the registration; the list response carries no identities field.
 
 | Operation | Trigger | AHP submits | RA processes | RA seals | DNS effect |
 | --- | --- | --- | --- | --- | --- |
-| **Version bump** | Code or config change | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance, DNS verification | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
-| **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | Nothing today (`AGENT_RENEWED` reserved — §6.3) | None |
+| **Version bump** | Code or config change | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance or BYOC validation, DNS verification; CSR issuance is optional per §3.1 | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
+| **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR when offered, or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes CSR issuance or accepts the validated BYOC replacement; a BYOC-only RA rejects CSR submissions per §3.1 | Nothing today (`AGENT_RENEWED` reserved — §6.3) | None |
 | **Identity-certificate rotation** | Key roll on an identity-bearing registration | A fresh `identityCsrPEM` | Issues a new Identity Certificate at the private CA. Additive: the prior certificate remains valid until it expires. No fresh domain-control proof. `ACTIVE` registrations only; a registration created without an Identity CSR is refused (`IDENTITY_CSR_NOT_PERMITTED`, 409) | Nothing | AHP updates any published fingerprint records per ANS-3 |
 | **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists `dnsRecordsToRemove`; the AHP removes them |
 
@@ -284,6 +327,19 @@ Certificate lapse does not change RA state on an `ACTIVE` registration and emits
 `WARNING` and `EXPIRED` at read time from the sealed `expiresAt` (ANS-4). The RA's expiry sweep applies only to
 pending registrations: a lapsed `PENDING_VALIDATION` row is retired to `EXPIRED` without a TL event.
 
+### 7.4 Disabling Server Certificate issuance
+
+An RA switching to BYOC-only operation MUST retain the issuer needed by accepted CSR operations until
+they complete or reach a terminal state through their existing cancellation, failure, or expiry handling.
+It MUST NOT leave an accepted operation pending indefinitely solely because issuance was disabled.
+An implementation without separate controls for accepting and completing CSR orders must drain those
+operations before removing the issuer.
+
+Disabling issuance does not revoke previously accepted certificates or change registration identity.
+Subsequent server renewals use BYOC, even when the previous certificate was issued through the RA.
+Certificate retrieval and the BYOC validation lifecycle remain available; the existing DNS publication,
+TL event, and certificate-binding requirements still apply.
+
 ## 8. RA key management
 
 | Principle | Rule |
@@ -306,13 +362,15 @@ Producer-key rotation procedure:
 A conformant ANS-1 implementation:
 
 1. Exposes a `RegistrationService` whose register operation accepts the registration request (§4.1) and returns the pending registration with its domain-control challenges.
-2. Verifies domain control before certificate issuance on every registration and renewal — the challenge gate is unconditional, except a renewal order that arrives challenge-free under ACME authorization reuse (§7).
+2. Verifies domain control before completing certificate issuance or BYOC acceptance on every registration and renewal — the challenge gate is unconditional, except a renewal order that arrives challenge-free under ACME authorization reuse (§7).
 3. Gates Identity Certificate issuance on the presence of a pending Identity CSR (the verify-acme rule, §4.2), never unconditionally on lifecycle entry.
 4. Enforces global ANSName uniqueness at registration (`ANS_NAME_TAKEN`, 409).
 5. Never generates, holds, or accesses an agent's private keys, and does not persist proven public keys as live state (key transience per [ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)).
 6. Emits `AGENT_REGISTERED` at activation and `AGENT_REVOKED` at revocation to the ANS-4 TL, constructing and signing each event payload once and replaying the exact bytes and signature on retry.
 7. Honors the lifecycle state machine (§4.4) and produces TL events only on the `ACTIVE` and `REVOKED` transitions.
 8. Exposes an owner-scoped `list(filter)` operation that supports `agentHost` filtering.
+9. Supports BYOC registration and renewal, and follows §3.1's rejection contract when optional Server Certificate issuance is not offered, including on standalone server-CSR submission.
+10. Handles accepted CSR operations before removing their issuer (§7.4).
 
 ## 10. Security considerations
 
