@@ -1,0 +1,35 @@
+; Status tokens for V1 and V2 agent events share this encoding.
+; The event-schema version is not a new claim in the token.
+; Root: status-token. Use status-token-payload for an already-decoded payload.
+; Describes the tagged ANS format, not a generic COSE acceptance policy.
+status-token = #6.18([
+  protected: bstr .cbor status-token-protected,
+  unprotected: {},
+  payload: bstr .cbor status-token-payload,
+  signature: bstr .size 64       ; ES256 P1363 R || S, not ASN.1 DER
+])
+
+status-token-protected = {
+  1: -7,                        ; alg: ES256
+  3: "application/ans-status-token+cbor",
+  4: bstr .size 4               ; kid: first 4 bytes of SHA-256(SPKI DER)
+}
+
+status-token-payload = {
+  1: tstr,                       ; agentId (UUID string)
+  2: tstr,                       ; status; policy is defined in ANS-6
+  3: int,                        ; issued-at Unix seconds
+  4: int,                        ; expiry Unix seconds
+  ? 5: tstr,                     ; ansName
+  ? 6: [* certificate-binding],  ; identity certificates
+  ? 7: [* certificate-binding],  ; server certificates
+  ? 8: {* tstr => tstr}          ; protocol -> SHA256:<hex> metadata hash
+}
+
+; The reference encoder emits SHA256:<hex> text. Raw 32-byte fingerprints
+; are the existing reader-compatibility form documented in ANS-6.
+certificate-binding = {1: certificate-fingerprint, 2: tstr}
+certificate-fingerprint = tstr / bstr .size 32
+
+; COSE signs ["Signature1", protected, h'', payload]. CDDL validates shape;
+; it does not validate the signature, TL trust, times, status or peer binding.

@@ -58,6 +58,7 @@ The OpenAPI contracts and conformance schemas live under [`api/`](api/):
 - [Sealed Verified-Identity event (V2)](api/identity-event-schema-v2.json)
 - [Historical Transparency Log entry (V2)](api/tl-response-schema-v2.json)
 - [Current Transparency Log entry (V3)](api/tl-response-schema-v3.json)
+- Binary CDDL: [V1/V2 status tokens](api/ans-status-token-v1-v2.cddl), [V3 status tokens](api/ans-status-token-v3.cddl), and [SCITT receipts](api/ans-receipt.cddl)
 
 ## SDKs
 
