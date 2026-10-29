@@ -19,11 +19,11 @@ The ANS protocol is split across seven layered specifications under [`spec/`](sp
 | --- | --- | --- |
 | ANS-0 | [`spec/ans-0-identity-anchor.md`](spec/ans-0-identity-anchor.md) | The proof-of-control gate, Verified Identities, identity profiles |
 | ANS-1 | [`spec/ans-1-registration.md`](spec/ans-1-registration.md) | Registration aggregate, lifecycle, event set |
-| ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | Stable ANS names, optional versions, certificate binding and mTLS |
+| ANS-2 | [`spec/ans-2-versioned-naming.md`](spec/ans-2-versioned-naming.md) | Stable ANS names, optional versions, certificate binding for DPoP and optional mTLS |
 | ANS-3 | [`spec/ans-3-dns-publication.md`](spec/ans-3-dns-publication.md) | DNS publication, record styles, DANE, anchor-conditional emission |
 | ANS-4 | [`spec/ans-4-transparency.md`](spec/ans-4-transparency.md) | SCITT statements and receipts, Transparency Log, checkpoints and tiles, HCS anchoring |
 | ANS-5 | [`spec/ans-5-integrity-monitoring.md`](spec/ans-5-integrity-monitoring.md) | `VerificationWorker`, integrity reporting |
-| ANS-6 | [`spec/ans-6-agent-authentication.md`](spec/ans-6-agent-authentication.md) | Agent-to-agent authentication: badge/SCITT verification tiers, mTLS and DPoP (RFC 9449) caller methods |
+| ANS-6 | [`spec/ans-6-agent-authentication.md`](spec/ans-6-agent-authentication.md) | Agent-to-agent authentication: badge/SCITT verification tiers, recommended DPoP (RFC 9449) and optional mTLS caller authentication |
 
 Worked examples for ANS-1 live at [`spec/examples/ans-1-examples.md`](spec/examples/ans-1-examples.md). [`DESIGN.md`](DESIGN.md) is a pointer to the layered specs and to the IETF draft.
 
