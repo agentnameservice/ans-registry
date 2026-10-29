@@ -214,3 +214,87 @@ are omitted from this excerpt. It is not JSON text inside a token:
 After the old v1 metadata is retired, replace its set with only `b…`; the v2 set remains `c…`.
 Neither the agent ID nor any historical event changes. Existing overlap tokens retain their normal
 acceptance window. A digest from v2 cannot authorize the v1 document.
+
+## A.7 Account-scoped parent proof and update-time revalidation
+
+Account 1 owns a pending BYOC registration for `agent.example.com`, with ID
+`550e8400-e29b-41d4-a716-446655440000`. To validate its parent, it sends this body to
+`POST /v2/ans/agents/550e8400-e29b-41d4-a716-446655440000/domain-validation`:
+
+```json
+{
+  "domain": "example.com",
+  "challengeType": "DNS_01"
+}
+```
+
+The RA returns 202 using the existing challenge model. The value below is illustrative; production
+tokens and key authorizations must be unpredictable and account/request-bound.
+
+```json
+{
+  "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "PENDING_VALIDATION",
+  "validationId": "a54ae223-9cbf-414a-8d47-f620ade26e84",
+  "validationDomain": "example.com",
+  "expiresAt": "2026-11-01T00:10:00Z",
+  "challenges": [{
+    "type": "DNS_01",
+    "token": "fresh-account-bound-token",
+    "dnsRecord": {
+      "name": "_acme-challenge.example.com",
+      "type": "TXT",
+      "value": "base64url-sha256-key-authorization"
+    },
+    "expiresAt": "2026-11-01T00:10:00Z"
+  }],
+  "links": [{
+    "rel": "verify",
+    "href": "https://ra.example.com/v2/ans/agents/550e8400-e29b-41d4-a716-446655440000/domain-validation/verify"
+  }]
+}
+```
+
+After publishing the TXT record, the owner sends `{ "validationId": "a54ae223-9cbf-414a-8d47-f620ade26e84" }`
+to the verify link. Successful verification returns 200:
+
+```json
+{
+  "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "VALID",
+  "validatedDomain": "example.com",
+  "domainValidation": "ACME-DNS-01",
+  "domainValidatedAt": "2026-11-01T00:00:00Z",
+  "domainValidUntil": "2026-12-01T00:00:00Z",
+  "links": []
+}
+```
+
+The pending agent can complete its normal certificate/DNS activation using this proof. The same account
+can register `other.example.com`, renew either certificate role, and update covered registrations before
+December 1 without another ANS ACME challenge. Its certificate must still cover the actual agent FQDN.
+Account 2 cannot reuse Account 1's proof. A DNS-01 grant for `agent.example.com` would cover its own
+descendants but not `other.example.com`; an HTTP-01 grant covers only its exact host.
+
+At `2026-12-01T00:00:00Z`, the proof becomes non-reusable. The existing registrations remain active,
+discoverable and authenticatable, and normal status-token refresh continues, subject to certificate
+validity and lifecycle rules. The token format and its normal expiry do not depend on this date.
+The next ordinary update without another eligible grant returns 409:
+
+```json
+{
+  "status": "ERROR",
+  "code": "DOMAIN_REVALIDATION_REQUIRED",
+  "message": "Complete domain validation before retrying this update.",
+  "details": {
+    "validationUrl": "/v2/ans/agents/550e8400-e29b-41d4-a716-446655440000/domain-validation",
+    "validatedDomain": "example.com",
+    "domainValidUntil": "2026-12-01T00:00:00Z"
+  }
+}
+```
+
+Revalidate, then retry against the current ETag/state. A failed challenge or an abandoned update leaves
+the existing registration unchanged. Credential retirement and registration revocation remain available
+without fresh proof. An update committed just before the reuse deadline can publish afterward: the TL
+appends its original signed bytes and the normal certificate/lifecycle checks determine current status.

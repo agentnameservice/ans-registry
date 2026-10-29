@@ -44,10 +44,10 @@ The `agentHost` field is the agent's operational FQDN: ANS-3 (DNS publication) c
 
 ## 4. Registration sequence
 
-Registration is a three-step flow driven by the AHP: the RA accepts the request and returns the domain-control
-challenges (`PENDING_VALIDATION`), verify-acme proves domain control and issues certificates (`PENDING_DNS`),
-and verify-dns confirms the published records and activates the agent (`ACTIVE`). ANS never writes DNS on the
-operator's behalf — every DNS step is the AHP publishing records the RA hands it.
+Registration uses the existing pending, verify-acme and verify-dns operations. Domain proof may be
+reused under §7.6; an eligible account/parent-domain grant avoids another ANS challenge. Verify-acme
+completes required proof and certificate admission/issuance, then verify-dns checks production records
+before activation. ANS never writes DNS on the operator's behalf.
 
 ### 4.1 Step 1 — pending registration
 
@@ -81,11 +81,18 @@ Pending-stage validations:
 5. `agentDisplayName` and `agentDescription` length limits apply (64 and 150 chars respectively).
 6. The ANSName derived from `agentHost` and the optional `version` MUST be globally unique; a taken name is rejected with `ANS_NAME_TAKEN` (409).
 
-If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName per [ANS-2 §2](ans-2-versioned-naming.md), opens a certificate order at the configured server-certificate issuer, and sets the registration to `PENDING_VALIDATION`. The response relays the order's domain-control challenges (DNS-01 TXT and/or HTTP-01) verbatim to the AHP.
+If valid, the RA assigns an `agentId` (UUID v4), constructs the ANSName per ANS-2 and creates the pending
+registration. It first checks for reusable account/domain proof (§7.6). With none, it returns the
+required validation next steps; the owner may validate a parent through the pending registration's
+domain-validation resource. BYOC requires no CA order. A CSR issuance path may create an issuer order
+and relay that issuer's challenges independently of the ANS proof cache.
 
 ### 4.2 Step 2 — verify-acme (domain control and certificate issuance)
 
-After publishing a challenge artifact, the AHP calls `verifyACME(agentId)`. The challenge gate passes when either the DNS-01 TXT record or the HTTP-01 resource verifies. The gate is unconditional — it runs on every registration.
+The AHP calls `verifyACME(agentId)` to complete this phase. The RA uses eligible proof under §7.6 or
+verifies a fresh challenge when needed. Covered BYOC does not repeat a challenge during the reuse
+window. DNS-01 grants account/parent-domain reuse; HTTP-01 proves only the exact host. Issuer-required
+validation remains separate.
 
 On a passing gate the RA:
 
@@ -101,7 +108,10 @@ After publishing the production records, the AHP calls `verifyDNS(agentId)`. The
 ANS-managed discovery records under ANS-3 §4. SVCB and HTTPS lookups carry the resolver's DNSSEC Authenticated-Data
 result into the sealed event as `dnsRecordsProvisioned[].dnssecVerified`; TXT lookups do not carry the flag.
 
-When the records verify, the RA records the ACTIVE transition and its signed `AGENT_REGISTERED` publication under the durability and replay requirements in §6.3–§6.5.
+When the records verify, the RA rechecks owner-account proof eligibility (§7.6) at activation commit,
+then records the ACTIVE transition and signed `AGENT_REGISTERED` publication under §6.3–§6.5.
+A pending registration without eligible proof remains pending; an existing ACTIVE registration is
+never inactivated solely because a proof-reuse window ends.
 
 ### 4.4 The state machine
 
@@ -232,16 +242,16 @@ current after a newer one. Historical entries are immutable.
 
 | Operation | Trigger | AHP submits | RA processes | RA seals | DNS effect |
 | --- | --- | --- | --- | --- | --- |
-| **Additional versioned registration** | Operator needs a separate registration identity | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | The new registration runs the full sequence — fresh domain-control proof, certificate issuance, DNS verification | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
-| **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Re-proves domain control at renewal verify-acme (DNS-01 TXT or HTTP-01), then finalizes the order and delivers the fresh certificate | `AGENT_RENEWED` with current certificate and metadata snapshots | None |
+| **Additional versioned registration** | Operator needs a separate registration identity | A full new registration: new `version`, same `agentHost`, display name, endpoints, and exactly one of server CSR / BYOC (an Identity CSR MAY be included) | Reuses eligible account/domain proof or obtains fresh proof (§7.6), admits/obtains certificates and verifies production DNS | `AGENT_REGISTERED` (for the new registration) | New per-version records published by the AHP; the prior version's records are untouched |
+| **Renewal (Server Certificate)** | Certificate approaching expiration | A renewal submission (CSR or BYOC) on the renewal routes | Reuses eligible account/domain proof or validates when needed (§7.6), then completes issuance or BYOC admission | `AGENT_RENEWED` with current certificate and metadata snapshots | None |
 | **Identity credential addition/rotation/removal** | Owner authorizes or retires a credential | `csrPEM` or BYOC leaf on the identity route; DELETE an individual binding by fingerprint | Owner/ACTIVE/admission checks; retain valid overlap; removing an external binding does not revoke its CA certificate (§7.2) | `AGENT_RENEWED` with the resulting certificate families | No automatic DNS publication |
 | **Profile/endpoint update** | Display text, metadata or endpoint changes | Complete replacement with the resource ETag in `If-Match` | Owner/lifecycle/precondition and full-result validation (§7.4) | `AGENT_UPDATED` | No DNS change for unmirrored display/hash edits; locator changes may require publication |
 | **Revocation** | Agent shutdown or version retirement | `reason` (RFC 5280 reason name token) | Revokes Identity Certificates at the issuing private CA (Server Certificates are not revoked at their issuer) and transitions the registration | `AGENT_REVOKED` | The revocation response lists ANS-managed `dnsRecordsToRemove`; the AHP removes them under ANS-3 |
 
-One exception to the renewal re-proof: a CSR renewal whose provider order arrives with no challenges (ACME
-authorization reuse inside the provider's validity window) finalizes directly — the re-proof is the
-provider's cached validation rather than a fresh RA-side check. Re-driven verify-acme calls on an
-already-finalizing order likewise skip the artifact check by design.
+The same account/domain proof lookup applies to BYOC registration, server renewal, identity credential
+addition/replacement and ordinary updates. An issuer may independently reuse its CA authorization or
+require another challenge for issuance. A shared RA CA-account authorization is not evidence for an
+individual owner account; BYOC needs no CA order. Reuse never advances the ANS proof timestamps.
 
 ### 7.1 Version coexistence
 
@@ -269,7 +279,10 @@ not the externally issued certificate at its CA. Fresh evidence excludes the bin
 retain their existing acceptance window.
 
 Retiring the final identity binding leaves a server-only registration and disables ANS caller
-authentication. Credential removal preserves domain-proof age.
+authentication. Credential removal preserves domain-proof age and never requires fresh ACME merely
+because its reuse window ended. Credential additions/replacements require eligible proof at commit
+(§7.6); a delayed issuance completion with no reusable proof waits for revalidation without withdrawing
+the existing credential set.
 
 ### 7.3 Expiry
 
@@ -333,7 +346,10 @@ bindings are usable only after they appear in the verifier's authenticated evide
 representation returns the same ETag without another event. After an ambiguous response, read the
 resource before retrying: the earlier write may have succeeded and made its precondition stale.
 
-Metadata edits preserve domain-proof age. `discoveryProfiles` is not writable here. Endpoint, port or
+Ordinary updates require reusable owner-account proof at commit (§7.6). Without it, return
+`409 DOMAIN_REVALIDATION_REQUIRED` with an actionable validation URL and leave existing published state
+unchanged. An exact retry/no-op does not require fresh validation or create another event. Metadata
+edits preserve proof age. `discoveryProfiles` is not writable here. Endpoint, port or
 locator changes may require operator DNS publication under ANS-3.
 
 ### 7.5 Discovery snapshots and stable identifiers
@@ -349,6 +365,82 @@ results; a failed projection does not. The registration still has at least one e
 Keep established agent and child discovery identifiers stable across renames, hash changes, adoption and
 index rebuild. Optional `discoveryIdentifier` carries the existing handle. Catalog `updatedAt` reflects
 the published event time, and its ETag changes when emitted bytes change.
+
+### 7.6 Account/domain proof reuse
+
+Domain validation gates activation and state-changing updates, not continuing registration validity.
+Expiry of a proof-reuse window MUST NOT inactivate an existing registration, suppress discovery, stop
+status-token issuance/refresh, or reject otherwise-valid DPoP/mTLS authentication. Certificate validity,
+credential retirement, explicit revocation and normal evidence freshness remain independent checks.
+
+**Grant and scope.** Bind each grant to the authenticated owner account within this RA, the normalized
+`validatedDomain`, proof method, actual successful `domainValidatedAt` and exclusive `domainValidUntil`.
+The account is the customer's RA identity, not a shared CA/ACME service account. The maximum reuse
+interval is **30 days (2,592,000 seconds)**; shorter published RA policy is permitted. Reuse, certificate
+issuance, token refresh, retries and event publication MUST NOT advance these timestamps.
+
+DNS-01 validates the requested domain and grants that same account reuse for it and its descendants.
+HTTP-01 grants exact-host reuse only: web-service control is not authority over a DNS subtree. A parent
+grant at `example.com` covers `agent.example.com` and `v2.agent.example.com`; an exact/child grant cannot
+cover a parent or sibling. Normalize names to lowercase DNS A-labels without a terminal dot, reject
+invalid names and public-suffix targets, and compare complete labels. `badexample.com` and
+`example.com.attacker.test` are not descendants of `example.com`.
+
+DNS delegation does not transfer RA account ownership or authorize another account to reuse a grant.
+Parent scope is this RA's admission policy, not a claim that a CA's ACME authorization covers all child
+issuance. If a known ownership change removes the account's authority, invalidate the affected grant
+for future mutations. Account transfers cannot inherit proof. A certificate still needs DNS SAN
+coverage of its actual registered host: parent proof cannot extend a certificate's wildcard scope.
+
+Every covered BYOC path MUST look for an eligible grant before requesting a new challenge, including
+initial registration, another registration under the parent, and replacement/renewal of either
+certificate role. Grants are account-scoped, not keyed to a single registration or certificate. A
+pending registration can validate an ancestor without creating an agent or obtaining a certificate
+for the ancestor itself. Registration ownership and all other admission checks remain required.
+
+**Mutation gate.** Recheck account, domain scope and `domainValidatedAt <= now < domainValidUntil` at
+activation or update commit, including after asynchronous issuance. With no eligible grant, return
+actionable `409 DOMAIN_REVALIDATION_REQUIRED` for an update and preserve existing state; initial
+registration uses its pending-validation flow. Reads, status-token refresh, exact retries/no-ops,
+credential retirement and registration revocation do not require fresh proof. A failed or postponed
+validation does not revoke an existing registration. Early refresh may be offered but is optional.
+
+An accepted mutation follows §6.3's normal publication rule. The proof may expire after commit and
+before delivery without invalidating the event or the existing registration. Preserve signed retry
+bytes and publication order. The RA records the grant used to authorize the mutation in its audit
+records; no new TL timestamp field or status-token claim is needed for this management policy.
+
+**Validation resource.** The existing owner-authenticated API exposes the following under
+`/v2/ans/agents/{agentId}`; the path selects an owned registration, not the scope of the stored grant:
+
+| Operation | Result |
+| --- | --- |
+| `GET /domain-validation` | Current eligible grant (or known expired proof) and pending challenge, with scope, timestamps and next steps |
+| `POST /domain-validation` with optional `{domain, challengeType}` | 202 with validation ID and challenges; domain defaults to `agentHost`, type defaults to `DNS_01` |
+| `POST /domain-validation/verify` with `{validationId}` | Verify the pending challenge, durably store the account/domain grant and return 200 with current proof state |
+
+An explicit `domain` must equal `agentHost` or be its non-public-suffix ancestor. `HTTP_01` is permitted
+only when domain equals `agentHost`; `DNS_01` supports parent scope. These operations need no CSR,
+replacement certificate or issuer integration. They are available for owned PENDING_VALIDATION,
+ACTIVE and DEPRECATED registrations, including computed certificate lapse; stored terminal states
+remain terminal. Successful validation does not itself publish an `AGENT_UPDATED` event or change a
+registration. Retry the intended mutation using its current state and ETag after validation succeeds.
+
+Bind pending challenges to the account, target domain and method, using fresh unpredictable tokens and
+their own `expiresAt`. Repeated starts for that tuple return its live challenge; a conflicting pending
+request returns `409 VALIDATION_CHANGED`. Completion rechecks the account, path-registration ownership,
+target coverage and challenge expiry. Completed-ID retries return current proof state without changing
+timestamps or restoring an older grant. Failed refresh leaves any prior unexpired grant usable.
+
+The response separates `validatedDomain` (the returned proof) from `validationDomain` (a pending
+challenge target). They may differ while broadening an exact-host grant to a parent grant. `VALID`
+means reusable RA proof immediately after durable verification, not TL publication. `EXPIRED` applies
+only to the proof cache. Revalidation never reactivates a revoked registration or repairs certificates.
+
+**Adoption.** Keep historical signed events and prepared retries unchanged. Reuse prior validation
+only when its account, domain, method, scope and actual verification time are reliable and satisfy
+this policy; otherwise validate at the next applicable mutation, never by inactivating an unchanged
+registration. Unrelated edits and policy changes cannot silently extend a proof's recorded window.
 
 ## 8. RA key management
 
@@ -372,7 +464,7 @@ Producer-key rotation procedure:
 A conformant ANS-1 implementation:
 
 1. Exposes a `RegistrationService` whose register operation accepts the registration request (§4.1) and returns the pending registration with its domain-control challenges.
-2. Verifies domain control before certificate issuance on every registration and renewal — the challenge gate is unconditional, except a renewal order that arrives challenge-free under ACME authorization reuse (§7).
+2. Reuses eligible account/domain proof or validates before activation and state-changing updates (§7.6), independently of issuer authorization; proof age never inactivates an existing registration.
 3. Gates Identity Certificate issuance on the presence of a pending Identity CSR (the verify-acme rule, §4.2), never unconditionally on lifecycle entry.
 4. Enforces global ANSName uniqueness at registration (`ANS_NAME_TAKEN`, 409).
 5. Never generates, holds, or accesses an agent's private keys, and does not persist proven public keys as live state (key transience per [ANS-0 §4](ans-0-identity-anchor.md#4-the-verified-identity-object)).
@@ -380,20 +472,19 @@ A conformant ANS-1 implementation:
 7. Honors the lifecycle state machine (§4.4) and permits only the eligible mutations in §7; updates never reactivate terminal registrations.
 8. Exposes an owner-scoped `list(filter)` operation that supports `agentHost` filtering.
 9. Implements resource-scoped conditional updates and published discovery snapshots (§7.4–§7.5).
+10. Exposes account/domain validation through owned registrations, supports DNS-01 parent reuse and exact-host HTTP-01, and rechecks proof eligibility at mutation commit (§7.6).
 
 ## 10. Security considerations
 
 ### 10.1 Reputation continuity and operator changes
 
-When a domain transfers ownership, the FQDN persists but the operator does not. Reputation accumulated under
-the old operator must not silently transfer to the new one. The registration model bounds the exposure through
-re-proof: domain control is re-proven at every renewal and every new version registration (the challenge gate
-is unconditional, subject to the ACME authorization-reuse window noted in §7), so a party that no longer
-controls the domain cannot renew or extend the registration. A
-failed re-proof fails that renewal — the registration is not auto-revoked — and the certificates lapse on
-their own schedule, surfacing as the TL's read-time `WARNING`/`EXPIRED` derivation. Revoking a live
-registration is an operator or RA action (`AGENT_REVOKED`); downstream consumers evaluate staleness from the
-sealed event timestamps.
+When a domain transfers ownership, its FQDN persists but the operator may change. An account/domain
+grant authorizes mutations only within its bounded reuse window; a known loss of authority invalidates
+future reuse. Proof ageing alone does not establish loss of ownership and does not revoke an existing
+registration. The window therefore does not bound continued use of an unchanged registration after a
+domain changes hands. Ownership/transfer and explicit revocation policy must address that case without
+silently transferring the old registration or reputation. Certificate validity and status evidence
+retain their own enforcement rules.
 
 ### 10.2 Failure modes
 
