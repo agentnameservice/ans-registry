@@ -161,6 +161,11 @@ assertion of the agent's computed status (`application/ans-status-token+cbor`; d
 hour), signed by the same TL key. Verifiers that need a fresh liveness signal without walking
 proofs consume this; verifiers MUST check the token's expiry themselves.
 
+Domain-proof reuse is RA management policy (ANS-1 §7.6). Proof-window expiry MUST NOT change the
+TL's computed registration status, block status-token issuance, cap token lifetime or suppress
+discovery/catalog results. No domain-proof deadline claim is required. Certificate expiry, explicit
+revocation and normal token freshness remain enforced; historical evidence stays immutable.
+
 **Binary wire definitions.** These CDDL files describe the complete tagged COSE objects:
 
 | Artifact | CDDL | Root rule |

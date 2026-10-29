@@ -90,27 +90,21 @@ paths:
       tags:
         - Management
       summary: List caller's agents
-      description: |
-        Returns agents owned by the authenticated caller. This is a management
-        endpoint, not a discovery/search endpoint.
-
-        **Key differences from v1 `GET /v1/agents`:**
-        - Results are scoped to the authenticated caller's agents only.
-        - Uses cursor-based pagination (no `offset`).
-        - Removed filters: `protocol`, `agentDisplayName`, `version`.
-          Use the dedicated search service for discovery use cases.
-        - Removed `totalCount` and `searchCriteria` from response.
-
-        **Pagination:** Use the `nextCursor` value from the response as the
-        `cursor` query parameter in the next request. When `hasMore` is false,
-        there are no more results.
+      description: "Returns agents owned by the authenticated caller. This is a management\nendpoint, not a discovery/search\
+        \ endpoint.\n\n**Key differences from v1 `GET /v1/agents`:**\n- Results are scoped to the authenticated caller's\
+        \ agents only.\n- Uses cursor-based pagination (no `offset`).\n- Removed filters: `protocol`, `agentDisplayName`,\
+        \ `version`.\n  Use the dedicated search service for discovery use cases.\n- Removed `totalCount` and `searchCriteria`\
+        \ from response.\n\n**Pagination:** Use the `nextCursor` value from the response as the\n`cursor` query parameter\
+        \ in the next request. When `hasMore` is false,\nthere are no more results.\n"
       operationId: listCallerAgents
       parameters:
         - name: status
           in: query
-          description: |
-            Filter by agent lifecycle status. Can specify multiple values.
-            Defaults to ACTIVE. Use 'ALL' to return agents of any status.
+          description: 'Filter by agent lifecycle status. Can specify multiple values.
+
+            Defaults to ACTIVE. Use ''ALL'' to return agents of any status.
+
+            '
           required: false
           style: form
           explode: true
@@ -135,9 +129,11 @@ paths:
             default: 20
         - name: cursor
           in: query
-          description: |
-            Opaque pagination cursor from a previous response's `nextCursor`.
+          description: 'Opaque pagination cursor from a previous response''s `nextCursor`.
+
             Omit for the first page.
+
+            '
           required: false
           schema:
             type: string
@@ -176,17 +172,28 @@ paths:
       tags:
         - Registration
       summary: Register a new agent with the ANS
-      description: |
-        Registers a new agent with the Agent Name Service.
+      description: 'Registers a new agent with the Agent Name Service.
 
-        The Registration Authority (RA) validates the agent's identity and
+
+        The Registration Authority (RA) validates the agent''s identity and
+
         submitted information, then interacts with the CA to issue certificates
+
         or validates provided (BYOC) server certificates.
 
+
         The identity CSR is optional. Exactly one of serverCsrPEM or
+
         serverCertificatePEM is required. An
+
         ACTIVE registration can add an identity credential later through
+
         the dedicated identity-certificate operation.
+
+
+        Registration activation applies ANS-1 section 7.6. Reuse eligible account/domain proof, including DNS-01 parent
+        scope. Without reusable proof, create pending validation and return its existing next steps; BYOC needs no
+        CA order. Certificate admission and issuer-required challenges remain separate.'
       operationId: registerAgent
       requestBody:
         description: Agent registration request
@@ -311,8 +318,14 @@ paths:
       tags:
         - Management
       summary: Replace the owner-scoped profile resource
-      description: Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
+      description: 'Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
         is durably accepted for publication as AGENT_UPDATED.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: updateAgentProfile
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -387,8 +400,14 @@ paths:
       tags:
         - Management
       summary: Replace the owner-scoped endpoints resource
-      description: Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
+      description: 'Replaces the complete resource for an eligible ACTIVE registration using If-Match. A changed result
         is durably accepted for publication as AGENT_UPDATED.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: updateAgentEndpoints
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -433,15 +452,138 @@ paths:
         '503':
           $ref: '#/components/responses/PublicationUnavailable'
 
+  /ans/agents/{agentId}/domain-validation:
+    get:
+      tags:
+        - Management
+      summary: Read reusable account/domain proof and pending validation
+      operationId: getDomainValidation
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      responses:
+        '200':
+          description: Account/domain proof and pending challenge state, separate from registration lifecycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainValidationResponse'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+      description: Owner-scoped view of proof eligible for this registration, including DNS-01 proof for an ancestor
+        domain. A proof-window expiry never changes registration lifecycle, discovery or authentication. A pending
+        challenge may coexist with an earlier reusable proof; the two domains are reported separately.
+    post:
+      tags:
+        - Management
+      summary: Start domain validation without certificate issuance
+      operationId: startDomainValidation
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      description: Start owner-account validation without certificate issuance. domain defaults to agentHost; an explicit
+        domain must equal that host or be a label-boundary ancestor, not a public suffix. DNS_01 is the default and
+        grants parent/child reuse; HTTP_01 is allowed only for agentHost and grants exact-host reuse. Matching live
+        account/domain/method challenges are idempotent; a different pending request returns 409 VALIDATION_CHANGED.
+        Available to the owner of PENDING_VALIDATION, ACTIVE or DEPRECATED registrations, including computed certificate
+        lapse. Existing proof remains usable until its own reuse deadline. BYOC paths first reuse eligible proof;
+        invoking this operation for early refresh is optional.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainValidationRequest'
+      responses:
+        '202':
+          description: Account/domain proof and pending challenge state, separate from registration lifecycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainValidationResponse'
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+        '409':
+          description: Registration is terminal, or validationId no longer identifies an eligible request (VALIDATION_CHANGED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid domain, public-suffix target, unsupported challenge type, or HTTP_01 requested for
+            an ancestor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /ans/agents/{agentId}/domain-validation/verify:
+    post:
+      tags:
+        - Management
+      summary: Complete the pending domain-control challenge
+      operationId: verifyDomainValidation
+      parameters:
+        - $ref: '#/components/parameters/AgentIdPath'
+      description: Check validationId, authenticated owner-account, requested domain/method, registration ownership
+        and challenge expiry. Durably record the successful account/domain grant and return current proof state; no
+        TL publication is needed to make the proof reusable. A completed-ID retry does not reset timestamps or overwrite
+        newer proof. Completing validation does not apply a pending registration mutation; retry it against current
+        state and preconditions. Proof expiry or verification failure never inactivates an existing registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainValidationVerificationRequest'
+      responses:
+        '401':
+          $ref: '#/components/responses/ManagementAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/RegistrationNotOwned'
+        '404':
+          $ref: '#/components/responses/RegistrationNotFound'
+        '409':
+          description: Registration is terminal, or validationId no longer identifies an eligible request (VALIDATION_CHANGED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: ACME_CHALLENGE_MISSING or ACME_CHALLENGE_EXPIRED. An early failed attempt does not erase still-valid
+            proof.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Validation service unavailable; existing proof deadlines are unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: Account/domain proof recorded; current reusable proof state returned. Registration lifecycle
+            is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainValidationResponse'
+
   /ans/agents/{agentId}/verify-acme:
     post:
       tags:
         - Registration
       summary: Trigger ACME validation
-      description: |
-        Initiates domain control validation. The AHP calls this after placing
-        the ACME challenge token. The RA validates domain control, which is
-        required before issuing both server and identity certificates.
+      description: Complete registration domain validation or reuse the authenticated account's eligible exact/ancestor
+        proof under ANS-1 section 7.6. Covered BYOC does not repeat an ANS ACME challenge or create a CA order. Issuance
+        may require its own issuer validation. Apply certificate admission, pending identity-CSR gating and the existing
+        activation/DNS steps.
       operationId: validateRegistration
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -650,9 +792,15 @@ paths:
       tags:
         - Certificate Management
       summary: Submit server certificate CSR
-      description: |
-        Submits a CSR for the agent's server certificate.
+      description: 'Submits a CSR for the agent''s server certificate.
+
         The response contains a `csrId` matching `CertificateResponse.csrId`.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: submitServerCsr
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -699,16 +847,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/DomainRevalidationRequired'
 
   /ans/agents/{agentId}/certificates/server/renewal:
     post:
       tags:
         - Certificate Management
       summary: Submit server certificate renewal
-      description: |
-        Initiates server certificate renewal. Supports CSR path (RA issues)
+      description: 'Initiates server certificate renewal. Supports CSR path (RA issues)
+
         or BYOC path (client provides certificate). Only one pending renewal
+
         allowed per agent.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: submitServerCertRenewal
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -744,7 +901,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Pending renewal already exists
+          description: Pending renewal already exists Also DOMAIN_REVALIDATION_REQUIRED with details.validationUrl
+            and known proof scope/deadline.
           content:
             application/json:
               schema:
@@ -804,9 +962,11 @@ paths:
       tags:
         - Certificate Management
       summary: Cancel pending renewal
-      description: |
-        Cancels the pending server certificate renewal. Marks associated CSR
+      description: 'Cancels the pending server certificate renewal. Marks associated CSR
+
         as REJECTED if applicable. Client can immediately submit a new renewal.
+
+        '
       operationId: cancelServerCertRenewal
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -849,9 +1009,15 @@ paths:
       tags:
         - Certificate Management
       summary: Verify ACME challenges for pending server cert renewal
-      description: |
-        Triggers ACME validation for external agents only.
+      description: 'Triggers ACME validation for external agents only.
+
         DNS-01 or HTTP-01 challenge verification.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: verifyRenewalAcme
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -898,10 +1064,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/DomainRevalidationRequired'
 
-  # ──────────────────────────────────────────────────────────────────
-  # Certificate Management — Identity
-  # ──────────────────────────────────────────────────────────────────
   /ans/agents/{agentId}/certificates/identity/{fingerprint}:
     delete:
       tags:
@@ -1009,9 +1174,15 @@ paths:
       tags:
         - Certificate Management
       summary: Submit an identity CSR or owner-authorized BYOC certificate
-      description: For an ACTIVE registration, submit one DNS-covered identity CSR or an owner-authorized certificate.
+      description: 'For an ACTIVE registration, submit one DNS-covered identity CSR or an owner-authorized certificate.
         BYOC returns pending publication and requires no enrollment possession challenge. Certificate admission and
         use follow ANS-2 and ANS-6.
+
+
+        At mutation commit, apply ANS-1 section 7.6 account/domain proof reuse, including eligible DNS-01 ancestor
+        grants. No new ANS challenge is needed for covered BYOC within the reuse window. If no proof is reusable,
+        return 409 DOMAIN_REVALIDATION_REQUIRED without changing the existing registration. Proof age never gates
+        runtime status.'
       operationId: submitIdentityCsr
       parameters:
         - $ref: '#/components/parameters/AgentIdPath'
@@ -1061,7 +1232,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Registration is not eligible, or the certificate has already been enrolled.
+          description: Registration is not eligible, or the certificate has already been enrolled. Also DOMAIN_REVALIDATION_REQUIRED
+            with details.validationUrl and known proof scope/deadline.
           content:
             application/json:
               schema:
@@ -1601,6 +1773,22 @@ components:
   # Schemas
   # ──────────────────────────────────────────────────────────────────
   responses:
+    DomainRevalidationRequired:
+      description: 'DOMAIN_REVALIDATION_REQUIRED: no reusable proof for the authenticated owner-account and registration
+        domain. The mutation is not committed; existing registration, discovery, authentication and status-token refresh
+        continue. Use details.validationUrl; known proof domain/deadline appear in details.validatedDomain and details.domainValidUntil.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: ERROR
+            code: DOMAIN_REVALIDATION_REQUIRED
+            message: Complete domain revalidation before retrying this operation.
+            details:
+              validationUrl: https://ra.example.com/v2/ans/agents/550e8400-e29b-41d4-a716-446655440000/domain-validation
+              domainValidUntil: '2026-12-01T00:00:00Z'
+              validatedDomain: example.com
     PublicationUnavailable:
       description: Durable signed publication is unavailable.
       content:
@@ -1756,6 +1944,147 @@ components:
         - CERTIFICATE_HOLD
         - PRIVILEGE_WITHDRAWN
         - AA_COMPROMISE
+
+    DomainValidationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        domain:
+          type: string
+          format: hostname
+          maxLength: 253
+          pattern: ^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$
+          description: Domain to validate, default agentHost. DNS_01 may target a non-public-suffix ancestor; HTTP_01
+            requires agentHost.
+        challengeType:
+          type: string
+          enum:
+            - DNS_01
+            - HTTP_01
+          default: DNS_01
+    DomainValidationVerificationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - validationId
+      properties:
+        validationId:
+          type: string
+          format: uuid
+    DomainValidationResponse:
+      type: object
+      additionalProperties: false
+      description: RA validation state, not registration lifecycle. VALID is immediately reusable after durable validation;
+        EXPIRED means the next applicable mutation needs revalidation and never makes the registration inactive. PENDING_VALIDATION
+        may include prior proof for validatedDomain while challenges concern validationDomain. Only the authenticated
+        owner-account can inspect or reuse these grants; a shared CA account is not that owner.
+      required:
+        - agentId
+        - status
+        - links
+      properties:
+        agentId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - UNVALIDATED
+            - PENDING_VALIDATION
+            - VALID
+            - EXPIRED
+        validationId:
+          type: string
+          format: uuid
+        domainValidation:
+          type: string
+          enum:
+            - ACME-DNS-01
+            - ACME-HTTP-01
+        domainValidatedAt:
+          type: string
+          format: date-time
+          description: Actual successful account/domain validation time; unchanged by reuse, issuance, updates, retries
+            or publication.
+        domainValidUntil:
+          type: string
+          format: date-time
+          description: Exclusive RA proof-reuse deadline, at most 2592000 seconds after domainValidatedAt. This is not
+            a certificate or registration expiry and does not cap status tokens.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Pending challenge completion deadline; distinct from domainValidUntil.
+        challenges:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ChallengeInfo'
+        nextSteps:
+          type: array
+          items:
+            $ref: '#/components/schemas/NextStep'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        validatedDomain:
+          type: string
+          format: hostname
+          maxLength: 253
+          pattern: ^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$
+          description: Domain actually proven. ACME-DNS-01 grants exact and descendant reuse for this account; ACME-HTTP-01
+            grants exact-host reuse only.
+        validationDomain:
+          type: string
+          format: hostname
+          maxLength: 253
+          pattern: ^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$
+          description: Target of the pending challenge, which may differ from the domain of the prior proof.
+      allOf:
+        - oneOf:
+            - not:
+                anyOf:
+                  - required:
+                      - validatedDomain
+                  - required:
+                      - domainValidation
+                  - required:
+                      - domainValidatedAt
+                  - required:
+                      - domainValidUntil
+            - required:
+                - validatedDomain
+                - domainValidation
+                - domainValidatedAt
+                - domainValidUntil
+        - oneOf:
+            - properties:
+                status:
+                  enum:
+                    - UNVALIDATED
+              not:
+                required:
+                  - domainValidUntil
+            - properties:
+                status:
+                  enum:
+                    - PENDING_VALIDATION
+              required:
+                - validationId
+                - validationDomain
+                - expiresAt
+                - challenges
+            - properties:
+                status:
+                  enum:
+                    - VALID
+                    - EXPIRED
+              required:
+                - validatedDomain
+                - domainValidation
+                - domainValidatedAt
+                - domainValidUntil
 
     AgentProfile:
       type: object
