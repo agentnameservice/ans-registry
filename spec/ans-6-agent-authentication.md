@@ -2,8 +2,8 @@
 
 Status: DRAFT v1.0
 Spec: ANS-6 (Agent-to-Agent Authentication)
-Version: 0.1.0
-Date: 2026-08-24
+Version: 0.2.0
+Date: 2026-10-28
 Audience: implementers building ANS-aware agent runtimes and SDKs (caller and callee sides), and operators deploying agent-to-agent authentication
 
 ## 1. Scope
@@ -15,21 +15,18 @@ time, consuming the artifacts the other layers produce — the Identity and Serv
 ([ANS-4](ans-4-transparency.md)). Where [ANS-5](ans-5-integrity-monitoring.md) specifies periodic
 out-of-band monitoring, ANS-6 specifies the per-request path between two agents.
 
-Authentication decomposes along two independent axes:
 
-- **Verification tier** — where the trust evidence comes from. The **badge tier** queries the TL
-  at connection time and trusts its response. The **SCITT tier** verifies receipt and status-token
-  artifacts locally, with no per-request network calls.
-- **Possession-proof method** — how the caller proves it holds its identity key. **Method A
-  (mTLS)** presents the Identity Certificate in the TLS handshake ([ANS-2
-  §4](ans-2-versioned-naming.md#4-mtls-with-identity-certificates)). **Method B (application-layer
-  proof of possession)** carries an RFC 9449 DPoP proof in an HTTP header, surviving L7 proxies
-  and gateways that terminate TLS.
+**DPoP is RECOMMENDED for new ANS integrations; mTLS remains an optional ANS authentication method.**
+DPoP carries registration-bound request proofs across gateways and managed HTTP environments.
+Deployments with suitable TLS control, including SPIFFE, MAY select mTLS under §6 instead. A conformant
+implementation supports at least one method and documents which; general-purpose SDKs SHOULD support
+DPoP for broad interoperability. A recommendation does not guarantee a common method between all peers.
 
-The two methods have equal standing. A deployment picks per its topology: Method A where the TLS
-path between the agents is end-to-end; Method B where intermediaries terminate TLS, or where
-client certificates are operationally unavailable. A conformant callee implements at least one
-method and documents which (§10).
+Select the method and evidence policy through trusted configuration or authenticated advertisement
+before authentication. Failure under the selected method MUST NOT trigger an automatic switch to the
+other method. Both bind the actual proof credential to the selected registration and enforce current
+ANS status and credential validity. Neither requires an ANS URI SAN. Ordinary server-authenticated HTTPS
+and the callee checks in §5 remain required. See §10.2 for adoption requirements.
 
 ANS-6 does **not** specify:
 
@@ -54,9 +51,10 @@ ANS-6 does **not** specify:
 - **Status token**: a short-lived COSE_Sign1 structure asserting an agent's current lifecycle
   state with bounded staleness. Proves *liveness*: the registration is currently valid.
 - **Possession proof**: evidence that the caller holds the Identity Certificate's private key for
-  this request — the mTLS `CertificateVerify` in Method A, the DPoP proof in Method B.
+  this connection or request — TLS CertificateVerify under mTLS, or a registration-bound DPoP signature.
 - **Verification tier**: badge tier (online) or SCITT tier (offline), per §3.2.
-- **Possession-proof method**: Method A (mTLS) or Method B (application-layer DPoP), per §3.3.
+- **Possession-proof method**: optional mTLS (Method A) or recommended DPoP (Method B), per §3.3;
+  server TLS supplies the callee possession proof.
 - **Replay cache**: the callee-side store enforcing single-use DPoP proof identifiers (§7.6).
 - **Verification**: establishing a peer's identity and liveness from ANS artifacts (§3.1 rows
   1–2). ANS-5 runs verification out-of-band and periodically; the §5–§7 procedures embed it per
@@ -74,7 +72,7 @@ Authenticating a peer establishes three independent facts, all bound to one cert
 | --- | --- | --- |
 | **Identity** | Is this certificate sealed in the Transparency Log for this agent? | Badge (badge tier) or receipt (SCITT tier) |
 | **Liveness** | Is that registration valid *right now* (ACTIVE, not revoked)? | Badge `status` (badge tier) or status token (SCITT tier) |
-| **Possession** | Does the peer hold the certificate's private key, for *this* connection or request? | TLS handshake (Server Certificate for callees; Identity Certificate under Method A) or DPoP proof (Method B) |
+| **Possession** | Does the peer hold the certificate's private key, for *this* connection or request? | Server TLS for callees; mTLS client CertificateVerify or registration-bound DPoP for callers |
 
 A verifier that checks identity and liveness but not possession accepts anyone replaying public
 artifacts — badges, receipts, and status tokens are all public documents. A verifier that checks
@@ -85,14 +83,14 @@ possession but not liveness accepts a revoked agent. All three are required.
 | Tier | Artifacts | Trust model | Per-request network calls |
 | --- | --- | --- | --- |
 | **Badge** | Badge JSON fetched from the TL | Trust the TL's response at query time | DNS lookup + TL query (cacheable) |
-| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation (under Method B the replay cache adds callee-side state, shared across replicas, §7.6) |
+| **SCITT** | Receipt + status token, presented in HTTP headers | Verify signatures and Merkle proof locally | None — verification is local computation (under DPoP the replay cache adds callee-side state, shared across replicas, §7.6) |
 
 The SCITT tier is RECOMMENDED for new implementations: a verifier holding the TL's root keys
 (§4.5, fetched once and cached) verifies peers with no DNS lookup and no TL query in the request
 path. The only recurring network dependency is each agent refreshing its **own** status token in
-the background (§4.6). The badge tier remains fully supported and is sufficient where online TL
-queries are acceptable. Method A may explicitly select either tier (§6); Method B always requires its signed status
-evidence. Missing or invalid caller artifacts do not trigger an automatic tier or method change.
+the background (§4.6). The badge tier remains available for callees and explicitly configured mTLS callers (§6.2).
+DPoP always requires its signed status evidence. Neither missing nor invalid caller artifacts trigger
+an automatic tier or method switch (§6, §9).
 
 ### 3.3 Possession-proof methods
 
@@ -103,11 +101,11 @@ evidence. Missing or invalid caller artifacts do not trigger an automatic tier o
 | Channel binding | Yes — the proof is the channel | No — the channel is server-authenticated HTTPS only |
 | Request binding | No — the handshake authenticates the connection, not individual requests | Yes — each proof binds one HTTP method + URL + content, single-use |
 | Trust anchor for the caller's certificate | Deployment-configured TLS trust plus the ANS registration/fingerprint binding (§6) | Status token's `validIdentityCerts` fingerprint set (§7.5) |
-| Callee-side state | None beyond TLS | Replay cache (§7.6) |
+| Callee-side state | TLS session and bounded ANS evidence cache (§6.4) | Replay cache (§7.6) and ANS evidence |
 
 In both methods the **callee** is authenticated the same way: TLS server authentication provides
-its possession proof, and §5 provides its identity and liveness checks. The methods differ only
-in how the **caller** proves itself.
+its possession proof, and §5 provides its identity and liveness checks. Caller methods have different
+channel/request properties and retain their respective verification requirements.
 
 For consumers scoring interaction strength: the Trust Index's interaction-context model
 ([TRUST_INDEX_SPEC.md Appendix C](https://github.com/agentnameservice/trust-index-spec/blob/main/TRUST_INDEX_SPEC.md#appendix-c-interaction-context-model-informational-implementation-recommended))
@@ -118,7 +116,7 @@ consumes their outcome.
 
 ### 3.4 Composing tiers and methods
 
-Method A composes with either tier: the mTLS handshake authenticates the caller's certificate,
+Method A explicitly selects either tier: the mTLS handshake authenticates the caller's certificate,
 and the badge (§6.2) or the caller's SCITT artifacts (§6.3) establish identity and liveness.
 Method B requires the SCITT tier: its binding checks run against the status token's certificate
 fingerprint arrays (§7.5), and its whole point is a request path free of per-request TL queries.
@@ -129,11 +127,11 @@ fingerprint arrays (§7.5), and its whole point is a request path free of per-re
 
 `GET /v1/agents/{agentId}` on the TL returns the badge: the agent's most recent sealed event
 wrapped in the TL envelope, with a Merkle inclusion proof (`merkleProof`), a `status` computed at
-query time, and the TL's signature over the payload. The envelope is `schemaVersion: "V2"`; the
+query time, and the TL's signature over the payload. Current evidence uses `schemaVersion: "V3"`; historical V1/V2 envelopes remain readable. The
 inner event carries `ansId`, `ansName`, `agent {host, name, version, providerId}`, and
 `attestations` with certificate **arrays**. A worked response lives at [ANS-4 example
 A.2](examples/ans-4-examples.md#a2-tl-badge-response); the machine-readable schema is
-[`api/tl-response-schema-v2.json`](../api/tl-response-schema-v2.json).
+[`api/tl-response-schema-v3.json`](../api/tl-response-schema-v3.json) defines the current payload.
 
 Key paths a verifier reads:
 
@@ -341,14 +339,17 @@ Input: tokenBytes, trusted key set, clock-skew tolerance (≤ 10 minutes)
    (after the signature, as in §4.3 step 3)
 6. Decode the integer-keyed payload
 7. Assert now ≤ exp + skew
-8. Assert status is not terminal (EXPIRED, REVOKED)
+8. Assert status is usable (not EXPIRED or REVOKED)
 ```
 
-**Terminal states return `410 Gone`, not a token.** The TL refuses to issue status tokens for
-EXPIRED or REVOKED agents; the absence of a fresh token *is* the revocation signal. Verifiers
-MUST treat the inability to obtain a fresh status token as equivalent to revocation, subject to
-the failure policy in §9. A `501` means the deployment has not enabled status tokens; clients
-fall back to the badge tier.
+Domain-proof reuse is an RA management rule (ANS-1 §7.6), not a runtime token requirement. An expired
+RA proof window MUST NOT prevent token issuance/refresh, cap token lifetime, alter badge/discovery
+eligibility or reject otherwise-valid caller/callee authentication. Tokens need no domain-proof claim.
+
+**Unusable states return no token.** Explicit terminal state and certificate lapse use `410 Gone`.
+Verifiers MUST reject unusable status and apply §9 only to actual availability failures. A `501` means
+status tokens are unavailable; callee verification or an explicitly configured mTLS badge tier may
+use badges. DPoP and mTLS selecting the SCITT tier still require their signed status evidence.
 
 ### 4.5 Root keys
 
@@ -401,13 +402,13 @@ exchange:
 | --- | --- | --- |
 | `X-SCITT-Receipt` | Both — callers send it on requests, callees on responses | Standard-base64 COSE_Sign1 receipt |
 | `X-ANS-Status-Token` | Both | Standard-base64 COSE_Sign1 status token |
-| `DPoP` | Requests only (Method B) | Compact-JWS DPoP proof (§7.2) |
+| `DPoP` | Requests only (DPoP) | Compact-JWS DPoP proof (§7.2) |
 
 Agents SHOULD include their artifacts on **every** request and response, not only the first —
 this lets peers observe a refreshed status token the moment it rotates. Re-presentation does not
 imply re-verification: a receiver SHOULD cache the verified result keyed by the artifact bytes
 (or their hash) and re-run cryptographic verification only when the presented bytes change or
-the cached token's `exp` passes. The Method-B possession proof is the exception — it is
+the cached token's `exp` passes. The DPoP possession proof is the exception — it is
 single-use by design and is verified on every request (§7.4). Each of these headers,
 plus `Authorization` (which drives the token binding in §7.8), MUST appear at most once; a
 verifier MUST reject a request carrying duplicates, since two hops reading different values of
@@ -596,8 +597,9 @@ host MUST NOT select a different registration. Require:
 | `SHA-256(peer leaf DER)` | `.payload.producer.event.attestations.identityCerts[]` | Matches an authorized entry |
 | — | `.status` | Eligible under §4.4; terminal/certificate-lapsed registrations reject |
 
-Enforce the applicable evidence freshness and certificate validity at use time. A configured badge
-tier is not permission to discard invalid supplied signed artifacts or bypass a determinate rejection.
+Enforce evidence freshness and certificate validity at use time.
+A configured badge tier is not permission to discard invalid supplied signed artifacts or bypass a
+determinate rejection.
 
 ### 6.3 SCITT tier
 
@@ -620,8 +622,7 @@ under §6.2; failure is not a signal to switch tiers or caller-authentication me
 ### 6.4 Timing and caching
 
 Cache verification results by `(trusted TL, agentId, peer leaf fingerprint)`, not just the connection
-or issuer. At every use, enforce current leaf validity and the evidence-acceptance deadline; refresh
-before it expires. Retiring a binding does not recall already-issued tokens, but a refreshed snapshot
+or issuer. At every use, enforce current leaf validity and the evidence-acceptance deadline; refresh before it expires. Retiring a binding does not recall already-issued tokens, but a refreshed snapshot
 excluding that fingerprint MUST stop further ANS-authorized use, even on an established connection.
 
 Long-lived sessions MUST revalidate before their permitted evidence window ends or stop ANS-authorized
@@ -647,26 +648,26 @@ grant application permissions. Unverified identifiers MUST NOT become the author
 | Trusted TL, signature, fingerprint, hostname, lifecycle or freshness check fails | Reject |
 | TLS session remains open after its permitted ANS evidence window | Revalidate or stop ANS-authorized use |
 
-## 7. Authenticating a caller — Method B: application-layer proof of possession
+## 7. Authenticating a caller — Method B: DPoP
 
-Method B moves the caller's possession proof from the TLS handshake to the application layer as a
+DPoP moves the caller's possession proof from the TLS handshake to the application layer as a
 [DPoP](https://www.rfc-editor.org/rfc/rfc9449) proof — the RFC-stable form of the IETF WIMSE
 workload-proof-token pattern — carried in the standard `DPoP` header over ordinary
-server-authenticated HTTPS. No client certificate appears in the handshake, so the proof survives
-L7 proxies, gateways, and any hop that terminates TLS.
+server-authenticated HTTPS. This proof requires no TLS client certificate and works across supported
+L7 proxies and gateways that preserve its signed request facts.
 
 Where textbook DPoP gets its identity binding from an authorization server stamping a key
 thumbprint into an access token, this profile gets it from the Identity Certificate and the
 Transparency Log — it works with no authorization server at all. OAuth 2.0 composes on top,
 unchanged, when a deployment adds one (§7.8).
 
-### 7.1 The three proofs under Method B
+### 7.1 The three proofs under DPoP
 
 | Proof | Provided by |
 | --- | --- |
 | Identity | SCITT receipt in `X-SCITT-Receipt` (§4.3) |
 | Liveness | Status token in `X-ANS-Status-Token` (§4.4) |
-| Possession | DPoP proof in `DPoP` — what the mTLS handshake used to provide |
+| Possession | DPoP proof in the `DPoP` header, bound to this request |
 
 All three MUST bind to one Identity Certificate (§7.5). The receipt is REQUIRED by default; a
 deployment MAY operate in a reduced mode that accepts status token + proof alone, trading away
@@ -709,8 +710,8 @@ The payload claims:
 | `iat` | Issue time, Unix seconds |
 | `jti` | Unique proof id, ≤ 128 bytes. Signers SHOULD generate ≥ 96 bits of randomness (the reference signer uses 128); verifiers can only enforce presence and the size cap |
 | `ath` | Only when the request presents an access token: `base64url(SHA-256(token))` (§7.8) |
-| `ans_profile` | OPTIONAL. A positive JSON integer identifying the Method-B profile revision; absence means revision `1`, while revision `2` requires explicit selection and `ans_agent_id`. Verifiers MUST reject malformed values and revisions they do not support (§7.12) |
-| `ans_agent_id` | REQUIRED for revision `2`: the existing registration ID, signed with the request. It must agree with the expected caller registration and status evidence (§7.5) |
+| `ans_profile` | REQUIRED. The JSON integer `2` for this baseline. Missing, malformed, unselected or unsupported revisions reject (§7.12) |
+| `ans_agent_id` | REQUIRED: the existing registration ID, signed with the request. It must agree with the expected caller registration and status evidence (§7.5) |
 | `ans_content_digest` | REQUIRED. `base64url(SHA-256(content))`, without padding, over the request content defined by RFC 9110 §6.4: after transfer-coding removal, with any content coding still applied. Requests without content carry the digest of the empty octet string (§7.13) |
 
 Verifiers MUST ignore payload claims they do not understand, as required by
@@ -727,7 +728,7 @@ it is case-sensitive and receives no dot-segment or percent-encoding canonicaliz
 path-rewriting hop between caller and callee breaks the binding **by design**: the proof binds
 the URL the caller signed, not whatever a middlebox turned it into. Because `htu` excludes the
 query string, request parameters are not bound — deployments MUST NOT put authority-bearing
-parameters in the query string of a Method-B endpoint.
+parameters in the query string of a DPoP endpoint.
 
 ### 7.4 Verification procedure
 
@@ -740,10 +741,11 @@ Then, in order, cheapest and least stateful first:
 
 1. Proof size within bound; compact JWS structure splits into three segments.
 2. Strict header decode (§7.2); `typ` and `alg` match; `jwk` present; `x5c` has exactly one
-   entry. Decode the payload; reject a malformed or unsupported `ans_profile` and a missing or
-   malformed `ans_content_digest` (§7.2). Revision 2 also requires a valid `ans_agent_id` for the selected caller registration.
+   entry. Decode the payload; require `ans_profile: 2` and reject a missing, malformed or unsupported revision and a missing or
+   malformed `ans_content_digest` (§7.2). Require a valid `ans_agent_id` for the selected caller registration.
 3. Parse `x5c[0]`; the leaf key MUST be ECDSA P-256; the certificate's validity period MUST
-   contain the current time (§7.5).
+   contain the current time (§7.5). When Key Usage is present, require `digitalSignature`
+   under ANS-2 §3.2; TLS `clientAuth` is not required for DPoP.
 4. `jwk` equals the certificate key, byte-for-byte.
 5. JWS signature verifies under that single key.
 6. `htm` equals the request's HTTP method.
@@ -768,12 +770,10 @@ The certificate that signed the proof must be the certificate the TL vouches for
 
 1. **Fingerprint.** `SHA-256(x5c[0] DER)` MUST equal some entry of the status token's
    `validIdentityCerts`.
-2. **Registration binding.** For revision 1, the certificate MUST carry an `ans://` URI SAN whose
-   host equals the status token's ANSName host; the legacy URI checks remain in force. For revision 2,
-   `ans_agent_id` MUST equal the expected caller registration ID and the signed status token's agent ID.
+2. **Registration binding.** `ans_agent_id` MUST equal the expected caller registration ID and the signed status token's agent ID.
    Anchor the expected registration to its trusted TL. Parse the authenticated ANS name under ANS-2,
    require its FQDN to be the expected caller FQDN, and check the leaf's DNS SAN coverage against it.
-   A Common Name cannot substitute for DNS SAN coverage. No ANS URI SAN is required for revision 2.
+   A Common Name cannot substitute for DNS SAN coverage. No ANS URI SAN is required.
    Do not use the callee's request Host as the caller identity or select trust from unverified proof fields.
 3. **Receipt agreement.** When a receipt is presented, the sealed event in its leaf payload MUST
    name the same agent as the status token: equal `ansName` — compared case-insensitively over
@@ -788,7 +788,7 @@ tolerance). Certificate fingerprints in historical leaves never change, and cach
 Fresh status evidence can omit retired or expired credentials, but that does not remove the need to
 check the presented certificate's own validity period on every verification.
 
-**Deliberately absent:** CA-chain validation, key usage, and certificate-type checks. The status
+**Deliberately absent from DPoP verification:** CA-chain validation and certificate-type checks. The status
 token — signed by the TL, bounded by `exp` — is the trust statement about the certificate's
 *registration*. Chain validation would introduce a second trust root whose revocation semantics
 (CRL/OCSP) run on a different clock than the TL's; this profile keeps one authority for "is this
@@ -799,7 +799,7 @@ which expects full RFC 5280 path validation for `x5c`; §7.9 records the deviati
 
 The authenticated result is the status token's `ansName` and `agentId`, the proof certificate's
 fingerprint, and the key's RFC 7638 thumbprint (for §7.8). As everywhere in ANS-6, this is
-authentication only — the callee authorizes separately (§6.5 applies unchanged).
+authentication only — the callee authorizes separately (§6.5).
 
 ### 7.6 Replay protection
 
@@ -894,27 +894,18 @@ the header, they MUST read identical bytes — one parser, not two.
   also uses the fixed-width `R || S` form per RFC 7518 §3.4. Implementations bridging to DER-based
   APIs convert accordingly.
 
-### 7.10 What Method B gives up relative to Method A
+### 7.10 Transport, content and proxy limits
 
-DPoP provides sender-constraint, not channel binding: the TLS channel is server-authenticated
-only, and the proof binds the request, not the connection. A caller induced to connect to a
-hostile callee discloses its receipt and status token (both public documents) and one single-use,
-`htu`-bound, `iat`-bounded proof — the callee learns nothing it can replay elsewhere as that
-caller, but the caller has still spoken to the wrong party; §5's callee authentication is what
-prevents that. There is also no mutual endpoint authentication at the TLS layer and no
-credential confidentiality for the proof itself.
+DPoP provides request proof, not TLS channel binding. HTTPS protects each transport connection and
+authenticates the server; §5 verifies the callee's ANS binding before application data is entrusted to
+it. Receipts, status tokens and proof certificates are public artifacts, not confidential credentials.
 
-**No request-content integrity from the base DPoP proof.** The base proof binds only the HTTP
-method and URI: neither the query string (§7.3) nor the message body is covered
-([RFC 9449 §11.7](https://www.rfc-editor.org/rfc/rfc9449#section-11.7)). A hop that terminates
-TLS — the topology Method B exists for — can therefore alter either on a first, in-flight request
-without invalidating the proof, and that is not replay: the `jti` is unseen and the `iat` fresh.
-The required `ans_content_digest` claim (§7.13) closes this for the message content; the query
-string stays uncovered by design. Method A prevents the tampering structurally — an
-intermediary cannot terminate mTLS to the callee without being the callee.
-
-Deployments needing channel binding and mutual endpoint authentication at the TLS layer run
-Method A (or both — the methods are not mutually exclusive on one callee).
+Base RFC 9449 DPoP does not bind message content or the query string. This profile requires
+`ans_content_digest` for content, including empty requests (§7.13), but the query remains outside `htu`.
+Applications MUST NOT infer query integrity from this proof; security-relevant query values need a
+separately defined integrity mechanism or must be moved into signed content. Intermediaries must
+preserve the facts the proof binds or verification fails. Additional infrastructure protections do
+not waive the ANS signature, replay, content, identity or status checks.
 
 ### 7.11 Outcomes
 
@@ -923,7 +914,7 @@ Method A (or both — the methods are not mutually exclusive on one callee).
 | Duplicate `DPoP` / `Authorization` / SCITT header | Reject |
 | Request authority outside the trusted set | Reject |
 | Proof oversize, malformed, wrong `typ`/`alg`, extra header params, `d` in `jwk` | Reject |
-| `ans_profile` malformed or unsupported | Reject |
+| `ans_profile` missing, not `2`, malformed or unselected | Reject |
 | `x5c` count ≠ 1, non-P-256 leaf, certificate expired or not yet valid, `jwk` ≠ certificate key | Reject |
 | Signature invalid | Reject |
 | `htm`/`htu` mismatch | Reject |
@@ -932,7 +923,7 @@ Method A (or both — the methods are not mutually exclusive on one callee).
 | `iat` outside window; `jti` missing or oversize | Reject |
 | Missing status token (or missing receipt where required) | Reject — §10.1 makes accepting this non-conformant, and the absence may be an intermediary stripping headers (§9.7) |
 | Status token invalid, expired, or terminal status | Reject (expired: §9.4) |
-| Fingerprint not in `validIdentityCerts`; revision-1 URI mismatch; revision-2 registration-ID or DNS coverage mismatch; receipt names a different agent | Reject |
+| Fingerprint not in `validIdentityCerts`; registration-ID or DNS coverage mismatch; receipt names a different agent | Reject |
 | `jti` already seen; replay cache full or erroring | Reject (fail closed) |
 
 ### 7.12 Profile evolution
@@ -943,19 +934,18 @@ is the extension lane. Verifiers MUST ignore payload claims they do not understa
 RFC 7519 §4), so an addition that a verifier may safely ignore can be an OPTIONAL payload claim.
 A new security requirement cannot rely on an older verifier enforcing a claim it ignores.
 
-A change a verifier cannot safely ignore — a new `alg`, a different key-carriage mechanism, a
-tightened check — is a **profile revision**. This document defines revisions 1 and 2:
+A change a verifier cannot safely ignore — a new `alg`, different key carriage or tightened check —
+is a **profile revision**. The current baseline requires revision 2, selected through trusted
+configuration or authenticated advertisement; the signed `ans_profile` claim confirms that selection.
+It is never carried in `typ`, which remains `dpop+jwt`. Missing revision claims and revision 1 do not
+meet this baseline and MUST reject on endpoints enforcing it. Legacy compatibility may be isolated
+during migration (§10.2), but an authentication failure MUST NOT trigger automatic downgrade.
 
-- **The revision is never carried in `typ`.** RFC 9449 pins `typ: dpop+jwt`, and wire-conformance
-  with textbook DPoP is a property this profile keeps. A proof states its revision in the
-  `ans_profile` payload claim (§7.2); absence means revision 1.
-- **Revision 1** uses URI-SAN identity binding; **revision 2** requires signed `ans_agent_id` and the
-  registration/fingerprint/DNS binding in §7.5. Both use the full verification procedure in §7.4.
-- **Selection** uses trusted configuration or a separately specified authenticated advertisement.
-  Reject unsupported or unselected revisions; an unauthenticated rejection MUST NOT trigger downgrade.
-
-Revision-2 replay accounting is scoped to the trusted TL, registration and credential as well as the proof
-identifier. The existing shared-cache and fail-closed requirements apply across replicas and restarts.
+Revision 2 requires signed `ans_agent_id` and the registration/fingerprint/DNS binding in §7.5.
+Replay accounting is scoped to the trusted TL, registration and credential as well as the proof ID;
+the shared-cache and fail-closed requirements apply across replicas and restarts. Future revisions
+require a separately specified authenticated rollout; unfamiliar payload claims cannot silently
+weaken current requirements.
 
 ### 7.13 Request-content binding
 
@@ -984,12 +974,12 @@ the caller sent empty therefore causes a digest mismatch.
 - Claim present, request carries no content, and the value is not the empty-content digest →
   reject.
 - Claim absent or malformed → reject. Every conformant signer carries the claim (§7.2), and
-  every conformant Method-B callee enforces it.
+  every conformant DPoP callee enforces it.
 
 **The binding is transformation-hostile by design**, exactly as §7.3 is for paths: the digest
 covers the octets the caller sent, so a hop that re-encodes, recompresses, or otherwise
 rewrites content breaks the binding — the proof binds what the caller signed, not what a
-middlebox produced. Deployments MUST NOT transform request content on Method-B endpoints, the
+middlebox produced. Deployments MUST NOT transform request content on DPoP endpoints, the
 content analogue of §7.3's query-string rule. Changing transfer framing while preserving the
 content octets does not change the digest.
 
@@ -1036,6 +1026,12 @@ forensics are needed.
 
 ## 9. Failure handling
 
+Caller authentication retains its selected method and tier. The badge fallback policies below apply
+to callee verification, not to missing caller artifacts under DPoP or the mTLS SCITT tier. An mTLS
+deployment may explicitly select the badge tier before authentication (§6.2). An unverified fail-open
+result MUST NOT be represented as successful ANS authentication. Certificate validity and ordinary
+evidence-acceptance windows still apply; RA proof age does not change them.
+
 ### 9.1 DNS lookup failure (badge tier)
 
 Distinguish NXDOMAIN (record does not exist → not an ANS agent) from SERVFAIL/timeout (lookup
@@ -1044,9 +1040,8 @@ retrieved-and-matching badge suffices; none retrievable → failure policy.
 
 NXDOMAIN can be the *post-revocation* state, not only the never-registered one: revocation
 deletes the version's records, `_ans-badge` included
-([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)'s `dnsRecordsToRemove`). So when a peer
-presents an ANS Identity Certificate and its host publishes no matching badge record, the
-determinate answer is rejection (§6.6) — a cached pre-revocation badge is not a fallback. §9.2's
+([ANS-1 §7](ans-1-registration.md#7-lifecycle-operations)'s `dnsRecordsToRemove`). When the selected badge tier requires discovery and the configured peer host has no matching badge record, the
+determinate answer is rejection (§5.1, §6.2) — a cached pre-revocation badge is not a fallback. §9.2's
 fail-open-with-cache applies to an unreachable TL, never to a record that is affirmatively gone.
 
 ### 9.2 TL unreachable (badge tier)
@@ -1076,12 +1071,14 @@ fall back to the badge tier, or fail closed, per deployment policy.
 
 | Policy | Behavior | Trade-off |
 | --- | --- | --- |
-| Fall back to badge | Live TL status check | Reintroduces the online query |
+| Fall back to badge (callee verification only) | Live TL status check | Reintroduces the online query; never substitutes for the caller’s required signed status token |
 | Grace window | Accept a recently-expired token within a bounded grace (e.g. ≤ 1× TTL) | Extends the revocation-latency bound by the grace |
 | Fail closed | Reject | Secure; reduces availability |
 
-A `410 Gone` from the status-token endpoint is not a failure — it is the terminal-state signal
-and MUST reject (§4.4). A `501` means the TL has no status tokens; use the badge tier.
+A `410 Gone` from the status-token endpoint is not a failure — it is the terminal/certificate-lapse signal
+and MUST reject (§4.4). A `501` means the TL has no status tokens. Callee verification and a previously
+configured mTLS badge tier remain available; a caller selecting a signed-status tier cannot bypass
+its required token.
 
 ### 9.5 Unknown signing key (SCITT tier)
 
@@ -1091,7 +1088,7 @@ retry the lookup; if the `kid` is still unknown, reject. Do not fall back to a w
 unknown `kid` alone: the badge tier consults the same TL, and a verifier that cannot recognize
 the TL's signing key has a configuration problem, not an evidence problem.
 
-### 9.6 Replay cache unavailable or saturated (Method B)
+### 9.6 Replay cache unavailable or saturated (DPoP)
 
 The replay cache is the one stateful dependency in the §7.4 pipeline, and §7.6 requires it to
 fail closed: a cache that is down, erroring, or at capacity rejects requests rather than admitting
@@ -1117,48 +1114,68 @@ reopens the replay exposure that single-use proofs exist to close. Operationally
 Fallbacks apply to *missing or stale* evidence. Evidence that is present and **fails** — a bad
 Merkle proof, a forged signature, a fingerprint mismatch, a terminal status — is a rejection, not
 a trigger to try a weaker tier. Absence is not always innocent either: where the topology lets an
-intermediary remove headers — Method B's operating premise — a missing SCITT artifact on a `DPoP`
+intermediary remove headers — DPoP's operating premise — a missing SCITT artifact on a `DPoP`
 request is a rejection (§7.11, §10.1), not a fallback trigger. §9.5's reasoning applies: that is
 a configuration or tampering problem, not an evidence problem.
 
 ## 10. Conformance
 
-A conformant ANS-6 verifier (callee side):
 
-1. Implements at least one caller-authentication method (§6 or §7) and documents which; when
-   implementing Method B, implements the full §7.4 order, the §7.5 binding, the §7.6 replay
-   rules, and the §7.7 authority requirement, failing closed throughout. Method B is conformant
-   only with its SCITT binding: a callee that accepts DPoP proofs without verifying a status
-   token against the proof certificate (§7.5) is non-conformant — that is not a degraded mode.
-2. Implements callee-side artifact verification per §4: receipt (JCS + RFC 9162 walk + TL
-   signature), status token (signature, `exp`, terminal-status handling), root-key handling with
-   `kid` cross-reference.
-3. Under the badge tier, enforces the trusted-TL allowlist (§4.2) before every badge fetch and
-   the §6.2 registration, fingerprint and hostname match set.
-4. Treats every procedure's result as authentication only, applying authorization separately.
+### 10.1 Authentication and artifacts
 
-A conformant ANS-6 caller:
+A conformant implementation:
 
-5. Authenticates callees per §5 before trusting application data, including the fingerprint and
-   hostname binding.
-6. Serves its own artifacts per §4.6 — on every request, refreshed in the background, never
-   minted or fetched in the request path — and, under Method B, mints proofs conformant to §7.2
-   with fresh `jti` and current `iat` per request and `ans_content_digest` computed per §7.13
-   over the content it transmits, including empty content.
-7. Enforces single-valued security headers in both directions (§4.6).
+1. Supports and documents at least one caller-authentication method. DPoP revision 2 is RECOMMENDED;
+   mTLS under §6 is an optional conformant choice. Method/evidence selection is explicit and cannot
+   change automatically after an authentication failure.
+2. For mTLS, implements §6's TLS-peer validation, registration selection, fingerprint/DNS binding,
+   current-evidence checks and session limits. The configured badge tier requires an expected
+   registration; the SCITT tier requires its signed artifacts. A certificate URI is not the ANS identity.
+3. For DPoP, implements revision 2 and the full §7.4 order, §7.5 binding, §7.6 shared replay protection,
+   §7.7 authority policy and §7.13 content binding. A valid TLS client certificate does not substitute
+   for DPoP on a request selecting that method. DPoP requires a signed status token and the receipt
+   unless the explicit §7.1 policy waives it; absent evidence is not badge-only authentication.
+4. Enforces the selected tier's signature, receipt/checkpoint and root-key rules (§4), certificate
+   validity, current registration status and ordinary evidence freshness (§4.4). None may be bypassed by
+   a valid handshake, a historical receipt or an open connection. The trusted-TL policy applies before
+   retrieval and verification; artifacts cannot introduce a new trust anchor.
+5. Authenticates callees per §5 before trusting application data, including hostname and server-leaf
+   fingerprint binding. Supplies the selected caller method's evidence under §4.6, refreshed in the
+   background; DPoP adds a fresh per-request proof and content digest. Enforces single-valued security
+   headers and applies application authorization only after authentication.
 
-A conformant implementation of either role passes the profile's conformance vectors. The vector
-suite MUST include the §7.2 negative cases — a library-added `kid`, a multi-entry `x5c`, a
-`jwk` carrying members beyond the four, a `d` in the `jwk` — and these payload cases:
+Conformance vectors cover every implemented method. Shared cases include qualifying certificates
+without an ANS URI, wrong-registration/fingerprint/hostname rejection, issuer-policy rejection at RA
+admission, certificate/status expiry, overlap/retirement and cached evidence. Proof-window expiry alone
+must leave authentication, discovery and normal token refresh available. Method-specific cases:
 
-- An unknown payload claim is ignored; an otherwise-valid proof still verifies.
-- An absent `ans_profile` and an explicit `ans_profile: 1` both select revision 1; malformed
-  values and unsupported revisions reject.
-- Revision 2 rejects missing/wrong `ans_agent_id`, a token naming another registration, wrong/CN-only DNS coverage, and relabelled proofs even when a certificate is shared across registrations.
-- A missing, malformed, or mismatched `ans_content_digest` rejects, including content added to
-  an empty request or removed from a request with content.
-- The empty-content digest verifies for an empty request; changing transfer framing alone
-  preserves verification, and content codings remain applied when computing the digest (§7.13).
+- **mTLS:** accept a qualifying DNS-covered SPIFFE SVID without an ANS URI; reject URI-only SVIDs,
+  untrusted issuers, ineligible client-authentication purpose and forged forwarding assertions.
+  Test ambiguous registration selection, shared credentials, leaf replacement, TLS resumption and
+  session revalidation after retirement or evidence expiry. A missing DPoP header is not an mTLS failure.
+- **DPoP:** reject missing/unsupported `ans_profile`, missing/wrong `ans_agent_id`, mismatched status
+  identity, replay and bad request/content binding. Exercise the closed JOSE header, single `x5c`,
+  exact public `jwk`, required empty-content digest, and shared-cache failure behavior. A TLS client
+  certificate cannot turn a failed DPoP request into a successful mTLS request.
+
+### 10.2 Adoption and method selection
+
+Publish the supported methods, evidence policies and transition requirements. Before adopting the
+revised profiles, demonstrate DNS-covered BYOC/issued credentials without an ANS URI, the correct
+registration/credential binding, normal evidence freshness and credential lifecycle behavior through
+the selected implementations. Include representative gateways for DPoP and trusted TLS termination,
+SPIFFE credential rotation and long-lived sessions where mTLS is offered.
+
+The revised mTLS binding replaces URI extraction with §6's configured or authenticated registration
+selection. Legacy implementations do not gain this behavior automatically. DPoP endpoints adopting
+this revision require profile 2; revision-1 compatibility may be separately configured for existing
+legacy peers, but MUST NOT be selected by missing claims or verification failure on an upgraded endpoint.
+History, registration IDs and existing credential bytes are preserved; a legacy URI may remain but
+cannot override the new binding. URI-only SPIFFE identity credentials remain deferred under ANS-2 §3.2.
+
+No mTLS retirement schedule is required. Operators may continue using the revised optional mTLS method
+without also sending DPoP on that request. The recommendation for DPoP does not waive either method's
+security checks or assert that existing SDKs already implement this revision.
 
 ## 11. Security considerations
 
@@ -1196,19 +1213,17 @@ defined there, not here.
 
 ### 11.4 DNS spoofing (badge tier)
 
-Without DNSSEC the `_ans-badge` lookup is spoofable. The trusted-TL allowlist (§4.2) caps the
-damage — an attacker can point the verifier at a *trusted* TL's badge for a different agent, but
-the comparisons then fail: on the caller-verification path every field anchors to the validated
-client certificate (§6.2), and on the callee path `agent.host` anchors to the name the caller
-dialed (§5.1 step 4), which the attacker's badge cannot rename. What the attacker cannot do is
-redirect to a forging TL. The SCITT tier removes the DNS dependency from the request path
-entirely.
+Without DNSSEC the `_ans-badge` lookup is spoofable. The trusted-TL allowlist (§4.2) limits callee
+badge fetches to accepted TLs. A response for a different agent still fails the requested-host and
+server-certificate binding in §5. Caller authentication binds the TLS peer (§6) or DPoP proof (§7.5)
+to its selected registration and trusted TL, not to an identity supplied by an unverified DNS hint. The SCITT tier removes a
+per-request DNS lookup; it does not remove these identity and trust bindings.
 
 ### 11.5 `htu` authority spoofing and path rewriting
 
 §7.7 is a deployment requirement, not advice: with the comparison URL derived from the client's
 `Host` header, cross-origin proof replay is trivial. Path-rewriting hops between the caller and
-the verifying process break `htu` by design; terminate Method-B verification at a hop that sees
+the verifying process break `htu` by design; terminate DPoP verification at a hop that sees
 the externally-visible path, or configure the reconstruction to reproduce it.
 
 ### 11.6 Replay-cache exhaustion
@@ -1223,9 +1238,9 @@ a legitimate-traffic spike that saturates the cache rejects legitimate callers.
 `ath` alone does not sender-constrain a token: the thief holds the token bytes and mints a
 matching `ath` under its own key. The `cnf.jkt` thumbprint comparison (§7.8) is the check that
 defeats token theft, and it lives with whoever validates the token. Deployments composing OAuth
-on Method B MUST implement it there.
+on DPoP MUST implement it there.
 
-### 11.8 Hostile callee (Method B)
+### 11.8 Hostile callee (DPoP)
 
 A caller induced to speak to the wrong endpoint leaks public artifacts and one spent,
 target-bound proof (§7.10) — the exposure is bounded, but the misdirected request itself may
@@ -1262,7 +1277,7 @@ class to key misuse rather than key exfiltration — and the explicit pinning ab
 
 ### 11.11 Content manipulation behind the TLS terminator
 
-Method B's operating premise cuts both ways: the hop that lets headers survive TLS termination
+DPoP's operating premise cuts both ways: the hop that lets headers survive TLS termination
 also sees — and can rewrite — the request body, and doing so on a *first* request trips no
 replay defense (§7.10). The required §7.13 claim closes this by riding the proof's signature:
 unlike an [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530) header, which the offending hop can strip or
@@ -1276,13 +1291,13 @@ but intermediaries must preserve the content octets (§7.13).
 ## Appendix A: Worked examples
 
 Non-normative worked examples (`_ans-badge` record, receipt and status-token structures, root-key
-line, a complete Method-B request/response exchange) live at
+line, a DPoP request/response exchange and optional mTLS with SPIFFE) live at
 [`examples/ans-6-examples.md`](examples/ans-6-examples.md).
 
 ## 12. References
 
 - ANS-1 [`ans-1-registration.md`](ans-1-registration.md): registration aggregate, lifecycle, rotation.
-- ANS-2 [`ans-2-versioned-naming.md`](ans-2-versioned-naming.md): ANSName, certificate admission, registration binding and mTLS.
+- ANS-2 [`ans-2-versioned-naming.md`](ans-2-versioned-naming.md): ANSName and certificate binding for request authentication.
 - ANS-3 [`ans-3-dns-publication.md`](ans-3-dns-publication.md): `_ans-badge` and TLSA family trust records.
 - ANS-4 [`ans-4-transparency.md`](ans-4-transparency.md): TL public API, receipts, key distribution, checkpoint anchoring.
 - ANS-5 [`ans-5-integrity-monitoring.md`](ans-5-integrity-monitoring.md): out-of-band verification checks and channels.
@@ -1300,4 +1315,4 @@ line, a complete Method-B request/response exchange) live at
 - [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): HTTP content digests (digest semantics for §7.13; header form is diagnostic-only).
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110): HTTP semantics (header fields, auth schemes).
 - [C2SP signed-note](https://c2sp.org/signed-note): root-key line format.
-- [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; Method B is the RFC 9449-stable form of this pattern).
+- [draft-ietf-wimse-s2s-protocol](https://datatracker.ietf.org/doc/draft-ietf-wimse-s2s-protocol/): WIMSE workload-to-workload authentication (informative; DPoP is the RFC 9449-stable form of this pattern).

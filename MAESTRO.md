@@ -29,7 +29,12 @@ may return different Trust Vectors.
 Two proposals remain in development: HCS-27 checkpoints for public ledger anchoring `[DRAFT:HCS-27]`
 and HCS-14 cross-registry discovery `[DRAFT:HCS-14]`.
 Where a proposal changes the threat picture, the text says so.
-Unmarked mitigations describe the architecture as it stands.
+ANS recommends DPoP and permits explicitly selected mTLS. Private issuance and CA trust-bundle
+distribution are deployment choices for the scenarios that use them; neither method requires an ANS
+URI SAN. [ANS-6](spec/ans-6-agent-authentication.md) defines method-specific verification and
+[ANS-2](spec/ans-2-versioned-naming.md) defines certificate admission and issuer policy. Domain-proof
+reuse under [ANS-1](spec/ans-1-registration.md#76-accountdomain-proof-reuse) gates management updates,
+not continuing registration validity.
 
 ## The scenario
 

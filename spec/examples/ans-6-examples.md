@@ -1,4 +1,4 @@
-# ANS-6 worked examples (badge record, receipt, status token, root keys, Method-B exchange)
+# ANS-6 worked examples (badge record, receipt, status token, root keys, DPoP and optional mTLS exchanges)
 
 Non-normative worked examples for ans-6-agent-authentication. Implementers MAY use these as
 fixtures or cross-checks. Hosts, UUIDs, keys, and hashes are illustrative.
@@ -21,7 +21,8 @@ _ans-badge.agent.example.com. IN TXT "v=ans-badge1; version=v1.0.1; url=https://
 A Method-A verifier configured for registration `019be7f3-5720-77c9-9672-adae3394502f`
 selects that registration's badge and verifies the peer certificate's fingerprint and DNS coverage.
 The certificate need not carry an ANS URI; a version selector cannot establish the caller's identity.
-The badge response shape is illustrated in [ANS-4 A.2](ans-4-examples.md#a2-tl-badge-response).
+The historical badge response shape is illustrated in [ANS-4 A.2](ans-4-examples.md#a2-tl-badge-response);
+DPoP uses its signed `ans_agent_id` and status evidence; mTLS uses ANS-6 §6 registration selection. Neither extracts identity from an ANS URI.
 
 ## A.2 SCITT receipt structure
 
@@ -80,7 +81,9 @@ COSE_Sign1 [CBOR tag 18]
 ```
 
 Key 6 carrying two fingerprints is what makes certificate rotation seamless in the SCITT tier: a
-verifier matches the presented certificate against **any** entry.
+verifier matches the presented certificate against **any** entry. Its normal freshness, certificate
+validity and status checks remain required. RA proof-window expiry does not add a token claim or prevent
+refresh of an otherwise-valid registration.
 
 ## A.4 Root-keys line
 
@@ -261,7 +264,8 @@ the RA checks owner/domain eligibility and its issuer-admission policy and publi
 On a connection selecting mTLS, the callee validates the peer under its configured SPIFFE/TLS trust
 policy. The caller sends the existing receipt and status-token headers. Under ANS-6 §6.3, the callee
 verifies the selected trusted TL and registration, matches the actual peer leaf to `validIdentityCerts`,
-and checks DNS coverage of the authenticated registration host plus current validity/status. It then
+and checks DNS coverage of the authenticated registration host, current validity/status and normal
+evidence freshness. It then
 applies application authorization. It does not require a DPoP proof on this explicitly selected method.
 
 Removing the DNS SAN makes this SVID ineligible under the current ANS rule; `example.org` in the SPIFFE
