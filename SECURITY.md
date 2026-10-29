@@ -4,7 +4,7 @@ Follow the [ANS security policy](https://github.com/agentnameservice/governance/
 for vulnerability handling, response targets, and coordinated disclosure.
 
 To report a vulnerability in this repository, use
-[Report a vulnerability](https://github.com/agentnameservice/ans-registry/security/advisories/new)
+[Report a vulnerability](https://github.com/agentnameservice/ans-spec/security/advisories/new)
 in its Security tab. Do not include vulnerability details or credentials in a
 public issue, pull request, or discussion.
 
