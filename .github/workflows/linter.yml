@@ -2,6 +2,8 @@
 name: Lint
 
 on:
+  pull_request:
+  merge_group:
   push:
 
 permissions: {}
@@ -14,8 +16,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-      # To report GitHub Actions status checks
-      statuses: write
 
     steps:
       - name: Checkout code
@@ -29,7 +29,7 @@ jobs:
       - name: Super-linter
         uses: super-linter/super-linter@v8.3.1 # x-release-please-version
         env:
-          # To report GitHub Actions status checks
+          MULTI_STATUS: false
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Default branch for comparison (only changed files are linted)
           DEFAULT_BRANCH: main

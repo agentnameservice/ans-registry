@@ -1,19 +1,16 @@
-# Reporting Security Issues
+# Security
 
-We take security very seriously at GoDaddy. We appreciate your efforts to
-responsibly disclose your findings, and will make every effort to acknowledge
-your contributions.
+Follow the [ANS security policy](https://github.com/agentnameservice/governance/blob/main/SECURITY.md)
+for vulnerability handling, response targets, and coordinated disclosure.
 
-## Where should I report security issues?
+To report a vulnerability in this repository, use
+[Report a vulnerability](https://github.com/agentnameservice/ans-spec/security/advisories/new)
+in its Security tab. Do not include vulnerability details or credentials in a
+public issue, pull request, or discussion.
 
-In order to give the community time to respond and upgrade, we strongly urge you
-report all security issues privately.
+## Affected versions
 
-To report a security issue in one of our Open Source projects email us directly
-at **<oss@godaddy.com>** and include the word "SECURITY" in the subject line.
-
-This mail is delivered to our Open Source Security team.
-
-After the initial reply to your report, the team will keep you informed of the
-progress being made towards a fix and announcement, and may ask for additional
-information or guidance.
+For specification reports, include the affected document version or commit
+and the requirement or example that causes the vulnerability. The
+[ANS security policy](https://github.com/agentnameservice/governance/blob/main/SECURITY.md)
+describes coordination with affected implementations.

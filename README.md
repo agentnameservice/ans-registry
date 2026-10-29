@@ -70,6 +70,14 @@ This architecture builds on "Agent Name Service for Secure AI Agent Discovery"
 by Narajala, Huang, Habler, and Sheriff (OWASP), contributed to the IETF as
 an internet-draft (draft-narajala-ans).
 
+## Contributing
+
+This repository follows [ANS governance](https://github.com/agentnameservice/governance/blob/main/GOVERNANCE.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance and
+[MAINTAINERS.md](MAINTAINERS.md) for the repository's Maintainers.
+The [Code of Conduct](CODE_OF_CONDUCT.md) applies to participation;
+report vulnerabilities privately using [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
